@@ -1,0 +1,15 @@
+[tool.poetry]
+name = "installertui"
+version = "0.1.0"
+description = ""
+authors = ["Nathaniel Graham <[nathaniel.graham@protonmail.com, ngraham@redhat.com]>"]
+readme = "README.md"
+
+[tool.poetry.dependencies]
+python = "^3.11"
+openshift-client = "^1.0.19"
+
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
