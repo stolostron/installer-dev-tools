@@ -1,8 +1,5 @@
 #!/bin/bash
 
-# yq for reading yaml output of the `oc` commands
-
-
 acm_version=$(oc get csv -n open-cluster-management -oyaml | yq '.items[0].spec.version')
 mce_version=$(oc get csv -n multicluster-engine -oyaml | yq '.items[0].spec.version')
 
