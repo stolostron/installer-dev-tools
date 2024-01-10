@@ -76,7 +76,7 @@ def parse_image_ref(image_ref):
     return parsed_ref
 
 # Copy chart-templates to a new helmchart directory
-def templateHelmChart(outputDir, helmChart):
+def templateHelmChart(outputDir, helmChart, configLocation):
     logging.info("Copying templates into new '%s' chart directory ...", helmChart)
     # Create main folder
     if os.path.exists(os.path.join(outputDir, "charts", "toggle",  helmChart)):
@@ -803,7 +803,7 @@ def main():
             # Template Helm Chart Directory from 'chart-templates'
             logging.info("Templating helm chart '%s' ...", operator["name"])
             # Creates a helm chart template
-            templateHelmChart(destination, operator["name"])
+            templateHelmChart(destination, operator["name"], configLocation)
             
             # Generate the Chart.yaml file based off of the CSV
             helmChart = os.path.join(destination, "charts", "toggle", operator["name"])
