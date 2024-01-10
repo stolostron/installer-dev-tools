@@ -76,7 +76,7 @@ def parse_image_ref(image_ref):
     return parsed_ref
 
 # Copy chart-templates to a new helmchart directory
-def templateHelmChart(outputDir, helmChart, configLocation):
+def templateHelmChart(outputDir, helmChart):
     logging.info("Copying templates into new '%s' chart directory ...", helmChart)
     # Create main folder
     if os.path.exists(os.path.join(outputDir, "charts", "toggle",  helmChart)):
@@ -84,10 +84,8 @@ def templateHelmChart(outputDir, helmChart, configLocation):
 
     # Create Chart.yaml, values.yaml, and templates dir
     os.makedirs(os.path.join(outputDir, "charts", "toggle",  helmChart, "templates"))
-    if configLocation == "MCHconfig.yaml":
-        shutil.copyfile(os.path.join(os.path.dirname(os.path.realpath(__file__)), "chart-templates", "MCHChart.yaml"), os.path.join(outputDir, "charts",  "toggle", helmChart, "Chart.yaml"))
-    else:
-        shutil.copyfile(os.path.join(os.path.dirname(os.path.realpath(__file__)), "chart-templates", "MCEChart.yaml"), os.path.join(outputDir, "charts",  "toggle", helmChart, "Chart.yaml"))
+    
+    shutil.copyfile(os.path.join(os.path.dirname(os.path.realpath(__file__)), "chart-templates", "Chart.yaml"), os.path.join(outputDir, "charts",  "toggle", helmChart, "Chart.yaml"))
     shutil.copyfile(os.path.join(os.path.dirname(os.path.realpath(__file__)), "chart-templates", "values.yaml"), os.path.join(outputDir, "charts", "toggle", helmChart, "values.yaml"))
     logging.info("Templates copied.\n")
 
@@ -664,7 +662,6 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--destination", dest="destination", type=str, required=False, help="Destination directory of the created helm chart")
     parser.add_argument("--skipOverrides", dest="skipOverrides", type=bool, help="If true, overrides such as helm flow control will not be applied")
-    parser.add_argument("--configLocation", dest="configLocation", type=str, help="Relative location of the config*file")
     parser.add_argument("--lint", dest="lint", action='store_true', help="If true, bundles will only be linted to ensure they can be transformed successfully. Default is False.")
     parser.set_defaults(skipOverrides=False)
     parser.set_defaults(lint=False)
@@ -673,20 +670,15 @@ def main():
     skipOverrides = args.skipOverrides
     destination = args.destination
     lint = args.lint
-    configLocation = args.configLocation 
 
     if lint == False and not destination:
         logging.critical("Destination directory is required when not linting.")
         exit(1)
 
-    if not configLocation:
-        logging.critical("Relative location of the config file is required")
-        exit(1)
-
     logging.basicConfig(level=logging.DEBUG)
 
     # Config.yaml holds the configurations for Operator bundle locations to be used
-    configYaml = os.path.join(os.path.dirname(os.path.realpath(__file__)),configLocation)
+    configYaml = os.path.join(os.path.dirname(os.path.realpath(__file__)),"config.yaml")
     with open(configYaml, 'r') as f:
         config = yaml.safe_load(f)
 
@@ -803,7 +795,7 @@ def main():
             # Template Helm Chart Directory from 'chart-templates'
             logging.info("Templating helm chart '%s' ...", operator["name"])
             # Creates a helm chart template
-            templateHelmChart(destination, operator["name"], configLocation)
+            templateHelmChart(destination, operator["name"])
             
             # Generate the Chart.yaml file based off of the CSV
             helmChart = os.path.join(destination, "charts", "toggle", operator["name"])
