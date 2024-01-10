@@ -84,7 +84,10 @@ def templateHelmChart(outputDir, helmChart):
 
     # Create Chart.yaml, values.yaml, and templates dir
     os.makedirs(os.path.join(outputDir, "charts", "toggle",  helmChart, "templates"))
-    shutil.copyfile(os.path.join(os.path.dirname(os.path.realpath(__file__)), "chart-templates", "Chart.yaml"), os.path.join(outputDir, "charts",  "toggle", helmChart, "Chart.yaml"))
+    if configLocation == "MCHconfig":
+        shutil.copyfile(os.path.join(os.path.dirname(os.path.realpath(__file__)), "chart-templates", "MCHChart.yaml"), os.path.join(outputDir, "charts",  "toggle", helmChart, "Chart.yaml"))
+    else:
+        shutil.copyfile(os.path.join(os.path.dirname(os.path.realpath(__file__)), "chart-templates", "MCEChart.yaml"), os.path.join(outputDir, "charts",  "toggle", helmChart, "Chart.yaml"))
     shutil.copyfile(os.path.join(os.path.dirname(os.path.realpath(__file__)), "chart-templates", "values.yaml"), os.path.join(outputDir, "charts", "toggle", helmChart, "values.yaml"))
     logging.info("Templates copied.\n")
 
