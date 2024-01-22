@@ -27,12 +27,15 @@ version_matches() {
 }
 
 scan_components() {
-    local kinds=("deployment")
+    local kinds=("deployment" "clusterrole" "clusterrolebinding" \
+    "serviceaccount" "policy" "operatorgroup" "subscription" "placementbinding" \
+    "placementrule" "role" "rolebinding" "consoleplugin" "prometheusrule" "service" "servicemonitor" \
+    "clustermanagementaddon" "configmap" "validatingwebhookconfiguration")
 
     local acm_version=$(oc get csv -n open-cluster-management -oyaml | yq '.items[0].spec.version')
     local mce_version=$(oc get csv -n multicluster-engine -oyaml | yq '.items[0].spec.version')
 
-    for kind in $kinds; do
+    for kind in ${kinds[@]}; do
         local acm_resources=$(oc get $kind -n open-cluster-management | awk 'NR>1 {print $1}')
         local mce_resources=$(oc get $kind -n multicluster-engine | awk 'NR>1 {print $1}')
 
