@@ -379,7 +379,11 @@ def fixImageReferences(helmChart, imageKeyMapping):
         with open(deployment, 'w') as f:
             yaml.dump(deploy, f)
 
-    del  values['global']['imageOverrides']['imageOverride']
+    # Remove the placeholder/dummy image overrides we might get from our values template
+    try:
+        del  values['global']['imageOverrides']['imageOverride']
+    except KeyError:
+        pass
     for imageKey in imageKeys:
         values['global']['imageOverrides'][imageKey] = "" # set to temp to debug
     with open(valuesYaml, 'w') as f:
