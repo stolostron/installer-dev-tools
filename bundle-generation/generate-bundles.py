@@ -381,7 +381,7 @@ def fixImageReferences(helmChart, imageKeyMapping):
 
     # Remove the placeholder/dummy image overrides we might get from our values template
     try:
-        del  values['global']['imageOverrides']['imageOverride']
+        del values['global']['imageOverrides']['imageOverride']
     except KeyError:
         pass
     for imageKey in imageKeys:
