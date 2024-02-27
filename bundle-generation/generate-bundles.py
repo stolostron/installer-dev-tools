@@ -9,11 +9,15 @@ import shutil
 import yaml
 import array
 import logging
+import coloredlogs
 import sys
 from git import Repo, exc
 from packaging import version
 
 from validate_csv import *
+
+# Configure logging with coloredlogs
+coloredlogs.install(level='DEBUG')  # Set the logging level as needed
 
 # Split a string at a specified delimiter.  If delimiter doesn't exist, consider the
 # string to be all "left-part" (before delimiter) or "right-part" as requested.
@@ -76,18 +80,47 @@ def parse_image_ref(image_ref):
     return parsed_ref
 
 # Copy chart-templates to a new helmchart directory
-def templateHelmChart(outputDir, helmChart):
-    logging.info("Copying templates into new '%s' chart directory ...", helmChart)
-    # Create main folder
-    if os.path.exists(os.path.join(outputDir, "charts", "toggle",  helmChart)):
-        shutil.rmtree(os.path.join(outputDir, "charts","toggle", helmChart))
+def templateHelmChart(outputDir, helmChart, preservedFiles=None, overwrite=False):
+    """
+    Copies templates into a new helm chart directory.
 
-    # Create Chart.yaml, values.yaml, and templates dir
-    os.makedirs(os.path.join(outputDir, "charts", "toggle",  helmChart, "templates"))
-    
-    shutil.copyfile(os.path.join(os.path.dirname(os.path.realpath(__file__)), "chart-templates", "Chart.yaml"), os.path.join(outputDir, "charts",  "toggle", helmChart, "Chart.yaml"))
-    shutil.copyfile(os.path.join(os.path.dirname(os.path.realpath(__file__)), "chart-templates", "values.yaml"), os.path.join(outputDir, "charts", "toggle", helmChart, "values.yaml"))
-    logging.info("Templates copied.\n")
+    Args:
+        outputDir (str): The directory where the helm chart will be created.
+        helmChart (str): The name of the new helm chart directory.
+        preservedFiles (list, optional): List of filenames to preserve. Defaults to None.
+        overwrite (bool, optional): Whether to overwrite existing files. Defaults to False.
+    """
+    logging.info("Copying templates into '%s' helm chart directory ...", helmChart)
+
+    if preservedFiles is None:
+        preservedFiles = []
+
+    # Determine directory path
+    directoryPath = os.path.join(outputDir, "charts", "toggle", helmChart)
+
+    # Remove existing files if directory exists
+    if os.path.exists(directoryPath):
+        logging.debug("Removing existing template files...")
+        for filename in os.listdir(os.path.join(directoryPath, "templates")):
+            if filename not in preservedFiles:
+                filepath = os.path.join(directoryPath, "templates", filename)
+                os.remove(filepath)
+        logging.debug("Existing template files removed.")
+
+    else:
+        # Create directory and template subdirectory
+        logging.debug("Creating new directory for the helm chart...")
+        os.makedirs(os.path.join(directoryPath, "templates"))
+        logging.debug("New directory created.")
+
+    logging.debug("Copying template files...")
+    for template_file in ["Chart.yaml", "values.yaml"]:
+        shutil.copyfile(
+            os.path.join(os.path.dirname(os.path.realpath(__file__)), "chart-templates", template_file),
+            os.path.join(directoryPath, template_file)
+        )
+    logging.debug("Template files copied.")
+    logging.info("Templates successfully copied into the '%s' helm chart directory.", helmChart)
 
 # Fill in the chart.yaml template with information from the CSV
 def fillChartYaml(helmChart, name, csvPath):
@@ -566,32 +599,68 @@ def addCMAs(repo, operator, outputDir):
             logging.info("CMA")
             shutil.copyfile(filepath, os.path.join(outputDir, "charts", "toggle", operator['name'], "templates", filename))
 
-def addCRDs(repo, operator, outputDir):
+def addCRDs(repo, operator, outputDir, preservedFiles=None, overwrite=False):
+    """
+    Add Custom Resource Definitions (CRDs) to the specified output directory.
+
+    Args:
+        repo (str): The name of the repository.
+        operator (dict): The configuration of the operator.
+        outputDir (str): The directory where CRDs will be added.
+        preservedFiles (list, optional): List of files to preserve. Defaults to None.
+        overwrite (bool, optional): Whether to overwrite existing files. Defaults to False.
+
+    Raises:
+        ValueError: If bundlePath is not found or if CRD file copying fails.
+    """
+    logging.info("Adding Custom Resource Definitions (CRDs) for operator: %s", operator['name'])
+
     if 'bundlePath' in operator:
         manifestsPath = os.path.join(os.path.dirname(os.path.realpath(__file__)), "tmp", repo, operator["bundlePath"])
         if not os.path.exists(manifestsPath):
-            logging.critical("Could not validate bundlePath at given path: " + operator["bundlePath"])
-            exit(1)
+            raise ValueError("Could not validate bundlePath at given path: " + operator["bundlePath"])
+        else:
+            logging.info("Using specified bundlePath for CRDs: %s", operator["bundlePath"])
+
     else:
         bundlePath = getBundleManifestsPath(repo, operator)
         manifestsPath = os.path.join(bundlePath, "manifests")
+        logging.info("Using bundlePath derived from repository for CRDs: %s", bundlePath)
+
+    if preservedFiles is None:
+        preservedFiles = []
 
     directoryPath = os.path.join(outputDir, "crds", operator['name'])
-    if os.path.exists(directoryPath): # If path exists, remove and re-clone
-        shutil.rmtree(directoryPath)
-    os.makedirs(directoryPath)
+    if os.path.exists(directoryPath):
+        logging.debug("Removing existing CRD files...")
+        for filename in os.listdir(directoryPath):
+            if filename not in preservedFiles:
+                filepath = os.path.join(directoryPath, filename)
+                os.remove(filepath)
+        logging.debug("Existing CRD files removed.")
+
+    else:
+        os.makedirs(directoryPath)
+        logging.debug("Created directory for CRDs: %s", directoryPath)
 
     for filename in os.listdir(manifestsPath):
         if not filename.endswith(".yaml"): 
             continue
+
         filepath = os.path.join(manifestsPath, filename)
         with open(filepath, 'r') as f:
             resourceFile = yaml.safe_load(f)
 
         if "kind" not in resourceFile:
             continue
+
         elif resourceFile["kind"] == "CustomResourceDefinition":
-            shutil.copyfile(filepath, os.path.join(outputDir, "crds", operator['name'], filename))
+            dest_file_path = os.path.join(outputDir, "crds", operator['name'], filename)
+            if overwrite or not os.path.exists(dest_file_path):
+                shutil.copyfile(filepath, dest_file_path)
+                logging.info("CRD file copied: %s", filename)
+
+    logging.info("CRDs added successfully for operator: %s", operator['name'])
 
 def getBundleManifestsPath(repo, operator):
     """
@@ -641,12 +710,16 @@ def getCSVPath(repo, operator):
         if not os.path.exists(manifestsPath):
             logging.critical("Could not validate bundlePath at given path: " + operator["bundlePath"])
             exit(1)
+        else:
+            logging.info("Using specified bundlePath: %s", operator["bundlePath"])
+
     else:
         bundlePath = getBundleManifestsPath(repo, operator)
         manifestsPath = os.path.join(bundlePath, "manifests")
+        logging.info("Using bundlePath derived from repository: %s", bundlePath)
 
     for filename in os.listdir(manifestsPath):
-        logging.info("Checking manifestPath file: " + filename)
+        logging.info("Checking manifestPath file: %s", filename)
 
         if not filename.endswith(".yaml"): 
             continue
@@ -659,9 +732,13 @@ def getCSVPath(repo, operator):
             continue
 
         elif resourceFile["kind"] == "ClusterServiceVersion":
+            logging.info("CSV file found: %s", filepath)
             return filepath
 
 def main():
+    logging.basicConfig(level=logging.INFO)
+    logging.info("Script started.")
+
     ## Initialize ArgParser
     parser = argparse.ArgumentParser()
     parser.add_argument("--destination", dest="destination", type=str, required=False, help="Destination directory of the created helm chart")
@@ -678,8 +755,6 @@ def main():
     if lint == False and not destination:
         logging.critical("Destination directory is required when not linting.")
         exit(1)
-
-    logging.basicConfig(level=logging.DEBUG)
 
     # Config.yaml holds the configurations for Operator bundle locations to be used
     configYaml = os.path.join(os.path.dirname(os.path.realpath(__file__)),"config.yaml")
@@ -755,23 +830,21 @@ def main():
 
         # Loop through each operator in the repo identified by the config
         for operator in repo["operators"]:
-            logging.info("Helm Chartifying -  %s!\n", operator["name"])
+            logging.info("Helm Chartifying - %s!", operator["name"])
             # Generate and return path to CSV based on bundlePath or bundles-directory
             bundlepath = getBundleManifestsPath(repo["repo_name"], operator)
-            print("the latest bundle path for channel is ", bundlepath)
+            logging.info("The latest bundle path for channel is %s", bundlepath)
 
             csvPath = getCSVPath(repo["repo_name"], operator)
             if csvPath == "":
                 # Validate the bundlePath exists in config.yaml
-                print("Unable to find given channel: " +  operator["channel"])
+                logging.error("Unable to find given channel: %s", operator.get("channel", "Channel not specified"))
                 exit(1)
 
-            logging.basicConfig(level=logging.DEBUG)
-
-            # Validate CSV exists
             logging.info("Reading CSV: %s ...",  csvPath)
+            # Validate CSV exists
             if not os.path.isfile(csvPath):
-                logging.critical("Unable to find CSV at given path - '" + csvPath + "'.")
+                logging.critical("Unable to find CSV at given path - '%s'.", csvPath)
                 exit(1)
 
             if lint:
@@ -785,41 +858,58 @@ def main():
                 logging.info("CSV validated successfully!\n")
                 continue
 
+            # Get preserved files from config or set default value
+            preservedFiles = operator.get("preserve_files", [])
+            
+            # If preserve_files is provided, keep only those files; otherwise, remove directory and recreate
+            if preservedFiles:
+                logging.info("Preserving files for operator '%s': %s", operator["name"], str(preservedFiles))
 
             # Copy over all CRDs to the destination directory from the manifest folder
-            addCRDs(repo["repo_name"], operator, destination)
+            addCRDs(repo["repo_name"], operator, destination, preservedFiles)
 
             # If name is empty, fail
             helmChart = operator["name"]
             if helmChart == "":
                 logging.critical("Unable to generate helm chart without a name.")
                 exit(1)
-            logging.info("Creating helm chart: '%s' ...", operator["name"])
 
+            logging.info("Creating helm chart: '%s' ...", operator["name"])
             # Template Helm Chart Directory from 'chart-templates'
             logging.info("Templating helm chart '%s' ...", operator["name"])
+
             # Creates a helm chart template
-            templateHelmChart(destination, operator["name"])
+            templateHelmChart(destination, operator["name"], preservedFiles)
+            logging.info("Helm chart template created successfully.\n")
             
             # Generate the Chart.yaml file based off of the CSV
             helmChart = os.path.join(destination, "charts", "toggle", operator["name"])
-            logging.info("Filling Chart.yaml ...")
-            fillChartYaml(helmChart, operator["name"],csvPath)
+            logging.info("Filling Chart.yaml for helm chart '%s' ...", operator["name"])
+            fillChartYaml(helmChart, operator["name"], csvPath)
+            logging.info("Chart.yaml filled successfully.\n")
 
             # Add all basic resources to the helm chart from the CSV
-            logging.info("Adding Resources from CSV...")
+            logging.info("Adding Resources from CSV to helm chart '%s' ...", operator["name"])
             addResources(helmChart, csvPath)
-            logging.info("Resources have been added from CSV. \n")
+            logging.info("Resources added from CSV successfully.\n")
 
             # Copy over all ClusterManagementAddons to the destination directory
+            logging.info("Copying ClusterManagementAddons to helm chart '%s' ...", operator["name"])
             addCMAs(repo["repo_name"], operator, destination)
+            logging.info("ClusterManagementAddons copied successfully.")
 
             if not skipOverrides:
-                logging.info("Adding Overrides (set --skipOverrides=true to skip) ...")
+                logging.info("Adding Overrides to helm chart '%s' (set --skipOverrides=true to skip) ...", operator["name"])
                 exclusions = operator["exclusions"] if "exclusions" in operator else []
                 injectRequirements(helmChart, operator["imageMappings"], exclusions)
-                logging.info("Overrides added. \n")
-    shutil.rmtree((os.path.join(os.path.dirname(os.path.realpath(__file__)), "tmp")), ignore_errors=True)       
+                logging.info("Overrides added to helm chart '%s' successfully.", operator["name"])
+
+    logging.info("All repositories and operators processed successfully.")
+    logging.info("Performing cleanup...")
+    shutil.rmtree((os.path.join(os.path.dirname(os.path.realpath(__file__)), "tmp")), ignore_errors=True)
+
+    logging.info("Cleanup completed.")
+    logging.info("Script execution completed.")
 
 if __name__ == "__main__":
-   main()
+    main()
