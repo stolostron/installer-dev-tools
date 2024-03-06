@@ -522,6 +522,9 @@ def updateDeployments(helmChart, exclusions):
 
         containers = pod_template_spec['containers']
         for container in containers:
+            if 'automountServiceAccountToken' not in container:
+                container['automountServiceAccountToken'] = True
+
             if 'env' not in container:
                 container['env'] = {}
 
