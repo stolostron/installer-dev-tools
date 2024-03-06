@@ -505,11 +505,15 @@ def updateDeployments(helmChart, exclusions):
         pod_template_spec['hostNetwork'] = False
         pod_template_spec['hostPID'] = False
         pod_template_spec['hostIPC'] = False
+        
+        if 'automountServiceAccountToken' not in pod_template_spec:
+            pod_template_spec['automountServiceAccountToken'] = True
 
         if 'securityContext' not in pod_template_spec:
             pod_template_spec['securityContext'] = {}
         pod_security_context = pod_template_spec['securityContext']
         pod_security_context['runAsNonRoot'] = True
+
         if 'seccompProfile' not in pod_security_context:
             pod_security_context['seccompProfile'] = {'type': 'RuntimeDefault'}
             # This will be made conditional on OCP version >= 4.11 by injectHelmFlowControl()
@@ -522,9 +526,6 @@ def updateDeployments(helmChart, exclusions):
 
         containers = pod_template_spec['containers']
         for container in containers:
-            if 'automountServiceAccountToken' not in container:
-                container['automountServiceAccountToken'] = True
-
             if 'env' not in container:
                 container['env'] = {}
 
