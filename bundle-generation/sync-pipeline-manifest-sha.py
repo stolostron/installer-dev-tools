@@ -157,7 +157,8 @@ def main():
 
             if not found_match:
                 logging.info(f"No SHA mismatch found for repository {repo.get('repo_name')}")
-        print("\n")
+
+            print("\n")
 
 if __name__ == '__main__':
     main()
