@@ -91,7 +91,7 @@ def read_json_file(file_path):
     with open(file_path, "r") as file:
         data = json.load(file)
 
-    logging.info("JSON data read successfully.")
+    logging.info("JSON data read successfully.\n")
     return data
 
 def main():
@@ -157,6 +157,7 @@ def main():
 
             if not found_match:
                 logging.info(f"No SHA mismatch found for repository {repo.get('repo_name')}")
+        print("\n")
 
 if __name__ == '__main__':
     main()
