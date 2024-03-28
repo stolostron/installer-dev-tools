@@ -505,9 +505,6 @@ def updateDeployments(helmChart, exclusions):
         pod_template_spec['hostNetwork'] = False
         pod_template_spec['hostPID'] = False
         pod_template_spec['hostIPC'] = False
-        
-        if 'automountServiceAccountToken' not in pod_template_spec:
-            pod_template_spec['automountServiceAccountToken'] = False
 
         if 'securityContext' not in pod_template_spec:
             pod_template_spec['securityContext'] = {}
