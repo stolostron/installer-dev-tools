@@ -510,6 +510,7 @@ def updateDeployments(helmChart, exclusions):
             pod_template_spec['securityContext'] = {}
         pod_security_context = pod_template_spec['securityContext']
         pod_security_context['runAsNonRoot'] = True
+
         if 'seccompProfile' not in pod_security_context:
             pod_security_context['seccompProfile'] = {'type': 'RuntimeDefault'}
             # This will be made conditional on OCP version >= 4.11 by injectHelmFlowControl()
