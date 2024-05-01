@@ -479,37 +479,37 @@ def injectHelmFlowControl(deployment, sizes):
                     for container in sizDeployment["containers"]:
                         if line.strip() == "resources: REPLACE-" + container["name"]:
                             lines[i] = """        resources:
-{{-  if eq .values.hubconfig.hubSize "small" }}
+{{-  if eq .values.hubconfig.hubSize "Small" }}
           limits:
-            cpu: """ + container["small"]["limits"]["cpu"] + """
-            memory: """ + container["small"]["limits"]["memory"] + """
+            cpu: """ + container["Small"]["limits"]["cpu"] + """
+            memory: """ + container["Small"]["limits"]["memory"] + """
           requests:
-            cpu: """ + container["small"]["requests"]["cpu"] + """
-            memory: """ + container["small"]["requests"]["memory"] + """
+            cpu: """ + container["Small"]["requests"]["cpu"] + """
+            memory: """ + container["Small"]["requests"]["memory"] + """
 {{- end }}
-{{ if eq .values.hubconfig.hubSize "medium" }}
+{{ if eq .values.hubconfig.hubSize "Medium" }}
           limits:
-            cpu: """ + container["medium"]["limits"]["cpu"] + """
-            memory: """ + container["medium"]["limits"]["memory"] + """
+            cpu: """ + container["Medium"]["limits"]["cpu"] + """
+            memory: """ + container["Medium"]["limits"]["memory"] + """
           requests:
-            cpu: """ + container["medium"]["requests"]["cpu"] + """
-            memory: """ + container["medium"]["requests"]["memory"] + """
+            cpu: """ + container["Medium"]["requests"]["cpu"] + """
+            memory: """ + container["Medium"]["requests"]["memory"] + """
 {{- end }}
-{{-  if eq .values.hubconfig.hubSize "large" }}
-    limits:
-        cpu: """ + container["large"]["limits"]["cpu"] + """
-        memory: """ + container["large"]["limits"]["memory"] + """
-    requests:
-        cpu: """ + container["large"]["requests"]["cpu"] + """
-        memory: """ + container["large"]["requests"]["memory"] + """
+{{-  if eq .values.hubconfig.hubSize "Large" }}
+          limits:
+            cpu: """ + container["Large"]["limits"]["cpu"] + """
+            memory: """ + container["Large"]["limits"]["memory"] + """
+          requests:
+            cpu: """ + container["Large"]["requests"]["cpu"] + """
+            memory: """ + container["Large"]["requests"]["memory"] + """
 {{- end }}
-{{ if eq .values.hubconfig.hubSize "extra-large" }}
-    limits:
-        cpu: """ + container["extra-large"]["limits"]["cpu"] + """
-        memory: """ + container["extra-large"]["limits"]["memory"] + """
-    requests:
-        cpu: """ + container["extra-large"]["requests"]["cpu"] + """
-        memory: """ + container["extra-large"]["requests"]["memory"] + """
+{{ if eq .values.hubconfig.hubSize "ExtraLarge" }}
+          limits:
+            cpu: """ + container["ExtraLarge"]["limits"]["cpu"] + """
+            memory: """ + container["ExtraLarge"]["limits"]["memory"] + """
+          requests:
+            cpu: """ + container["ExtraLarge"]["requests"]["cpu"] + """
+            memory: """ + container["ExtraLarge"]["requests"]["memory"] + """
 {{- end }}
 """
         if line.strip() == "seccompProfile:":
@@ -541,7 +541,10 @@ def updateDeployments(helmChart, exclusions, sizes):
         if sizes:
             for  sizDeployment in sizes["deployments"]:
                 if sizDeployment["name"] == deploy["metadata"]["name"]:
-                    for i in deploy['spec']['template']['spec']['containers']:
+                    for i in deploy['spec']['template']['spec']['containers']:            
+                        if not any(d['name'] == i['name'] for d in sizDeployment["containers"]):
+                            logging.error("Missing container in sizes.yaml")
+                            exit(1)
                         for sizContainer in sizDeployment["containers"]:
                             if sizContainer["name"] == i["name"]:
                                 i['resources'] = 'REPLACE-' + i['name']
@@ -553,8 +556,8 @@ def updateDeployments(helmChart, exclusions, sizes):
         pod_template_spec['hostPID'] = False
         pod_template_spec['hostIPC'] = False
         
-        if 'automountServiceAccountToken' not in pod_template_spec:
-            pod_template_spec['automountServiceAccountToken'] = False
+        # if 'automountServiceAccountToken' not in pod_template_spec:
+        #     pod_template_spec['automountServiceAccountToken'] = False
 
         if 'securityContext' not in pod_template_spec:
             pod_template_spec['securityContext'] = {}
@@ -890,6 +893,8 @@ def main():
         else:
             logging.critical("Config entry doesn't specify either a Git repo or a generation command")
             exit(1)
+
+        
 
         # Loop through each operator in the repo identified by the config
         for operator in repo["operators"]:
