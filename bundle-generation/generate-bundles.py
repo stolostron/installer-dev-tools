@@ -523,7 +523,7 @@ def injectHelmFlowControl(deployment, sizes):
     logging.info("Added Helm flow control for NodeSelector, Proxy Overrides and SecCompProfile.\n")
 
 # updateDeployments adds standard configuration to the deployments (antiaffinity, security policies, and tolerations)
-def updateDeployments(helmChart, exclusions, sizes):
+def updateDeployments(helmChart, operator, exclusions, sizes):
     logging.info("Updating deployments with antiaffinity, security policies, and tolerations ...")
     deploySpecYaml = os.path.join(os.path.dirname(os.path.realpath(__file__)), "chart-templates/templates/deploymentspec.yaml")
     with open(deploySpecYaml, 'r') as f:
@@ -556,8 +556,13 @@ def updateDeployments(helmChart, exclusions, sizes):
         pod_template_spec['hostPID'] = False
         pod_template_spec['hostIPC'] = False
         
-        # if 'automountServiceAccountToken' not in pod_template_spec:
-        #     pod_template_spec['automountServiceAccountToken'] = False
+        # Set automountServiceAccountToken only if is configured for the operator.
+        if 'automountServiceAccountToken' in operator:
+            automountSAToken = operator.get('automountServiceAccountToken')
+            if isinstance(automountSAToken, bool):
+                pod_template_spec['automountServiceAccountToken'] = operator.get('automountServiceAccountToken')
+            else:
+                logging.warning("automountServiceAccountToken should be a boolean. Ignoring invalid value.")
 
         if 'securityContext' not in pod_template_spec:
             pod_template_spec['securityContext'] = {}
@@ -622,12 +627,18 @@ def updateRBAC(helmChart):
     logging.info("Clusterroles, roles, clusterrolebindings, and rolebindings updated. \n")
 
 
-def injectRequirements(helmChart, imageKeyMapping, exclusions, sizes):
+def injectRequirements(helmChart, operator, exclusions, sizes):
     logging.info("Updating Helm chart '%s' with onboarding requirements ...", helmChart)
+    imageKeyMapping = operator.get('imageMappings', {})
+
+    # Fixes image references in the Helm chart.
     fixImageReferences(helmChart, imageKeyMapping)
     fixEnvVarImageReferences(helmChart, imageKeyMapping)
+
+    # Updates RBAC and deployment configuration in the Helm chart.
     updateRBAC(helmChart)
-    updateDeployments(helmChart, exclusions, sizes)
+    updateDeployments(helmChart, operator, exclusions, sizes)
+
     logging.info("Updated Chart '%s' successfully\n", helmChart)
 
 def addCMAs(repo, operator, outputDir):
@@ -969,7 +980,7 @@ def main():
             if not skipOverrides:
                 logging.info("Adding Overrides to helm chart '%s' (set --skipOverrides=true to skip) ...", operator["name"])
                 exclusions = operator["exclusions"] if "exclusions" in operator else []
-                injectRequirements(helmChart, operator["imageMappings"], exclusions, sizes)
+                injectRequirements(helmChart, operator, exclusions, sizes)
                 logging.info("Overrides added to helm chart '%s' successfully.", operator["name"])
 
     logging.info("All repositories and operators processed successfully.")
