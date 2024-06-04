@@ -558,7 +558,11 @@ def updateDeployments(helmChart, operator, exclusions, sizes):
         
         # Set automountServiceAccountToken only if is configured for the operator.
         if 'automountServiceAccountToken' in operator:
-            pod_template_spec['automountServiceAccountToken'] = operator.get('automountServiceAccountToken')
+            automountSAToken = operator.get('automountServiceAccountToken')
+            if isinstance(automountSAToken, bool):
+                pod_template_spec['automountServiceAccountToken'] = operator.get('automountServiceAccountToken')
+            else:
+                logging.warning("automountServiceAccountToken should be a boolean. Ignoring invalid value.")
 
         if 'securityContext' not in pod_template_spec:
             pod_template_spec['securityContext'] = {}
