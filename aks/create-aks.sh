@@ -4,9 +4,9 @@ helpFunction()
 {
    echo ""
    echo "Usage: $0 -a REGION -b CLUSTER_NAME -c RESOURCE_GROUP"
-   echo -e "\t-r Description of what is parameterA"
-   echo -e "\t-n Description of what is parameterB"
-   echo -e "\t-g Description of what is parameterC"
+   echo -e "\t-r Azure region"
+   echo -e "\t-n Desired name of cluster"
+   echo -e "\t-g Azure resource group where the cluster will be placed"
    exit 1 # Exit script after printing help
 }
 
