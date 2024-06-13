@@ -49,7 +49,7 @@ def update_yaml_field(file_path, repo_name, new_sha):
 
     save_yaml(file_path, yaml_data)
         
-def clone_pipeline_repo(org, repo_name, branch, target_path):
+def clone_pipeline_repo(org, repo_name, branch, target_path, pat=None):
     """
     Clone the pipeline repository.
     
@@ -60,7 +60,15 @@ def clone_pipeline_repo(org, repo_name, branch, target_path):
         target_path (str): The directory path to clone the repository into.
     """
     logging.info(f"Cloning repository: {repo_name} from branch: {branch} into path: {target_path}")
-    repository = Repo.clone_from(f"https://github.com/{org}/{repo_name}.git", target_path)
+    if pat:
+        # Construct the URL with the PAT
+        clone_url = f"https://{pat}@github.com/{org}/{repo_name}.git"
+
+    else:
+        logging.warning("Personal Access Token (PAT) not provided. Cloning without authentication.")
+        clone_url = f"https://github.com/{org}/{repo_name}.git"
+
+    repository = Repo.clone_from(clone_url, target_path)
     repository.git.checkout(branch)
 
 def fetch_latest_manifest(dir_path):
@@ -124,7 +132,7 @@ def main():
         logging.warning("The repository directory already exists, removing directory at: %s" % repo_directory)
         shutil.rmtree(repo_directory)
     logging.info("Cloning pipeline repository: %s/%s (branch: %s)" % (args.org, args.repo, args.branch))
-    clone_pipeline_repo(args.org, args.repo, args.branch, target_path=repo_directory)
+    clone_pipeline_repo(args.org, args.repo, args.branch, target_path=repo_directory, pat=os.getenv("GH_READ_PAT"))
 
     # Fetch latest manifest
     snapshots_path = os.path.join(repo_directory, "snapshots")
