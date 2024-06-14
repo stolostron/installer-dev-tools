@@ -653,6 +653,10 @@ def main():
     with open(configYaml, 'r') as f:
         config = yaml.safe_load(f)
 
+    if not config:
+        logging.critical("No charts listed in config to be moved!")
+        exit(0)
+
     # Loop through each repo in the config.yaml
     for repo in config:
         logging.info("Cloning: %s", repo["repo_name"])
