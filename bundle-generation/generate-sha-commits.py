@@ -135,7 +135,7 @@ def main():
     clone_pipeline_repo(args.org, args.repo, args.branch, target_path=repo_directory, pat=os.getenv("GH_READ_PAT"))
 
     # Fetch latest manifest
-    snapshots_path = os.path.join(repo_directory, "snapshots")
+    snapshots_path = os.path.join(repo_directory, ".")
     if not os.path.exists(snapshots_path):
         logging.error("Snapshots directory does not exist in repository: %s" % args.repo)
         exit(1)
