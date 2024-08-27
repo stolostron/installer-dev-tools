@@ -81,8 +81,7 @@ def fetch_latest_manifest(dir_path):
     Returns:
         str or None: The path to the latest manifest file, or None if no manifest is found.
     """
-    manifest = glob.glob(os.path.join(dir_path, "manifest-*.json"))
-    manifest.sort()
+    manifest = glob.glob(os.path.join(dir_path, "manifest.json"))
 
     return manifest[-1] if manifest else None
 
@@ -135,7 +134,7 @@ def main():
     clone_pipeline_repo(args.org, args.repo, args.branch, target_path=repo_directory, pat=os.getenv("GH_READ_PAT"))
 
     # Fetch latest manifest
-    snapshots_path = os.path.join(repo_directory, "snapshots")
+    snapshots_path = os.path.join(repo_directory, ".")
     if not os.path.exists(snapshots_path):
         logging.error("Snapshots directory does not exist in repository: %s" % args.repo)
         exit(1)
