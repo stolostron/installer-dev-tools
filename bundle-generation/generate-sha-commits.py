@@ -81,8 +81,7 @@ def fetch_latest_manifest(dir_path):
     Returns:
         str or None: The path to the latest manifest file, or None if no manifest is found.
     """
-    manifest = glob.glob(os.path.join(dir_path, "manifest-*.json"))
-    manifest.sort()
+    manifest = glob.glob(os.path.join(dir_path, "manifest.json"))
 
     return manifest[-1] if manifest else None
 
