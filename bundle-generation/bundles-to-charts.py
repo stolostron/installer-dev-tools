@@ -473,10 +473,6 @@ def injectHelmFlowControl(deployment, sizes):
           value: {{ .Values.hubconfig.proxyConfigs.NO_PROXY }}
 {{- end }}
 """     
-
-        if 'replicas:' in line.strip():
-            lines[i] = """  replicas: {{ .Values.hubconfig.replicaCount }}
-"""
         if sizes:
             for sizDeployment in sizes["deployments"]:
                 if sizDeployment["name"] == deployx["metadata"]["name"]:
