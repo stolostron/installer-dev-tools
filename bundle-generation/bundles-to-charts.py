@@ -430,9 +430,11 @@ def insertFlowControlIfAround(lines_list, first_line_index, last_line_index, if_
    lines_list[last_line_index] = "%s{{- end }}\n" % lines_list[last_line_index]
 
 # injectHelmFlowControl injects advanced helm flow control which would typically make a .yaml file more difficult to parse. This should be called last.
-def injectHelmFlowControl(deployment):
+def injectHelmFlowControl(deployment, sizes):
     logging.info("Adding Helm flow control for NodeSelector, Proxy Overrides and SecCompProfile...")
     deploy = open(deployment, "r")
+    with open(deployment, 'r') as f:
+        deployx = yaml.safe_load(f)
     lines = deploy.readlines()
     for i, line in enumerate(lines):
         if line.strip() == "nodeSelector: \'\'":
@@ -470,6 +472,45 @@ def injectHelmFlowControl(deployment):
         - name: NO_PROXY
           value: {{ .Values.hubconfig.proxyConfigs.NO_PROXY }}
 {{- end }}
+"""     
+        if sizes:
+            for sizDeployment in sizes["deployments"]:
+                if sizDeployment["name"] == deployx["metadata"]["name"]:
+                    for container in sizDeployment["containers"]:
+                        if line.strip() == "resources: REPLACE-" + container["name"]:
+                            lines[i] = """        resources:
+{{-  if eq .values.hubconfig.hubSize "Small" }}
+          limits:
+            cpu: """ + container["Small"]["limits"]["cpu"] + """
+            memory: """ + container["Small"]["limits"]["memory"] + """
+          requests:
+            cpu: """ + container["Small"]["requests"]["cpu"] + """
+            memory: """ + container["Small"]["requests"]["memory"] + """
+{{- end }}
+{{ if eq .values.hubconfig.hubSize "Medium" }}
+          limits:
+            cpu: """ + container["Medium"]["limits"]["cpu"] + """
+            memory: """ + container["Medium"]["limits"]["memory"] + """
+          requests:
+            cpu: """ + container["Medium"]["requests"]["cpu"] + """
+            memory: """ + container["Medium"]["requests"]["memory"] + """
+{{- end }}
+{{-  if eq .values.hubconfig.hubSize "Large" }}
+          limits:
+            cpu: """ + container["Large"]["limits"]["cpu"] + """
+            memory: """ + container["Large"]["limits"]["memory"] + """
+          requests:
+            cpu: """ + container["Large"]["requests"]["cpu"] + """
+            memory: """ + container["Large"]["requests"]["memory"] + """
+{{- end }}
+{{ if eq .values.hubconfig.hubSize "ExtraLarge" }}
+          limits:
+            cpu: """ + container["ExtraLarge"]["limits"]["cpu"] + """
+            memory: """ + container["ExtraLarge"]["limits"]["memory"] + """
+          requests:
+            cpu: """ + container["ExtraLarge"]["requests"]["cpu"] + """
+            memory: """ + container["ExtraLarge"]["requests"]["memory"] + """
+{{- end }}
 """
         if line.strip() == "seccompProfile:":
             next_line = lines[i+1]  # Ignore possible reach beyond end-of-list, not really possible
@@ -482,12 +523,11 @@ def injectHelmFlowControl(deployment):
     logging.info("Added Helm flow control for NodeSelector, Proxy Overrides and SecCompProfile.\n")
 
 # updateDeployments adds standard configuration to the deployments (antiaffinity, security policies, and tolerations)
-def updateDeployments(helmChart, exclusions):
+def updateDeployments(helmChart, operator, exclusions, sizes):
     logging.info("Updating deployments with antiaffinity, security policies, and tolerations ...")
     deploySpecYaml = os.path.join(os.path.dirname(os.path.realpath(__file__)), "chart-templates/templates/deploymentspec.yaml")
     with open(deploySpecYaml, 'r') as f:
         deploySpec = yaml.safe_load(f)
-    
     deployments = findTemplatesOfType(helmChart, 'Deployment')
     for deployment in deployments:
         with open(deployment, 'r') as f:
@@ -498,6 +538,16 @@ def updateDeployments(helmChart, exclusions):
 
         pod_template = deploy['spec']['template']
         pod_template['metadata']['labels']['ocm-antiaffinity-selector'] = deploy['metadata']['name']
+        if sizes:
+            for  sizDeployment in sizes["deployments"]:
+                if sizDeployment["name"] == deploy["metadata"]["name"]:
+                    for i in deploy['spec']['template']['spec']['containers']:            
+                        if not any(d['name'] == i['name'] for d in sizDeployment["containers"]):
+                            logging.error("Missing container in sizes.yaml")
+                            exit(1)
+                        for sizContainer in sizDeployment["containers"]:
+                            if sizContainer["name"] == i["name"]:
+                                i['resources'] = 'REPLACE-' + i['name']
 
         pod_template_spec = pod_template['spec']
         pod_template_spec['affinity'] = deploySpec['affinity']
@@ -505,6 +555,14 @@ def updateDeployments(helmChart, exclusions):
         pod_template_spec['hostNetwork'] = False
         pod_template_spec['hostPID'] = False
         pod_template_spec['hostIPC'] = False
+        
+        # Set automountServiceAccountToken only if is configured for the operator.
+        if 'automountServiceAccountToken' in operator:
+            automountSAToken = operator.get('automountServiceAccountToken')
+            if isinstance(automountSAToken, bool):
+                pod_template_spec['automountServiceAccountToken'] = operator.get('automountServiceAccountToken')
+            else:
+                logging.warning("automountServiceAccountToken should be a boolean. Ignoring invalid value.")
 
         if 'securityContext' not in pod_template_spec:
             pod_template_spec['securityContext'] = {}
@@ -548,7 +606,7 @@ def updateDeployments(helmChart, exclusions):
             yaml.dump(deploy, f)
         logging.info("Deployments updated with antiaffinity, security policies, and tolerations successfully. \n")
 
-        injectHelmFlowControl(deployment)
+        injectHelmFlowControl(deployment, sizes)
 
 # updateRBAC adds standard configuration to the RBAC resources (clusterroles, roles, clusterrolebindings, and rolebindings)
 def updateRBAC(helmChart):
@@ -569,12 +627,18 @@ def updateRBAC(helmChart):
     logging.info("Clusterroles, roles, clusterrolebindings, and rolebindings updated. \n")
 
 
-def injectRequirements(helmChart, imageKeyMapping, exclusions):
+def injectRequirements(helmChart, operator, exclusions, sizes):
     logging.info("Updating Helm chart '%s' with onboarding requirements ...", helmChart)
+    imageKeyMapping = operator.get('imageMappings', {})
+
+    # Fixes image references in the Helm chart.
     fixImageReferences(helmChart, imageKeyMapping)
     fixEnvVarImageReferences(helmChart, imageKeyMapping)
+
+    # Updates RBAC and deployment configuration in the Helm chart.
     updateRBAC(helmChart)
-    updateDeployments(helmChart, exclusions)
+    updateDeployments(helmChart, operator, exclusions, sizes)
+
     logging.info("Updated Chart '%s' successfully\n", helmChart)
 
 def addCMAs(repo, operator, outputDir):
@@ -793,6 +857,12 @@ def main():
             repository = Repo.clone_from(repo["github_ref"], repo_path) # Clone repo to above path
             if 'branch' in repo:
                 repository.git.checkout(repo['branch']) # If a branch is specified, checkout that branch
+            sizesyaml = repo_path + "/bundle/manifests/sizes.yaml"
+            if os.path.isfile(sizesyaml):
+                with open(sizesyaml, 'r') as f:
+                    sizes = yaml.safe_load(f)
+            else:
+                sizes = {}
 
         elif "gen_command" in repo:
             try:
@@ -824,10 +894,18 @@ def main():
                "bundlePath": bundlePath
             }
             repo["operators"] = [op]
+            sizesyaml = bundlePath + "/sizes.yaml"
+            if os.path.isfile(sizesyaml):
+                with open(sizesyaml, 'r') as f:
+                    sizes = yaml.safe_load(f)
+            else:
+                sizes = {}
 
         else:
             logging.critical("Config entry doesn't specify either a Git repo or a generation command")
             exit(1)
+
+        
 
         # Loop through each operator in the repo identified by the config
         for operator in repo["operators"]:
@@ -902,7 +980,7 @@ def main():
             if not skipOverrides:
                 logging.info("Adding Overrides to helm chart '%s' (set --skipOverrides=true to skip) ...", operator["name"])
                 exclusions = operator["exclusions"] if "exclusions" in operator else []
-                injectRequirements(helmChart, operator["imageMappings"], exclusions)
+                injectRequirements(helmChart, operator, exclusions, sizes)
                 logging.info("Overrides added to helm chart '%s' successfully.", operator["name"])
 
     logging.info("All repositories and operators processed successfully.")
