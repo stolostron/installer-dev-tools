@@ -11,6 +11,7 @@ import array
 import logging
 import coloredlogs
 import sys
+import re
 from git import Repo, exc
 from packaging import version
 
@@ -429,8 +430,35 @@ def insertFlowControlIfAround(lines_list, first_line_index, last_line_index, if_
    lines_list[first_line_index] = "{{- if %s }}\n%s" % (if_condition, lines_list[first_line_index])
    lines_list[last_line_index] = "%s{{- end }}\n" % lines_list[last_line_index]
 
+def is_version_compatible(branch, min_release_version, min_backplane_version):
+    # Extract the version part from the branch name (e.g., '2.12-integration' -> '2.12')
+    pattern = r'(\d+\.\d+)'  # Matches versions like '2.12'
+    
+    if branch == "main":
+        return True
+    
+    match = re.search(pattern, branch)
+    if match:
+        version = match.group(1)  # Extract the version
+        branch_version = version.Version(version)  # Create a Version object
+        
+        if "release" in branch:
+            min_branch_version = version.Version(min_release_version)  # Use the minimum release version
+        elif "backplane" or "mce" in branch:
+            min_branch_version = version.Version(min_backplane_version)  # Use the minimum backplane version
+        else:
+            logging.error(f"Unrecognized branch type for branch: {branch}")
+            return False
+
+        # Check if the branch version is compatible with the specified minimum branch
+        return branch_version >= min_branch_version
+
+    else:
+        logging.error(f"Version not found in branch: {branch}")
+        return False
+
 # injectHelmFlowControl injects advanced helm flow control which would typically make a .yaml file more difficult to parse. This should be called last.
-def injectHelmFlowControl(deployment, sizes):
+def injectHelmFlowControl(deployment, sizes, branch):
     logging.info("Adding Helm flow control for NodeSelector, Proxy Overrides and SecCompProfile...")
     deploy = open(deployment, "r")
     with open(deployment, 'r') as f:
@@ -473,6 +501,12 @@ def injectHelmFlowControl(deployment, sizes):
           value: {{ .Values.hubconfig.proxyConfigs.NO_PROXY }}
 {{- end }}
 """     
+
+        if is_version_compatible(branch, '2.13', '2.8'):
+            if 'replicas:' in line.strip():
+                lines[i] = """  replicas: {{ .Values.hubconfig.replicaCount }}
+"""
+            
         if sizes:
             for sizDeployment in sizes["deployments"]:
                 if sizDeployment["name"] == deployx["metadata"]["name"]:
@@ -523,7 +557,7 @@ def injectHelmFlowControl(deployment, sizes):
     logging.info("Added Helm flow control for NodeSelector, Proxy Overrides and SecCompProfile.\n")
 
 # updateDeployments adds standard configuration to the deployments (antiaffinity, security policies, and tolerations)
-def updateDeployments(helmChart, operator, exclusions, sizes):
+def updateDeployments(helmChart, operator, exclusions, sizes, branch):
     logging.info("Updating deployments with antiaffinity, security policies, and tolerations ...")
     deploySpecYaml = os.path.join(os.path.dirname(os.path.realpath(__file__)), "chart-templates/templates/deploymentspec.yaml")
     with open(deploySpecYaml, 'r') as f:
@@ -606,7 +640,7 @@ def updateDeployments(helmChart, operator, exclusions, sizes):
             yaml.dump(deploy, f)
         logging.info("Deployments updated with antiaffinity, security policies, and tolerations successfully. \n")
 
-        injectHelmFlowControl(deployment, sizes)
+        injectHelmFlowControl(deployment, sizes, branch)
 
 # updateRBAC adds standard configuration to the RBAC resources (clusterroles, roles, clusterrolebindings, and rolebindings)
 def updateRBAC(helmChart):
@@ -627,7 +661,7 @@ def updateRBAC(helmChart):
     logging.info("Clusterroles, roles, clusterrolebindings, and rolebindings updated. \n")
 
 
-def injectRequirements(helmChart, operator, exclusions, sizes):
+def injectRequirements(helmChart, operator, exclusions, sizes, branch):
     logging.info("Updating Helm chart '%s' with onboarding requirements ...", helmChart)
     imageKeyMapping = operator.get('imageMappings', {})
 
@@ -637,7 +671,7 @@ def injectRequirements(helmChart, operator, exclusions, sizes):
 
     # Updates RBAC and deployment configuration in the Helm chart.
     updateRBAC(helmChart)
-    updateDeployments(helmChart, operator, exclusions, sizes)
+    updateDeployments(helmChart, operator, exclusions, sizes, branch)
 
     logging.info("Updated Chart '%s' successfully\n", helmChart)
 
@@ -920,6 +954,11 @@ def main():
                 logging.error("Unable to find given channel: %s", operator.get("channel", "Channel not specified"))
                 exit(1)
 
+            if "branch" in repo:
+                branch = repo["branch"]
+            else:
+                branch = ""
+
             logging.info("Reading CSV: %s ...",  csvPath)
             # Validate CSV exists
             if not os.path.isfile(csvPath):
@@ -980,7 +1019,7 @@ def main():
             if not skipOverrides:
                 logging.info("Adding Overrides to helm chart '%s' (set --skipOverrides=true to skip) ...", operator["name"])
                 exclusions = operator["exclusions"] if "exclusions" in operator else []
-                injectRequirements(helmChart, operator, exclusions, sizes)
+                injectRequirements(helmChart, operator, exclusions, sizes, branch)
                 logging.info("Overrides added to helm chart '%s' successfully.", operator["name"])
 
     logging.info("All repositories and operators processed successfully.")
