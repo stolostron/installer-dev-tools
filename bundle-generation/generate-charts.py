@@ -327,8 +327,35 @@ def insertFlowControlIfAround(lines_list, first_line_index, last_line_index, if_
    lines_list[first_line_index] = "{{- if %s }}\n%s" % (if_condition, lines_list[first_line_index])
    lines_list[last_line_index] = "%s{{- end }}\n" % lines_list[last_line_index]
 
+def is_version_compatible(branch, min_release_version, min_backplane_version):
+    # Extract the version part from the branch name (e.g., '2.12-integration' -> '2.12')
+    pattern = r'(\d+\.\d+)'  # Matches versions like '2.12'
+    
+    if branch == "main":
+        return True
+    
+    match = re.search(pattern, branch)
+    if match:
+        version = match.group(1)  # Extract the version
+        branch_version = version.Version(version)  # Create a Version object
+        
+        if "release" in branch:
+            min_branch_version = version.Version(min_release_version)  # Use the minimum release version
+        elif "backplane" or "mce" in branch:
+            min_branch_version = version.Version(min_backplane_version)  # Use the minimum backplane version
+        else:
+            logging.error(f"Unrecognized branch type for branch: {branch}")
+            return False
+
+        # Check if the branch version is compatible with the specified minimum branch
+        return branch_version >= min_branch_version
+
+    else:
+        logging.error(f"Version not found in branch: {branch}")
+        return False
+
 # injectHelmFlowControl injects advanced helm flow control which would typically make a .yaml file more difficult to parse. This should be called last.
-def injectHelmFlowControl(deployment):
+def injectHelmFlowControl(deployment, branch):
     logging.info("Adding Helm flow control for NodeSelector, Proxy Overrides, and SeccompProfile ...")
     deploy = open(deployment, "r")
     lines = deploy.readlines()
@@ -371,8 +398,9 @@ def injectHelmFlowControl(deployment):
 {{- end }}
 """
 
-        if 'replicas:' in line.strip():
-            lines[i] = """  replicas: {{ .Values.hubconfig.replicaCount }}
+        if is_version_compatible(branch, '2.13', '2.8'):
+            if 'replicas:' in line.strip():
+                lines[i] = """  replicas: {{ .Values.hubconfig.replicaCount }}
 """
 
         if line.strip() == "seccompProfile:":
@@ -466,7 +494,7 @@ def updateDeployments(chartName, helmChart, exclusions, inclusions):
             yaml.dump(deploy, f, width=float("inf"))
         logging.info("Deployments updated with antiaffinity, security policies, and tolerations successfully. \n")
 
-        injectHelmFlowControl(deployment)
+        injectHelmFlowControl(deployment, branch)
         if 'pullSecretOverride' in inclusions:
             addPullSecretOverride(deployment)
 
@@ -572,7 +600,7 @@ def updateRBAC(helmChart, chartName):
     logging.info("Clusterroles, roles, clusterrolebindings, and rolebindings updated. \n")
 
 
-def injectRequirements(helmChart, chartName, imageKeyMapping, skipRBACOverrides, exclusions, inclusions):
+def injectRequirements(helmChart, chartName, imageKeyMapping, skipRBACOverrides, exclusions, inclusions, branch):
     logging.info("Updating Helm chart '%s' with onboarding requirements ...", helmChart)
     fixImageReferences(helmChart, imageKeyMapping)
     fixEnvVarImageReferences(helmChart, imageKeyMapping)
@@ -694,8 +722,12 @@ def main():
         if os.path.exists(repo_path): # If path exists, remove and re-clone
             shutil.rmtree(repo_path)
         repository = Repo.clone_from(repo["github_ref"], repo_path) # Clone repo to above path
+
         if 'branch' in repo:
-            repository.git.checkout(repo['branch']) # If a branch is specified, checkout that branch
+            branch = repo['branch']
+            repository.git.checkout(branch) # If a branch is specified, checkout that branch
+        else:
+            branch = ""
         
         # Loop through each operator in the repo identified by the config
         for chart in repo["charts"]:
@@ -726,7 +758,7 @@ def main():
                 logging.info("Adding Overrides (set --skipOverrides=true to skip) ...")
                 exclusions = chart["exclusions"] if "exclusions" in chart else []
                 inclusions = chart["inclusions"] if "inclusions" in chart else []
-                injectRequirements(destinationChartPath, chart["name"], chart["imageMappings"], chart["skipRBACOverrides"], exclusions, inclusions)
+                injectRequirements(destinationChartPath, chart["name"], chart["imageMappings"], chart["skipRBACOverrides"], exclusions, inclusions, branch)
                 logging.info("Overrides added. \n")
 
 if __name__ == "__main__":
