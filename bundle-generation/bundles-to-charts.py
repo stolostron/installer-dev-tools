@@ -439,8 +439,8 @@ def is_version_compatible(branch, min_release_version, min_backplane_version):
     
     match = re.search(pattern, branch)
     if match:
-        version = match.group(1)  # Extract the version
-        branch_version = version.Version(version)  # Create a Version object
+        v = match.group(1)  # Extract the version
+        branch_version = version.Version(v)  # Create a Version object
         
         if "release" in branch:
             min_branch_version = version.Version(min_release_version)  # Use the minimum release version
