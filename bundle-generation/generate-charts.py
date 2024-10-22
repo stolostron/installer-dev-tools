@@ -400,10 +400,10 @@ def injectHelmFlowControl(deployment, branch):
 {{- end }}
 """
 
-        if is_version_compatible(branch, '2.13', '2.8'):
-            if 'replicas:' in line.strip():
-                lines[i] = """  replicas: {{ .Values.hubconfig.replicaCount }}
-"""
+#         if is_version_compatible(branch, '2.13', '2.8'):
+#             if 'replicas:' in line.strip():
+#                 lines[i] = """  replicas: {{ .Values.hubconfig.replicaCount }}
+# """
 
         if line.strip() == "seccompProfile:":
             next_line = lines[i+1]  # Ignore possible reach beyond end-of-list, not really possible
@@ -435,7 +435,7 @@ def addPullSecretOverride(deployment):
         a_file.close()
 
 # updateDeployments adds standard configuration to the deployments (antiaffinity, security policies, and tolerations)
-def updateDeployments(chartName, helmChart, exclusions, inclusions):
+def updateDeployments(chartName, helmChart, exclusions, inclusions, branch):
     logging.info("Updating deployments with antiaffinity, security policies, and tolerations ...")
     deploySpecYaml = os.path.join(os.path.dirname(os.path.realpath(__file__)), "chart-templates/templates/deploymentspec.yaml")
     with open(deploySpecYaml, 'r') as f:
@@ -612,7 +612,7 @@ def injectRequirements(helmChart, chartName, imageKeyMapping, skipRBACOverrides,
     injectAnnotationsForAddonTemplate(helmChart)
     if not skipRBACOverrides:
         updateRBAC(helmChart, chartName)
-    updateDeployments(chartName, helmChart, exclusions, inclusions)
+    updateDeployments(chartName, helmChart, exclusions, inclusions, branch)
 
     logging.info("Updated Chart '%s' successfully\n", helmChart)
 
@@ -644,7 +644,7 @@ def addCRDs(repo, chart, outputDir):
     
     crdPath = os.path.join(chartPath, "crds")
     if not os.path.exists(crdPath):
-        logging.info("No CRDs for repo: ", repo)
+        logging.info(f"No CRDs for repo: {repo}")
         return
 
     destinationPath = os.path.join(outputDir, chart['name'], "crds")

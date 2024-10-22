@@ -502,10 +502,10 @@ def injectHelmFlowControl(deployment, sizes, branch):
 {{- end }}
 """     
 
-        if is_version_compatible(branch, '2.13', '2.8'):
-            if 'replicas:' in line.strip():
-                lines[i] = """  replicas: {{ .Values.hubconfig.replicaCount }}
-"""
+#         if is_version_compatible(branch, '2.13', '2.8'):
+#             if 'replicas:' in line.strip():
+#                 lines[i] = """  replicas: {{ .Values.hubconfig.replicaCount }}
+# """
             
         if sizes:
             for sizDeployment in sizes["deployments"]:
