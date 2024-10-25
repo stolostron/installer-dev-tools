@@ -128,5 +128,12 @@ def main():
             logging.info("Templating helm chart '%s' ...", chart["name"])
             copyHelmChart(destinationChartPath, repo["repo_name"], chart)
 
+    logging.info("All repositories and operators processed successfully.")
+    logging.info("Performing cleanup...")
+    shutil.rmtree((os.path.join(os.path.dirname(os.path.realpath(__file__)), "tmp")), ignore_errors=True)
+
+    logging.info("Cleanup completed.")
+    logging.info("Script execution completed.")
+
 if __name__ == "__main__":
    main()
