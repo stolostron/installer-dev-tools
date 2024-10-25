@@ -502,10 +502,10 @@ def injectHelmFlowControl(deployment, sizes, branch):
 {{- end }}
 """     
 
-        if is_version_compatible(branch, '2.13', '2.8'):
-            if 'replicas:' in line.strip():
-                lines[i] = """  replicas: {{ .Values.hubconfig.replicaCount }}
-"""
+#         if is_version_compatible(branch, '2.13', '2.8'):
+#             if 'replicas:' in line.strip():
+#                 lines[i] = """  replicas: {{ .Values.hubconfig.replicaCount }}
+# """
             
         if sizes:
             for sizDeployment in sizes["deployments"]:
@@ -550,6 +550,8 @@ def injectHelmFlowControl(deployment, sizes, branch):
             next_line = lines[i+1]  # Ignore possible reach beyond end-of-list, not really possible
             if next_line.strip() == "type: RuntimeDefault":
                 insertFlowControlIfAround(lines, i, i+1, "semverCompare \">=4.11.0\" .Values.hubconfig.ocpVersion")
+                if is_version_compatible(branch, '2.12', '2.7'):
+                    insertFlowControlIfAround(lines, i, i+1, ".Values.global.deployOnOCP")
     #
     a_file = open(deployment, "w")
     a_file.writelines(lines)
