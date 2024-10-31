@@ -329,7 +329,7 @@ def insertFlowControlIfAround(lines_list, first_line_index, last_line_index, if_
    lines_list[first_line_index] = "{{- if %s }}\n%s" % (if_condition, lines_list[first_line_index])
    lines_list[last_line_index] = "%s{{- end }}\n" % lines_list[last_line_index]
 
-def is_version_compatible(branch, min_release_version, min_backplane_version):
+def is_version_compatible(branch, min_release_version, min_backplane_version, min_ocm_version):
     # Extract the version part from the branch name (e.g., '2.12-integration' -> '2.12')
     pattern = r'(\d+\.\d+)'  # Matches versions like '2.12'
     
@@ -341,10 +341,15 @@ def is_version_compatible(branch, min_release_version, min_backplane_version):
         v = match.group(1)  # Extract the version
         branch_version = version.Version(v)  # Create a Version object
         
-        if "release" in branch:
+        if "release-ocm" in branch:
+            min_branch_version = version.Version(min_ocm_version)  # Use the minimum release version
+        
+        elif "release" in branch:
             min_branch_version = version.Version(min_release_version)  # Use the minimum release version
-        elif "backplane" or "mce" in branch:
+
+        elif "backplane" in branch or "mce" in branch:
             min_branch_version = version.Version(min_backplane_version)  # Use the minimum backplane version
+
         else:
             logging.error(f"Unrecognized branch type for branch: {branch}")
             return False
@@ -410,7 +415,7 @@ def injectHelmFlowControl(deployment, branch):
             prev_line = lines[i-1]
             if next_line.strip() == "type: RuntimeDefault" and "semverCompare" not in prev_line:
                 insertFlowControlIfAround(lines, i, i+1, "semverCompare \">=4.11.0\" .Values.hubconfig.ocpVersion")
-                if is_version_compatible(branch, '2.13', '2.7'):
+                if is_version_compatible(branch, '2.13', '2.7', '2.12'):
                     insertFlowControlIfAround(lines, i, i+1, ".Values.global.deployOnOCP")
 
         a_file = open(deployment, "w")
@@ -656,6 +661,8 @@ def addCRDs(repo, chart, outputDir):
             continue
         filepath = os.path.join(crdPath, filename)
         with open(filepath, 'r') as f:
+            logging.info(f"filepath {filepath}")
+
             resourceFile = yaml.safe_load(f)
 
         if resourceFile["kind"] == "CustomResourceDefinition":
@@ -689,6 +696,29 @@ def getChartVersion(updateChartVersion, repo):
     # TODO: consider getting chart version from chart template
     return chartVersion
 
+def renderChart(chart_path):
+    # Define the path for the values.yaml file
+    values_file_path = os.path.join(chart_path, 'values.yaml')
+    
+    # Load the values from the values.yaml file
+    with open(values_file_path, 'r') as f:
+        values = yaml.safe_load(f)
+
+    try:
+        # Use the Helm command to render the chart
+        logging.info("Rendering chart '%s'...", chart_path)
+        subprocess.run(
+            ['helm', 'template', chart_path, '-f', values_file_path],
+            check=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE
+        )
+        logging.info("Chart rendered successfully.")
+        return True
+
+    except subprocess.CalledProcessError as e:
+        logging.error("Error rendering chart: %s", e.stderr.decode())
+        return False
 
 def main():
     ## Initialize ArgParser
@@ -756,6 +786,10 @@ def main():
             logging.info("Templating helm chart '%s' ...", chart["name"])
             copyHelmChart(destinationChartPath, repo["repo_name"], chart, chartVersion)
 
+            # Render the helm chart before updating the chart resources.
+            renderChart(destinationChartPath)
+            
+            # Update the helm chart resources with additional overrides
             updateResources(destination, repo["repo_name"], chart)
 
             if not skipOverrides:
