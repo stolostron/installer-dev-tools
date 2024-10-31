@@ -58,7 +58,7 @@ def addCRDs(repo, chart, outputDir):
     
     crdPath = os.path.join(chartPath, "crds")
     if not os.path.exists(crdPath):
-        logging.info("No CRDs for repo: ", repo)
+        logging.info(f"No CRDs for repo: {repo}")
         return
 
     destinationPath = os.path.join(outputDir, "crds", chart['name'])
