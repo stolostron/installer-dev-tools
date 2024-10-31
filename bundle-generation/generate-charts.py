@@ -786,13 +786,10 @@ def main():
             logging.info("Templating helm chart '%s' ...", chart["name"])
             copyHelmChart(destinationChartPath, repo["repo_name"], chart, chartVersion)
 
-            # Render the chart here
-        if renderChart(destinationChartPath):
-            logging.info(f"Helm chart '{chart['name']}' rendered successfully. Proceeding with resource updates.")
-        else:
-            logging.error(f"Helm chart '{chart['name']}' rendering failed. Resource update is skipped or may be incomplete due to this failure. "
-                "Check the Helm output for errors.")
-
+            # Render the helm chart before updating the chart resources.
+            renderChart(destinationChartPath)
+            
+            # Update the helm chart resources with additional overrides
             updateResources(destination, repo["repo_name"], chart)
 
             if not skipOverrides:
