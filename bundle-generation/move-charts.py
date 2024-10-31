@@ -124,7 +124,7 @@ def main():
 
         repository = Repo.clone_from(repo["github_ref"], repo_path) # Clone repo to above path
         if 'branch' in repo:
-            repository.git.checkout(chart['branch']) # If a branch is specified, checkout that branch
+            repository.git.checkout(repo['branch']) # If a branch is specified, checkout that branch
 
         # Loop through each operator in the repo identified by the config
         for chart in repo["charts"]:
