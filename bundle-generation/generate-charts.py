@@ -333,7 +333,7 @@ def is_version_compatible(branch, min_release_version, min_backplane_version, mi
     # Extract the version part from the branch name (e.g., '2.12-integration' -> '2.12')
     pattern = r'(\d+\.\d+)'  # Matches versions like '2.12'
     
-    if branch == "main":
+    if branch == "main" or branch == "master":
         return True
     
     match = re.search(pattern, branch)
@@ -415,7 +415,7 @@ def injectHelmFlowControl(deployment, branch):
             prev_line = lines[i-1]
             if next_line.strip() == "type: RuntimeDefault" and "semverCompare" not in prev_line:
                 insertFlowControlIfAround(lines, i, i+1, "semverCompare \">=4.11.0\" .Values.hubconfig.ocpVersion")
-                if is_version_compatible(branch, '2.13', '2.7', '2.12'):
+                if is_version_compatible(branch, '9.9', '2.7', '2.12'):
                     insertFlowControlIfAround(lines, i, i+1, ".Values.global.deployOnOCP")
 
         a_file = open(deployment, "w")
