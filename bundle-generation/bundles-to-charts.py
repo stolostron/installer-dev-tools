@@ -430,12 +430,15 @@ def insertFlowControlIfAround(lines_list, first_line_index, last_line_index, if_
    lines_list[first_line_index] = "{{- if %s }}\n%s" % (if_condition, lines_list[first_line_index])
    lines_list[last_line_index] = "%s{{- end }}\n" % lines_list[last_line_index]
 
-def is_version_compatible(branch, min_release_version, min_backplane_version, min_ocm_version):
+def is_version_compatible(branch, min_release_version, min_backplane_version, min_ocm_version, enforce_master_check=True):
     # Extract the version part from the branch name (e.g., '2.12-integration' -> '2.12')
     pattern = r'(\d+\.\d+)'  # Matches versions like '2.12'
     
     if branch == "main" or branch == "master":
-        return True
+        if enforce_master_check:
+            return True
+        else:
+            return False
     
     match = re.search(pattern, branch)
     if match:
@@ -507,7 +510,7 @@ def injectHelmFlowControl(deployment, sizes, branch):
 {{- end }}
 """     
 
-        if is_version_compatible(branch, '9.9', '9.9', '9.9'):
+        if is_version_compatible(branch, '9.9', '9.9', '9.9', False):
             if 'replicas:' in line.strip():
                 lines[i] = """  replicas: {{ .Values.hubconfig.replicaCount }}
 """
