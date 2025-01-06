@@ -506,10 +506,7 @@ def is_version_compatible(branch, min_release_version, min_backplane_version, mi
     pattern = r'(\d+\.\d+)'  # Matches versions like '2.12'
     
     if branch == "main" or branch == "master":
-        if enforce_master_check:
-            return True
-        else:
-            return False
+        return enforce_master_check
     
     match = re.search(pattern, branch)
     if match:
