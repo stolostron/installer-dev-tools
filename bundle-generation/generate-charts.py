@@ -376,10 +376,10 @@ def fixImageReferences(helmChart, imageKeyMapping):
                 logging.critical("No image key mapping provided for imageKey: %s" % image_key)
                 exit(1)
             imageKeys.append(image_key)
-            # temp = container['image'] 
             container['image'] = "{{ .Values.global.imageOverrides." + image_key + " }}"
             container['imagePullPolicy'] = "{{ .Values.global.pullPolicy }}"
-            args = container['args']
+
+            args = container.get('args', [])
             refreshed_args = []
             for arg in args:
                 if "--agent-image-name" not in arg:
@@ -585,6 +585,93 @@ def updateDeployments(chartName, helmChart, exclusions, inclusions, branch):
         if 'pullSecretOverride' in inclusions:
             addPullSecretOverride(deployment)
 
+# updateHelmResources adds standard configuration to the generic kubernetes resources
+def updateHelmResources(chartName, helmChart, exclusions, inclusions, branch):
+    logging.info(f"Updating resources chart: {chartName}")
+
+    resource_kinds = [
+        "ClusterRole", "ClusterRoleBinding", "ConfigMap", "Deployment", "MutatingWebhookConfiguration",
+        "NetworkPolicy", "PersistentVolumeClaim", "RoleBinding", "Role", "Route", "Secret", "Service", "StatefulSet",
+        "ValidatingWebhookConfiguration"
+    ]
+
+    namespace_scoped_kinds = [
+        "ConfigMap", "Deployment", "NetworkPolicy", "PersistentVolumeClaim", "RoleBinding", "Role", "Route",
+        "Secret", "Service", "StatefulSet"
+    ]
+
+    for kind in resource_kinds:
+        resource_templates = findTemplatesOfType(helmChart, kind)
+
+        if not resource_templates:
+            logging.warning(f"No {kind} templates found in the Helm chart. [Skipping]")
+        else:
+            logging.info(f"Found {len(resource_templates)} {kind} templates. Beginning processing...")
+
+        for template_path in resource_templates:
+            try:
+                with open(template_path, 'r') as f:
+                    resource_data = yaml.safe_load(f)
+                    resource_name = resource_data['metadata'].get('name', 'unknown')
+                    logging.info(f"Processing resource: {resource_name} from template: {template_path}")
+
+                # Not all resources are namespace-scoped, so we initialize target_namespace as None initially.
+                target_namespace = """{{ .Values.global.namespace }}"""
+
+                if kind in namespace_scoped_kinds:
+                    current_namespace = resource_data['metadata'].get('namespace', None)
+                    if current_namespace is None:
+                        # If no namespace is found, use the default Helm namespace
+                        resource_data['metadata']['namespace'] = target_namespace
+                        logging.info(f"Namespace not set for {resource_name}. Using default '{{ .Values.global.namespace }}'.")
+
+                    else:
+                        # Update target_namespace to reflect the current_namespace
+                        target_namespace = f"{{{{ default \"{current_namespace}\" .Values.global.namespace }}}}"
+                        resource_data['metadata']['namespace'] = target_namespace
+                        logging.info(f"Namespace for {resource_name} set to: {target_namespace} (Helm default used).")
+
+                if chartName != "managed-serviceaccount":
+                    if kind == "ClusterRoleBinding" or kind == "RoleBinding":
+                        if 'subjects' in resource_data:
+                            for subject in resource_data['subjects']:
+                                subject_namespace = subject.get('namespace', None)
+                                if subject_namespace is None:
+                                    # If no namespace is found, use the default Helm namespace
+                                    subject['namespace'] = target_namespace
+
+                                else:
+                                    # Update target_namespace to reflect the subject_namespace
+                                    target_namespace = f"{{{{ default \"{subject_namespace}\" .Values.global.namespace }}}}"
+                                    subject['namespace'] = target_namespace
+                            logging.info(f"Subject namespace for {resource_name} set to: {target_namespace} (Helm default used).")
+
+                if kind == "MutatingWebhookConfiguration" or kind == "ValidatingWebhookConfiguration":
+                    if 'webhooks' in resource_data:
+                        for webhook in resource_data['webhooks']:
+                            if 'clientConfig' in webhook:
+                                client_config = webhook['clientConfig']
+                                if 'service' in client_config:
+                                    service = client_config['service']
+                                    service_namespace = service.get('namespace', None)
+                                    if service_namespace is None:
+                                        service['namespace'] = target_namespace
+
+                                    else:
+                                        # Update target_namespace to reflect the service_namespace
+                                        target_namespace = f"{{{{ default \"{service_namespace}\" .Values.global.namespace }}}}"
+                                        service['namespace'] = target_namespace
+                        logging.info(f"Subject namespace for {resource_name} set to: {target_namespace} (Helm default used).")
+
+                with open(template_path, 'w') as f:
+                    yaml.dump(resource_data, f, width=float("inf"))
+                logging.info(f"Succesfully updated the namespace for resource: {resource_name}")
+
+            except Exception as e:
+                logging.error(f"Error processing template '{template_path}': {e}")
+
+    logging.info("Resource update process completed.")
+
 # injectAnnotationsForAddonTemplate injects following annotations for deployments in the AddonTemplate:
 # - target.workload.openshift.io/management: '{"effect": "PreferredDuringScheduling"}'
 def injectAnnotationsForAddonTemplate(helmChart):
@@ -696,6 +783,7 @@ def injectRequirements(helmChart, chartName, imageKeyMapping, skipRBACOverrides,
 
     if not skipRBACOverrides:
         updateRBAC(helmChart, chartName)
+    updateHelmResources(chartName, helmChart, exclusions, inclusions, branch)
     updateDeployments(chartName, helmChart, exclusions, inclusions, branch)
 
     logging.info("Updated Chart '%s' successfully", helmChart)
