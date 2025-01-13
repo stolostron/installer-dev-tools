@@ -783,7 +783,10 @@ def injectRequirements(helmChart, chartName, imageKeyMapping, skipRBACOverrides,
 
     if not skipRBACOverrides:
         updateRBAC(helmChart, chartName)
-    updateHelmResources(chartName, helmChart, exclusions, inclusions, branch)
+    
+    if is_version_compatible(branch, '2.13', '2.8', '2.13'):
+        updateHelmResources(chartName, helmChart, exclusions, inclusions, branch)
+
     updateDeployments(chartName, helmChart, exclusions, inclusions, branch)
 
     logging.info("Updated Chart '%s' successfully", helmChart)
