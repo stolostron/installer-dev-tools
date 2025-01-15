@@ -134,58 +134,100 @@ def escapeTemplateVariables(helmChart, variables):
 
 # Copy chart-templates to a new helmchart directory
 def updateResources(outputDir, repo, chart):
-    logging.info(" Updating resources!")
+    logging.info("Starting resource update process ...")
+
     # Create main folder
     always_or_toggle = chart['always-or-toggle']
     chartDir = os.path.join(outputDir, "charts", always_or_toggle, chart['name'])
     templateDir = os.path.join(chartDir, "templates")
-    print(templateDir)
+
+    # Check if template directory exists
+    if not os.path.exists(templateDir):
+        logging.error(f"Template directory {templateDir} does not exist. Exiting update process.")
+        return # Exit early if the template directory doesn't exist
+
     for tempFile in os.listdir(templateDir):
         filePath = os.path.join(templateDir, tempFile)
-        with open(filePath, 'r') as f:
-            yamlContent = yaml.safe_load(f)
-        kind = yamlContent["kind"]
+
+        try:
+            with open(filePath, 'r') as f:
+                yamlContent = yaml.safe_load(f)
+        except Exception as e:
+            logging.error(f"Error reading YAML content from {filePath}: {e}")
+            return
+
+        # Log the kind of resource being processed   
+        kind = yamlContent.get("kind")
+        logging.info(f"Found resource of kind: {kind} in {filePath}")
+
+        # Perform the appropriate update action based on the kind
         if kind == "AddOnDeploymentConfig":
-            logging.info(" Updating AddOnDeploymentConfig!")
+            logging.info(f"Updating AddOnDeploymentConfig in {filePath}")
             updateAddOnDeploymentConfig(yamlContent)
+
         elif kind == "ClusterManagementAddOn":
-            logging.info(" Updating ClusterManagementAddOn!")
+            logging.info(f"Updating ClusterManagementAddOn in {filePath}")
             updateClusterManagementAddOn(yamlContent)
-            if chart['auto-install-for-all-clusters']:
+            if chart.get('auto-install-for-all-clusters', False):
                 installAddonForAllClusters(yamlContent)
+
         elif kind == "ServiceAccount":
-            logging.info(" Updating ServiceAccount!")
+            logging.info(f"Updating ServiceAccount in {filePath}")
             updateServiceAccount(yamlContent)
+
         elif kind == "ClusterRoleBinding":
-            if not chart['skipRBACOverrides']:
-                logging.info(" Updating ClusterRoleBinding!")
+            skip_rbac_override = chart.get('skipRBACOverrides', False)
+            if not skip_rbac_override:
+                logging.info(f"Updating ClusterRoleBinding in {filePath}")
                 updateClusterRoleBinding(yamlContent)
+            else:
+                logging.warning(f"Skipping ClusterRoleBinding update (RBAC override is disabled) in {filePath}")
+
         else:
-            logging.info(" No updates for kind %s at this step.", kind)
-            continue
-        with open(filePath, 'w') as f:
-            yaml.dump(yamlContent, f, width=float("inf"))
-    # Escape template variables
-    escapeTemplateVariables(chartDir, chart["escape-template-variables"])
+            logging.warning(f"Skipping unsupported kind '{kind}' in {filePath}. No updates applied")
+            continue # Skip unsupported kinds
+
+        try:
+            with open(filePath, 'w') as f:
+                yaml.dump(yamlContent, f, width=float("inf"))
+            logging.info(f"Successfully updated {filePath}")
+        except Exception as e:
+            logging.error(f"Error writing YAML content to {filePath}: {e}")
+            return
+
+    try:
+        # Escape template variables
+        escapeTemplateVariables(chartDir, chart["escape-template-variables"])
+        logging.info(f"Template variables escaped successfully for {chartDir}.")
+    except Exception as e:
+        logging.error(f"Error escaping template variables in {chartDir}: {e}")
+        return
+
+    logging.info("All resources updated successfully.")
 
 
 # Copy chart-templates to a new helmchart directory
 def copyHelmChart(destinationChartPath, repo, chart, chartVersion):
-    chartName = chart['name']
-    logging.info("Copying templates into new '%s' chart directory ...", chartName)
+    chartName = chart.get('name', '')
+    logging.info(f"Starting to process chart '{chartName}' chart directory")
+
     # Create main folder
     chartPath = os.path.join(os.path.dirname(os.path.realpath(__file__)), "tmp", repo, chart["chart-path"])
+    logging.debug(f"Chart path resolved to: '{chartPath}'")
+    logging.debug(f"Destination chart path: '{destinationChartPath}'")
+
     if os.path.exists(destinationChartPath):
+        logging.warning(f"Destination chart path already exists. Removing: {destinationChartPath}")
         shutil.rmtree(destinationChartPath)
     
     # Copy Chart.yaml, values.yaml, and templates dir
-
     destinationTemplateDir = os.path.join(destinationChartPath, "templates")
+    logging.info(f"Creating destination template directory: {destinationTemplateDir}")
     os.makedirs(destinationTemplateDir)
 
     chartYamlPath = os.path.join(chartPath, "Chart.yaml")
     if not os.path.exists(chartYamlPath):
-        logging.info("No Chart.yaml for chart: ", chartName)
+        logging.error(f"Missing Chart.yaml in chart: '{chartName}' at path: {chartYamlPath}")
         return
 
     # Update chart version if specified before rendering templates
@@ -198,27 +240,46 @@ def copyHelmChart(destinationChartPath, repo, chart, chartVersion):
 
     specificValues = os.path.join(os.path.dirname(os.path.realpath(__file__)), "chart-values", chart['name'], "values.yaml")
     if os.path.exists(specificValues):
+        logging.info(f"Using specific values.yaml for chart '{chartName}' from: {specificValues}")
         shutil.copyfile(specificValues, os.path.join(chartPath, "values.yaml"))
+    else:
+        logging.warning(f"No specific values.yaml found for chart '{chartName}'")
 
+    logging.info(f"Running 'helm template' for chart: '{chartName}'")
     helmTemplateOutput = subprocess.getoutput(['helm template '+ chartPath])
+
     yamlList = helmTemplateOutput.split('---')
     for outputContent in yamlList:
         yamlContent = yaml.safe_load(outputContent)
         if yamlContent is None:
+            logging.warning("Skipped empty or invalid YAML content during template processing")
             continue
-        newFileName = yamlContent['kind'].lower() + '.yaml'
+
+        name = yamlContent.get('metadata', {}).get('name', '').lower()
+        kind = yamlContent.get('kind', '').lower()
+        if not name or not kind:
+            logging.warning("YAML content is missing required metadata or kind fields")
+            continue
+
+        yamlFileName = f"{name}-{kind}" if name else kind
+        newFileName = yamlFileName + '.yaml'
         newFilePath= os.path.join(destinationTemplateDir, newFileName)
-        a_file = open(newFilePath, "w")
-        a_file.writelines(outputContent)
-        a_file.close()
+        logging.info(f"Generated file: '{newFileName}'")
+
+        try:
+            with open(newFilePath, "w") as f:
+                f.writelines(outputContent)
+
+        except Exception as e:
+            logging.error(f"Failed to write file '{newFilePath}': {e}")
 
     shutil.copyfile(chartYamlPath, os.path.join(destinationChartPath, "Chart.yaml"))
-
     shutil.copyfile(os.path.join(chartPath, "values.yaml"), os.path.join(destinationChartPath, "values.yaml"))
+
     # Copying template values.yaml instead of values.yaml from chart
     shutil.copyfile(os.path.join(os.path.dirname(os.path.realpath(__file__)), "chart-templates", "values.yaml"), os.path.join(destinationChartPath, "values.yaml"))
 
-    logging.info("Chart copied.\n")
+    logging.info(f"Finished processing chart: '{chartName}'\n")
 
 # Given a resource Kind, return all filepaths of that resource type in a chart directory
 def findTemplatesOfType(helmChart, kind):
@@ -239,7 +300,15 @@ def findTemplatesOfType(helmChart, kind):
 # If the image-key referenced in the deployment does not exist in `imageMappings` in the Config.yaml, this will fail. Images must be explicitly defined
 def fixEnvVarImageReferences(helmChart, imageKeyMapping):
     logging.info("Fixing image references in container 'env' section in deployments and values.yaml ...")
+    
+    # Path to the values.yaml file
     valuesYaml = os.path.join(helmChart, "values.yaml")
+
+    # Check if the values.yaml file exists
+    if not os.path.exists(valuesYaml):
+        logging.error(f"{valuesYaml} does not exist. Skipping environment variable image reference updates.")
+        return
+
     with open(valuesYaml, 'r') as f:
         values = yaml.safe_load(f)
     deployments = findTemplatesOfType(helmChart, 'Deployment')
@@ -279,7 +348,15 @@ def fixEnvVarImageReferences(helmChart, imageKeyMapping):
 # If the image-key referenced in the deployment does not exist in `imageMappings` in the Config.yaml, this will fail. Images must be explicitly defined
 def fixImageReferences(helmChart, imageKeyMapping):
     logging.info("Fixing image and pull policy references in deployments and values.yaml ...")
+
+    # Path to the values.yaml file
     valuesYaml = os.path.join(helmChart, "values.yaml")
+
+    # Check if the values.yaml file exists
+    if not os.path.exists(valuesYaml):
+        logging.error(f"{valuesYaml} does not exist. Skipping image and pull policy updates.")
+        return  # Exit the function if the file doesn't exist
+
     with open(valuesYaml, 'r') as f:
         values = yaml.safe_load(f)
     
@@ -299,10 +376,10 @@ def fixImageReferences(helmChart, imageKeyMapping):
                 logging.critical("No image key mapping provided for imageKey: %s" % image_key)
                 exit(1)
             imageKeys.append(image_key)
-            # temp = container['image'] 
             container['image'] = "{{ .Values.global.imageOverrides." + image_key + " }}"
             container['imagePullPolicy'] = "{{ .Values.global.pullPolicy }}"
-            args = container['args']
+
+            args = container.get('args', [])
             refreshed_args = []
             for arg in args:
                 if "--agent-image-name" not in arg:
@@ -329,22 +406,30 @@ def insertFlowControlIfAround(lines_list, first_line_index, last_line_index, if_
    lines_list[first_line_index] = "{{- if %s }}\n%s" % (if_condition, lines_list[first_line_index])
    lines_list[last_line_index] = "%s{{- end }}\n" % lines_list[last_line_index]
 
-def is_version_compatible(branch, min_release_version, min_backplane_version):
+def is_version_compatible(branch, min_release_version, min_backplane_version, min_ocm_version, enforce_master_check=True):
     # Extract the version part from the branch name (e.g., '2.12-integration' -> '2.12')
     pattern = r'(\d+\.\d+)'  # Matches versions like '2.12'
     
-    if branch == "main":
-        return True
+    if branch == "main" or branch == "master":
+        if enforce_master_check:
+            return True
+        else:
+            return False
     
     match = re.search(pattern, branch)
     if match:
         v = match.group(1)  # Extract the version
         branch_version = version.Version(v)  # Create a Version object
         
-        if "release" in branch:
+        if "release-ocm" in branch:
+            min_branch_version = version.Version(min_ocm_version)  # Use the minimum release version
+        
+        elif "release" in branch:
             min_branch_version = version.Version(min_release_version)  # Use the minimum release version
-        elif "backplane" or "mce" in branch:
+
+        elif "backplane" in branch or "mce" in branch:
             min_branch_version = version.Version(min_backplane_version)  # Use the minimum backplane version
+
         else:
             logging.error(f"Unrecognized branch type for branch: {branch}")
             return False
@@ -353,7 +438,6 @@ def is_version_compatible(branch, min_release_version, min_backplane_version):
         return branch_version >= min_branch_version
 
     else:
-        logging.error(f"Version not found in branch: {branch}")
         return False
 
 # injectHelmFlowControl injects advanced helm flow control which would typically make a .yaml file more difficult to parse. This should be called last.
@@ -400,17 +484,17 @@ def injectHelmFlowControl(deployment, branch):
 {{- end }}
 """
 
-#         if is_version_compatible(branch, '2.13', '2.8'):
-#             if 'replicas:' in line.strip():
-#                 lines[i] = """  replicas: {{ .Values.hubconfig.replicaCount }}
-# """
+        if is_version_compatible(branch, '9.9', '9.9', '9.9', False):
+            if 'replicas:' in line.strip():
+                lines[i] = """  replicas: {{ .Values.hubconfig.replicaCount }}
+"""
 
         if line.strip() == "seccompProfile:":
             next_line = lines[i+1]  # Ignore possible reach beyond end-of-list, not really possible
             prev_line = lines[i-1]
             if next_line.strip() == "type: RuntimeDefault" and "semverCompare" not in prev_line:
                 insertFlowControlIfAround(lines, i, i+1, "semverCompare \">=4.11.0\" .Values.hubconfig.ocpVersion")
-                if is_version_compatible(branch, '2.12', '2.7'):
+                if is_version_compatible(branch, '9.9', '2.7', '2.12'):
                     insertFlowControlIfAround(lines, i, i+1, ".Values.global.deployOnOCP")
 
         a_file = open(deployment, "w")
@@ -446,7 +530,6 @@ def updateDeployments(chartName, helmChart, exclusions, inclusions, branch):
         with open(deployment, 'r') as f:
             deploy = yaml.safe_load(f)
         deploy['metadata'].pop('namespace')
-        deploy['spec']['replicas'] = "{{ .Values.hubconfig.replicaCount }}"
         affinityList = deploySpec['affinity']['podAntiAffinity']['preferredDuringSchedulingIgnoredDuringExecution']
         for antiaffinity in affinityList:
             antiaffinity['podAffinityTerm']['labelSelector']['matchExpressions'][0]['values'][0] = deploy['metadata']['name']
@@ -501,6 +584,93 @@ def updateDeployments(chartName, helmChart, exclusions, inclusions, branch):
         injectHelmFlowControl(deployment, branch)
         if 'pullSecretOverride' in inclusions:
             addPullSecretOverride(deployment)
+
+# updateHelmResources adds standard configuration to the generic kubernetes resources
+def updateHelmResources(chartName, helmChart, exclusions, inclusions, branch):
+    logging.info(f"Updating resources chart: {chartName}")
+
+    resource_kinds = [
+        "ClusterRole", "ClusterRoleBinding", "ConfigMap", "Deployment", "MutatingWebhookConfiguration",
+        "NetworkPolicy", "PersistentVolumeClaim", "RoleBinding", "Role", "Route", "Secret", "Service", "StatefulSet",
+        "ValidatingWebhookConfiguration"
+    ]
+
+    namespace_scoped_kinds = [
+        "ConfigMap", "Deployment", "NetworkPolicy", "PersistentVolumeClaim", "RoleBinding", "Role", "Route",
+        "Secret", "Service", "StatefulSet"
+    ]
+
+    for kind in resource_kinds:
+        resource_templates = findTemplatesOfType(helmChart, kind)
+
+        if not resource_templates:
+            logging.warning(f"No {kind} templates found in the Helm chart. [Skipping]")
+        else:
+            logging.info(f"Found {len(resource_templates)} {kind} templates. Beginning processing...")
+
+        for template_path in resource_templates:
+            try:
+                with open(template_path, 'r') as f:
+                    resource_data = yaml.safe_load(f)
+                    resource_name = resource_data['metadata'].get('name', 'unknown')
+                    logging.info(f"Processing resource: {resource_name} from template: {template_path}")
+
+                # Not all resources are namespace-scoped, so we initialize target_namespace as None initially.
+                target_namespace = """{{ .Values.global.namespace }}"""
+
+                if kind in namespace_scoped_kinds:
+                    current_namespace = resource_data['metadata'].get('namespace', None)
+                    if current_namespace is None:
+                        # If no namespace is found, use the default Helm namespace
+                        resource_data['metadata']['namespace'] = target_namespace
+                        logging.info(f"Namespace not set for {resource_name}. Using default '{{ .Values.global.namespace }}'.")
+
+                    else:
+                        # Update target_namespace to reflect the current_namespace
+                        target_namespace = f"{{{{ default \"{current_namespace}\" .Values.global.namespace }}}}"
+                        resource_data['metadata']['namespace'] = target_namespace
+                        logging.info(f"Namespace for {resource_name} set to: {target_namespace} (Helm default used).")
+
+                if chartName != "managed-serviceaccount":
+                    if kind == "ClusterRoleBinding" or kind == "RoleBinding":
+                        if 'subjects' in resource_data:
+                            for subject in resource_data['subjects']:
+                                subject_namespace = subject.get('namespace', None)
+                                if subject_namespace is None:
+                                    # If no namespace is found, use the default Helm namespace
+                                    subject['namespace'] = target_namespace
+
+                                else:
+                                    # Update target_namespace to reflect the subject_namespace
+                                    target_namespace = f"{{{{ default \"{subject_namespace}\" .Values.global.namespace }}}}"
+                                    subject['namespace'] = target_namespace
+                            logging.info(f"Subject namespace for {resource_name} set to: {target_namespace} (Helm default used).")
+
+                if kind == "MutatingWebhookConfiguration" or kind == "ValidatingWebhookConfiguration":
+                    if 'webhooks' in resource_data:
+                        for webhook in resource_data['webhooks']:
+                            if 'clientConfig' in webhook:
+                                client_config = webhook['clientConfig']
+                                if 'service' in client_config:
+                                    service = client_config['service']
+                                    service_namespace = service.get('namespace', None)
+                                    if service_namespace is None:
+                                        service['namespace'] = target_namespace
+
+                                    else:
+                                        # Update target_namespace to reflect the service_namespace
+                                        target_namespace = f"{{{{ default \"{service_namespace}\" .Values.global.namespace }}}}"
+                                        service['namespace'] = target_namespace
+                        logging.info(f"Subject namespace for {resource_name} set to: {target_namespace} (Helm default used).")
+
+                with open(template_path, 'w') as f:
+                    yaml.dump(resource_data, f, width=float("inf"))
+                logging.info(f"Succesfully updated the namespace for resource: {resource_name}")
+
+            except Exception as e:
+                logging.error(f"Error processing template '{template_path}': {e}")
+
+    logging.info("Resource update process completed.")
 
 # injectAnnotationsForAddonTemplate injects following annotations for deployments in the AddonTemplate:
 # - target.workload.openshift.io/management: '{"effect": "PreferredDuringScheduling"}'
@@ -610,11 +780,16 @@ def injectRequirements(helmChart, chartName, imageKeyMapping, skipRBACOverrides,
     fixEnvVarImageReferences(helmChart, imageKeyMapping)
     fixImageReferencesForAddonTemplate(helmChart, imageKeyMapping)
     injectAnnotationsForAddonTemplate(helmChart)
+
     if not skipRBACOverrides:
         updateRBAC(helmChart, chartName)
+    
+    if is_version_compatible(branch, '2.13', '2.8', '2.13'):
+        updateHelmResources(chartName, helmChart, exclusions, inclusions, branch)
+
     updateDeployments(chartName, helmChart, exclusions, inclusions, branch)
 
-    logging.info("Updated Chart '%s' successfully\n", helmChart)
+    logging.info("Updated Chart '%s' successfully", helmChart)
 
 def split_at(the_str, the_delim, favor_right=True):
 
@@ -634,32 +809,48 @@ def split_at(the_str, the_delim, favor_right=True):
 
 def addCRDs(repo, chart, outputDir):
     if not 'chart-path' in chart:
-        logging.critical("Could not validate chart path in given chart: " + chart)
+        logging.critical(f"Chart path missing in the provided chart configuration: {chart}")
         exit(1) 
 
     chartPath = os.path.join(os.path.dirname(os.path.realpath(__file__)), "tmp", repo, chart["chart-path"])
+    logging.debug(f"Chart path resolved to: '{chartPath}'")
+
     if not os.path.exists(chartPath):
-        logging.critical("Could not validate chartPath at given path: " + chartPath)
+        logging.critical(f"Chart path not found at: {chartPath}")
         exit(1)
-    
+        
     crdPath = os.path.join(chartPath, "crds")
     if not os.path.exists(crdPath):
         logging.info(f"No CRDs for repo: {repo}")
         return
+    
+    destinationCRDPath = os.path.join(outputDir, "crds", chart['name'])
+    logging.debug(f"Destination chart path: '{destinationCRDPath}'")
 
-    destinationPath = os.path.join(outputDir, chart['name'], "crds")
-    if os.path.exists(destinationPath): # If path exists, remove and re-clone
-        shutil.rmtree(destinationPath)
-    os.makedirs(destinationPath)
+    if os.path.exists(destinationCRDPath): # If path exists, remove and re-clone
+        logging.warning(f"Destination CRDs path already exists. Removing: {destinationCRDPath}")
+        shutil.rmtree(destinationCRDPath)
+
+    os.makedirs(destinationCRDPath)
+    logging.info(f"Created destination path for CRDs: {destinationCRDPath}")
+
     for filename in os.listdir(crdPath):
         if not filename.endswith(".yaml"): 
+            logging.debug(f"File '{filename}' is not a YAML file. Skipping processing.")
             continue
+
         filepath = os.path.join(crdPath, filename)
         with open(filepath, 'r') as f:
             resourceFile = yaml.safe_load(f)
 
         if resourceFile["kind"] == "CustomResourceDefinition":
-            shutil.copyfile(filepath, os.path.join(destinationPath, filename))
+            targetPath = os.path.join(destinationCRDPath, filename)
+            shutil.copyfile(filepath, targetPath)
+            logging.info(f"Generated CRD file '{filename}'")
+        else:
+            logging.debug(f"Skipping file '{filename}' as it does not contain a CRD.")
+
+    logging.info(f"Finished processing CRDs for chart '{chart['name']}'\n")
 
 def chartConfigAcceptable(chart):
     helmChart = chart["name"]
@@ -671,24 +862,54 @@ def chartConfigAcceptable(chart):
 def getChartVersion(updateChartVersion, repo):
     chartVersion = ""
     if not updateChartVersion:
+        logging.warning("Update chart version flag is not set. Returning default chart version.")
         return chartVersion
 
-    logging.info("Calculating chart version ...")
+    repo_name = repo.get("repo_name", "")
+    logging.info(f"Calculating chart version for repository '{repo_name}'")
+
     if 'branch' not in repo:
-        logging.warning("No branch specified for repo %s, skip.", repo["repo_name"])
+        logging.warning(f"No branch specified for repository '{repo_name}', skipping chart version calculation")
         return chartVersion
+    
+    branch_name = repo['branch']
+    logging.debug(f"Processing branch name: {branch_name}")
 
-    version = repo['branch'].replace("backplane-", "")
+    version = branch_name.replace("release-", "").replace("backplane-", "")
+    logging.debug(f"Extracted version after removing prefix: {version}")
+
     if not version.replace(".", "").isdecimal():
-        logging.warning("Unable to use branch name %s as chart version for repo %s, skip.",
-                        repo['branch'], repo["branch"])
+        logging.warning("Unable to use branch name '%s' as chart version for repo '%s', skip.", branch_name, repo_name)
         return chartVersion
 
     chartVersion = version
-    logging.info("Chart version: %s", chartVersion)
-    # TODO: consider getting chart version from chart template
+    logging.info(f"Detected chart version: {chartVersion}\n")
+
     return chartVersion
 
+def renderChart(chart_path):
+    # Define the path for the values.yaml file
+    values_file_path = os.path.join(chart_path, 'values.yaml')
+    
+    # Load the values from the values.yaml file
+    with open(values_file_path, 'r') as f:
+        values = yaml.safe_load(f)
+
+    try:
+        # Use the Helm command to render the chart
+        logging.info("Rendering chart '%s'...", chart_path)
+        subprocess.run(
+            ['helm', 'template', chart_path, '-f', values_file_path],
+            check=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE
+        )
+        logging.info("Chart rendered successfully.")
+        return True
+
+    except subprocess.CalledProcessError as e:
+        logging.error("Error rendering chart: %s", e.stderr.decode())
+        return False
 
 def main():
     ## Initialize ArgParser
@@ -739,31 +960,49 @@ def main():
                 logging.critical("Unable to generate helm chart without configuration requirements.")
                 exit(1)
 
-            logging.info("Helm Chartifying -  %s!\n", chart["name"])
+            chart_name = chart.get("name", "")
+            logging.info(f"Helm Chartifying: '{chart_name}'")
 
-            logging.info("Adding CRDs -  %s!\n", chart["name"])
             # Copy over all CRDs to the destination directory
+            logging.info(f"Adding CRDs for chart: '{chart_name}'")
             addCRDs(repo["repo_name"], chart, destination)
 
-            logging.info("Creating helm chart: '%s' ...", chart["name"])
-
+            logging.info(f"Creating helm chart: '{chart_name}'")
             always_or_toggle = chart['always-or-toggle']
             destinationChartPath = os.path.join(destination, "charts", always_or_toggle, chart['name'])
 
+            # Extract the chart version from the charts configuration, 
+            # ensuring the version is derived from the repository branch when applicable.
             chartVersion = getChartVersion(chart['updateChartVersion'], repo)
 
             # Template Helm Chart Directory from 'chart-templates'
-            logging.info("Templating helm chart '%s' ...", chart["name"])
+            logging.info(f"Templating helm chart '{chart_name}'")
             copyHelmChart(destinationChartPath, repo["repo_name"], chart, chartVersion)
 
+            # Render the helm chart before updating the chart resources.
+            if not renderChart(destinationChartPath):
+                logging.error(f"Failed to render chart {destinationChartPath}")
+            
+            # Update the helm chart resources with additional overrides
             updateResources(destination, repo["repo_name"], chart)
 
             if not skipOverrides:
                 logging.info("Adding Overrides (set --skipOverrides=true to skip) ...")
-                exclusions = chart["exclusions"] if "exclusions" in chart else []
-                inclusions = chart["inclusions"] if "inclusions" in chart else []
-                injectRequirements(destinationChartPath, chart["name"], chart["imageMappings"], chart["skipRBACOverrides"], exclusions, inclusions, branch)
-                logging.info("Overrides added. \n")
+                image_mappings = chart.get("imageMappings", {})
+                exclusions = chart.get("exclusions", [])
+                inclusions = chart.get("inclusions", [])
+                skip_rbac_overrides = chart.get("skipRBACOverrides", False)
+
+                injectRequirements(destinationChartPath, chart_name, image_mappings, skip_rbac_overrides, exclusions,
+                                   inclusions, branch)
+                logging.info("Overrides added.\n")
+
+    logging.info("All repositories and operators processed successfully.")
+    logging.info("Performing cleanup...")
+    shutil.rmtree((os.path.join(os.path.dirname(os.path.realpath(__file__)), "tmp")), ignore_errors=True)
+
+    logging.info("Cleanup completed.")
+    logging.info("Script execution completed.")
 
 if __name__ == "__main__":
    main()
