@@ -649,6 +649,11 @@ def updateHelmResources(chartName, helmChart, exclusions, inclusions, branch):
                 if kind == "ClusterRole":
                     resource_data['metadata']['name'] = 'flightctl-api-{{ .Values.global.namespace }}'
 
+                if kind == "NetworkPolicy":
+                    new_values = ["{{ .Values.global.namespace }}", "openshift-console"]
+                    resource_data['spec']['ingress'][0]['from'][0]['namespaceSelector']['matchExpressions'][0]['values'] = new_values
+
+
 
                 if chartName != "managed-serviceaccount":
                     if kind == "ClusterRoleBinding" or kind == "RoleBinding":
