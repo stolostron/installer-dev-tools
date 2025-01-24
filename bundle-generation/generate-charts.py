@@ -642,7 +642,7 @@ def updateHelmResources(chartName, helmChart, exclusions, inclusions, branch):
                         # resource_data['data']['service']['url']['url'] = """api.{{ .Values.global.baseDomain  }}.3443"""
                         # resource_data['data']['auth']['k8s']['externalOpenShiftApiUrl'] = """{{  .Values.global.aPIUrl }}"""
                         # resource_data['data']['database']['hostname'] = """flightctl-db.{{  .Values.global.namespace }}.svc.cluster.local"""
-                    data['data']['config.yaml'] = data['data']['config.yaml'].replace('flightctl-db.open-cluster-management.svc.cluster.local', '{{ .Values.global.baseDomain  }}')
+                    resource_data['data']['config.yaml'] = data['data']['config.yaml'].replace('flightctl-db.open-cluster-management.svc.cluster.local', '{{ .Values.global.baseDomain  }}')
 
                 if chartName != "managed-serviceaccount":
                     if kind == "ClusterRoleBinding" or kind == "RoleBinding":
