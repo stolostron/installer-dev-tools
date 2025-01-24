@@ -629,29 +629,29 @@ def updateHelmResources(chartName, helmChart, exclusions, inclusions, branch):
                         target_namespace = f"{{{{ default \"{current_namespace}\" .Values.global.namespace }}}}"
                         resource_data['metadata']['namespace'] = target_namespace
                         logging.info(f"Namespace for {resource_name} set to: {target_namespace} (Helm default used).")
-                
-                if kind == 'Route':
-                    if resource_name == 'flightctl-api-route':
-                        resource_data['spec']['host'] = """api.{{ .Values.global.baseDomain  }}"""
-                    if resource_name == 'flightctl-api-route-agent':
-                        resource_data['spec']['host'] = """agent-api.{{ .Values.global.baseDomain  }}"""
+                if chartName == 'flightctl':
+                    if kind == 'Route':
+                        if resource_name == 'flightctl-api-route':
+                            resource_data['spec']['host'] = """api.{{ .Values.global.baseDomain  }}"""
+                        if resource_name == 'flightctl-api-route-agent':
+                            resource_data['spec']['host'] = """agent-api.{{ .Values.global.baseDomain  }}"""
 
-                if kind == 'ConfigMap':
-                    resource_data['metadata']['namespace'] = '{{ .Values.global.namespace  }}'
-                    if 'config.yaml' in resource_data['data']:
-                        resource_data['data']['config.yaml'] = resource_data['data']['config.yaml'].replace('open-cluster-management', '{{ .Values.global.namespace  }}')
-                        resource_data['data']['config.yaml'] = resource_data['data']['config.yaml'].replace('placeholder-url', '{{ .Values.global.aPIUrl  }}')
-                        resource_data['data']['config.yaml'] = resource_data['data']['config.yaml'].replace('placeholder-basedomain', '{{ .Values.global.baseDomain  }}')
+                    if kind == 'ConfigMap':
+                        resource_data['metadata']['namespace'] = '{{ .Values.global.namespace  }}'
+                        if 'config.yaml' in resource_data['data']:
+                            resource_data['data']['config.yaml'] = resource_data['data']['config.yaml'].replace('open-cluster-management', '{{ .Values.global.namespace  }}')
+                            resource_data['data']['config.yaml'] = resource_data['data']['config.yaml'].replace('placeholder-url', '{{ .Values.global.aPIUrl  }}')
+                            resource_data['data']['config.yaml'] = resource_data['data']['config.yaml'].replace('placeholder-basedomain', '{{ .Values.global.baseDomain  }}')
                 
-                if kind == "ClusterRoleBinding":
-                    resource_data['metadata']['name'] = 'flightctl-api-{{ .Values.global.namespace }}'
-                    resource_data['roleRef']['name'] = 'flightctl-api-{{ .Values.global.namespace }}'
-                if kind == "ClusterRole":
-                    resource_data['metadata']['name'] = 'flightctl-api-{{ .Values.global.namespace }}'
+                    if kind == "ClusterRoleBinding":
+                        resource_data['metadata']['name'] = 'flightctl-api-{{ .Values.global.namespace }}'
+                        resource_data['roleRef']['name'] = 'flightctl-api-{{ .Values.global.namespace }}'
+                    if kind == "ClusterRole":
+                        resource_data['metadata']['name'] = 'flightctl-api-{{ .Values.global.namespace }}'
 
-                if kind == "NetworkPolicy":
-                    new_values = ["{{ .Values.global.namespace }}", "openshift-console"]
-                    resource_data['spec']['ingress'][0]['from'][0]['namespaceSelector']['matchExpressions'][0]['values'] = new_values
+                    if kind == "NetworkPolicy":
+                        new_values = ["{{ .Values.global.namespace }}", "openshift-console"]
+                        resource_data['spec']['ingress'][0]['from'][0]['namespaceSelector']['matchExpressions'][0]['values'] = new_values
 
 
 
