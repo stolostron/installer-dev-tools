@@ -602,7 +602,6 @@ def updateHelmResources(chartName, helmChart, exclusions, inclusions, branch):
 
     for kind in resource_kinds:
         resource_templates = findTemplatesOfType(helmChart, kind)
-
         if not resource_templates:
             logging.warning(f"No {kind} templates found in the Helm chart. [Skipping]")
         else:
@@ -620,7 +619,7 @@ def updateHelmResources(chartName, helmChart, exclusions, inclusions, branch):
 
                 if kind in namespace_scoped_kinds:
                     current_namespace = resource_data['metadata'].get('namespace', None)
-                    if current_namespace is None:
+                    if current_namespace is None or chartName == 'flight-control':
                         # If no namespace is found, use the default Helm namespace
                         resource_data['metadata']['namespace'] = target_namespace
                         logging.info(f"Namespace not set for {resource_name}. Using default '{{ .Values.global.namespace }}'.")
@@ -630,6 +629,18 @@ def updateHelmResources(chartName, helmChart, exclusions, inclusions, branch):
                         target_namespace = f"{{{{ default \"{current_namespace}\" .Values.global.namespace }}}}"
                         resource_data['metadata']['namespace'] = target_namespace
                         logging.info(f"Namespace for {resource_name} set to: {target_namespace} (Helm default used).")
+                if kind == 'Route':
+                    if resource_name == 'flightctl-api-route':
+                        resource_data['spec']['host'] = """api.{{ .Values.global.baseDomain  }}"""
+                    if resource_name == 'flightctl-api-route-agent':
+                        resource_data['spec']['host'] = """agent-api.{{ .Values.global.baseDomain  }}"""
+
+                if kind == 'ConfigMap':
+                    # if resource_name == 'flightctl-api-config':
+                    resource_data['metadata']['namespace'] = '{{ .Values.global.namespace  }}'
+                    resource_data['data']['config.yaml'] = resource_data['data']['config.yaml'].replace('open-cluster-management', '{{ .Values.global.namespace  }}')
+                    resource_data['data']['config.yaml'] = resource_data['data']['config.yaml'].replace('placeholder-url', '{{ .Values.global.aPIUrl  }}')
+                    resource_data['data']['config.yaml'] = resource_data['data']['config.yaml'].replace('placeholder-basedomain', '{{ .Values.global.baseDomain  }}')
 
                 if chartName != "managed-serviceaccount":
                     if kind == "ClusterRoleBinding" or kind == "RoleBinding":
