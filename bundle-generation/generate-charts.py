@@ -642,12 +642,11 @@ def updateHelmResources(chartName, helmChart, exclusions, inclusions, branch):
                     resource_data['data']['config.yaml'] = resource_data['data']['config.yaml'].replace('placeholder-url', '{{ .Values.global.aPIUrl  }}')
                     resource_data['data']['config.yaml'] = resource_data['data']['config.yaml'].replace('placeholder-basedomain', '{{ .Values.global.baseDomain  }}')
                 
-                if chartName == "flightctl":
-                    if kind == "ClusterRoleBinding":
-                        resource_data['metadata']['name'] = 'flightctl-api-{{ .Values.global.namespace }}'
-                        resource_data['roleref']['name'] = 'flightctl-api-{{ .Values.global.namespace }}'
-                    if kind ==  "ClusterRole":
-                        resource_data['metadata']['name'] = 'flightctl-api-{{ .Values.global.namespace }}'
+                if kind == "ClusterRoleBinding":
+                    resource_data['metadata']['name'] = 'flightctl-api-{{ .Values.global.namespace }}'
+                    resource_data['roleref']['name'] = 'flightctl-api-{{ .Values.global.namespace }}'
+                if kind ==  "ClusterRole":
+                    resource_data['metadata']['name'] = 'flightctl-api-{{ .Values.global.namespace }}'
 
 
                 if chartName != "managed-serviceaccount":
