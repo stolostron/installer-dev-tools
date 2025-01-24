@@ -652,7 +652,6 @@ def updateHelmResources(chartName, helmChart, exclusions, inclusions, branch):
 
                 if chartName != "managed-serviceaccount":
                     if kind == "ClusterRoleBinding" or kind == "RoleBinding":
-                        resource_data['metadata']['name'] 
                         if 'subjects' in resource_data:
                             for subject in resource_data['subjects']:
                                 subject_namespace = subject.get('namespace', None)
