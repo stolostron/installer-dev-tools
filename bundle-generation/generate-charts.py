@@ -637,12 +637,10 @@ def updateHelmResources(chartName, helmChart, exclusions, inclusions, branch):
 
                 if kind == 'ConfigMap':
                     # if resource_name == 'flightctl-api-config':
-                    logging.warning("we are inside the config map")
-                    resource_data['metadata']['namespace'] = 'Cameron'
-                        # resource_data['data']['service']['url']['url'] = """api.{{ .Values.global.baseDomain  }}.3443"""
-                        # resource_data['data']['auth']['k8s']['externalOpenShiftApiUrl'] = """{{  .Values.global.aPIUrl }}"""
-                        # resource_data['data']['database']['hostname'] = """flightctl-db.{{  .Values.global.namespace }}.svc.cluster.local"""
-                    resource_data['data']['config.yaml'] = resource_data['data']['config.yaml'].replace('flightctl-db.open-cluster-management.svc.cluster.local', '{{ .Values.global.baseDomain  }}')
+                    resource_data['metadata']['namespace'] = '{{ .Values.global.namespace  }}'
+                    resource_data['data']['config.yaml'] = resource_data['data']['config.yaml'].replace('open-cluster-management', '{{ .Values.global.namespace  }}')
+                    resource_data['data']['config.yaml'] = resource_data['data']['config.yaml'].replace('placeholder-url', '{{ .Values.global.aPIUrl  }}')
+                    resource_data['data']['config.yaml'] = resource_data['data']['config.yaml'].replace('placeholder-basedomain', '{{ .Values.global.basedommain  }}')
 
                 if chartName != "managed-serviceaccount":
                     if kind == "ClusterRoleBinding" or kind == "RoleBinding":
