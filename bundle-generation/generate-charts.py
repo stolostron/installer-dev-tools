@@ -638,9 +638,10 @@ def updateHelmResources(chartName, helmChart, exclusions, inclusions, branch):
 
                 if kind == 'ConfigMap':
                     resource_data['metadata']['namespace'] = '{{ .Values.global.namespace  }}'
-                    resource_data['data']['config.yaml'] = resource_data['data']['config.yaml'].replace('open-cluster-management', '{{ .Values.global.namespace  }}')
-                    resource_data['data']['config.yaml'] = resource_data['data']['config.yaml'].replace('placeholder-url', '{{ .Values.global.aPIUrl  }}')
-                    resource_data['data']['config.yaml'] = resource_data['data']['config.yaml'].replace('placeholder-basedomain', '{{ .Values.global.baseDomain  }}')
+                    if 'config.yaml' in resource_data::
+                        resource_data['data']['config.yaml'] = resource_data['data']['config.yaml'].replace('open-cluster-management', '{{ .Values.global.namespace  }}')
+                        resource_data['data']['config.yaml'] = resource_data['data']['config.yaml'].replace('placeholder-url', '{{ .Values.global.aPIUrl  }}')
+                        resource_data['data']['config.yaml'] = resource_data['data']['config.yaml'].replace('placeholder-basedomain', '{{ .Values.global.baseDomain  }}')
                 
                 if kind == "ClusterRoleBinding":
                     logging.warning("we are at least getting this fa rCRV")
