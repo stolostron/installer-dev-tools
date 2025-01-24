@@ -640,7 +640,7 @@ def updateHelmResources(chartName, helmChart, exclusions, inclusions, branch):
                     resource_data['metadata']['namespace'] = '{{ .Values.global.namespace  }}'
                     resource_data['data']['config.yaml'] = resource_data['data']['config.yaml'].replace('open-cluster-management', '{{ .Values.global.namespace  }}')
                     resource_data['data']['config.yaml'] = resource_data['data']['config.yaml'].replace('placeholder-url', '{{ .Values.global.aPIUrl  }}')
-                    resource_data['data']['config.yaml'] = resource_data['data']['config.yaml'].replace('placeholder-basedomain', '{{ .Values.global.basedommain  }}')
+                    resource_data['data']['config.yaml'] = resource_data['data']['config.yaml'].replace('placeholder-basedomain', '{{ .Values.global.baseDomain  }}')
 
                 if chartName != "managed-serviceaccount":
                     if kind == "ClusterRoleBinding" or kind == "RoleBinding":
