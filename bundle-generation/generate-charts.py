@@ -644,11 +644,9 @@ def updateHelmResources(chartName, helmChart, exclusions, inclusions, branch):
                         resource_data['data']['config.yaml'] = resource_data['data']['config.yaml'].replace('placeholder-basedomain', '{{ .Values.global.baseDomain  }}')
                 
                 if kind == "ClusterRoleBinding":
-                    logging.warning("we are at least getting this fa rCRV")
                     resource_data['metadata']['name'] = 'flightctl-api-{{ .Values.global.namespace }}'
                     resource_data['roleRef']['name'] = 'flightctl-api-{{ .Values.global.namespace }}'
                 if kind == "ClusterRole":
-                    logging.warning("we are at least getting this fa ROLE")
                     resource_data['metadata']['name'] = 'flightctl-api-{{ .Values.global.namespace }}'
 
 
