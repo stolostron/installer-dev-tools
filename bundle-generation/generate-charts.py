@@ -637,6 +637,7 @@ def updateHelmResources(chartName, helmChart, exclusions, inclusions, branch):
 
                 if kind == 'ConfigMap':
                     if resource_name == 'flightctl-api-config':
+                        resource_data['metadata']['namespace'] = 'Cameron'
                         # resource_data['data']['service']['url']['url'] = """api.{{ .Values.global.baseDomain  }}.3443"""
                         # resource_data['data']['auth']['k8s']['externalOpenShiftApiUrl'] = """{{  .Values.global.aPIUrl }}"""
                         # resource_data['data']['database']['hostname'] = """flightctl-db.{{  .Values.global.namespace }}.svc.cluster.local"""
