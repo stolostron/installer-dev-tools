@@ -270,125 +270,64 @@ def addNamespaceScopedRBAC(helmChart, rbacMap):
     logging.info("Rolebinding '%s-rolebinding.yaml' updated successfully.", name)
     logging.info("Namespace scoped RBAC created.\n")
 
-def process_csv_section(csv_data, section, handler_func, helm_chart):
-    section_data = csv_data.get('spec', {}).get('install', {}).get('spec', {}).get(section)
-    if section_data:
-        for item in section_data:
-            handler_func(helm_chart, item)
-            
-def check_unsupported_csv_resources(csv_path, csv_data, supported_config_types):
-    """Check if there are unsupported resource types in the CSV."""
-    unsupported_resources = [
-        resource for resource in csv_data['spec']['install']['spec']
-        if resource not in supported_config_types
-    ]
-
-    if unsupported_resources:
-        logging.error("Found unsupported resources in the CSV: '%s' in '%s'", 
-                      ", ".join(unsupported_resources), csv_path)
-        logging.error("Some resources in the CSV are not supported. Please review the CSV file.")
-        return True
-        
-    return False
-
 # Adds resources identified in the CSV to the helmchart
-def extract_csv_resources(helm_chart, csv_path):
-    logging.info("Reading CSV file: '%s'", csv_path)
+def addResources(helmChart, csvPath):
+    logging.info("Reading CSV '%s'\n", csvPath)
 
-    try:
-        with open(csv_path, 'r') as f:
-            csv_data = yaml.safe_load(f)
-    except Exception as e:
-        logging.error("Unexpected error occured while processing file '%s': %s", csv_path, e)
-        return
-
+    # Read CSV    
+    with open(csvPath, 'r') as f:
+        csv = yaml.safe_load(f)
+    
     logging.info("Checking for deployments, clusterpermissions, and permissions.\n")
-    supported_csv_install_spec_types = ["customResourceDefinitions","clusterPermissions", "deployments", "permissions"]
-
-    # Process deployments
-    process_csv_section(csv_data, "deployments", addDeployment, helm_chart)
+    # Check for deployments
+    for deployment in csv['spec']['install']['spec']['deployments']:
+        addDeployment(helmChart, deployment)
+    # Check for clusterroles, clusterrolebindings, and serviceaccounts
+    if 'clusterPermissions' in csv['spec']['install']['spec']:
+        clusterPermissions = csv['spec']['install']['spec']['clusterPermissions']
+        for clusterRole in clusterPermissions:
+            addClusterScopedRBAC(helmChart, clusterRole)
+    # Check for roles, rolebindings, and serviceaccounts
+    if 'permissions' in csv['spec']['install']['spec']:
+        permissions = csv['spec']['install']['spec']['permissions']
+        for role in permissions:
+            addNamespaceScopedRBAC(helmChart, role)
+    logging.info("Resources have been successfully added to chart '%s' from CSV '%s'.\n", helmChart, csvPath)
     
-    # Process clusterPermissions (ClusterRoles)
-    process_csv_section(csv_data, "clusterPermissions", addClusterScopedRBAC, helm_chart)
+    logging.info("Check to see if there are resources in the csv that aren't getting picked up")
+    handleAllFiles = False
+    # Current list of resources we handle
+    listOfResourcesAdded = ["deployments", "clusterPermissions", "permissions", "CustomResourceDefinition"]
+    for resource in csv['spec']['install']['spec']:
+        if resource not in listOfResourcesAdded:
+            logging.error("Found a resource in the csv not being handled called '%s' in '%s'", resource, csvPath)
+            handleAllFiles = True
 
-    # Process permissions (Roles)
-    process_csv_section(csv_data, "permissions", addNamespaceScopedRBAC, helm_chart)
-
-    logging.info("Resources have been successfully added to chart '%s' from CSV '%s'.\n", helm_chart, csv_path)
-    
-    if check_unsupported_csv_resources(csv_data, csv_data, supported_csv_install_spec_types):
-        exit(1)
-
-# Copies additional resources from the CSV directory to the Helm chart
-def copy_additional_resources(helmChart, csvPath):
-    logging.info("Copying additional resources from the bundle manifests if present ...")
-
+    logging.info("Copying over other resources in the bundle if they exist ...")
     dirPath = os.path.dirname(csvPath)
-    logging.info("Reading resources from directory: '%s'", dirPath)
-
-    # List of resources that are required for the OLM bundle (currently, empty but can be expanded)
-    required_bundle_resource_types = []
-
-    # List of optional resources that are supported by the OLM bundle
-    optional_supported_bundle_resourceTypes = ["ClusterRole", "ClusterRoleBinding", "ConfigMap", "ConsoleCLIDownload",
-    "ConsoleLink", "ConsoleQuickStart", "ConsoleYamlSample", "PodDisruptionBudget", "PriorityClass", "PrometheusRule",
-    "Role", "RoleBinding", "Secret", "Service", "ServiceAccount", "ServiceMonitor", "VerticalPodAutoscaler"]
-
-    # List of resources that are allowed but not be explicitly handled by the OLM bundle
-    allowed_bundle_resource_types = ["AddOnTemplate", "ClusterManagementAddOn"]
-
-    # List of resources that should be ignored or excluded from the copy process (not copied to Helm chart)
-    ignored_or_excluded_bundle_resource_types = ["ClusterServiceVersion", "CustomResourceDefinition"]
-    
-    # List of resources that should be **expected** in the OLM bundle, including both required and optional resources.
-    expected_bundle_resource_types = required_bundle_resource_types + optional_supported_bundle_resourceTypes 
-    
-    # List of collected unsupported resource types found in the bundle manifest
-    unsupported_resources = []
-
+    logging.info("From directory '%s'", dirPath)
+    otherBundleResourceTypes = ["ClusterRole", "ClusterRoleBinding", "Role", "RoleBinding", "Service", "ConfigMap"]
+    # list of files we handle currently
+    listOfFilesAdded = ["ClusterRole", "ClusterRoleBinding", "Role", 
+    "RoleBinding", "Service", "ClusterManagementAddOn", "CustomResourceDefinition", "ClusterServiceVersion", "ConfigMap"]
     for filename in os.listdir(dirPath):
         if filename.endswith(".yaml") or filename.endswith(".yml"):
             filePath = os.path.join(dirPath, filename)
-            try:
-                with open(filePath, 'r') as f:
-                    fileYml = yaml.safe_load(f)
-            except Exception as e:
-                logging.error("Unexpected error occured while processing file '%s': %s", filePath, e)
+            with open(filePath, 'r') as f:
+                fileYml = yaml.safe_load(f)
+            if "kind" not in fileYml:
                 continue
-
-            # Extract the 'kind' of the resource from the YAML file
-            resourceKind = fileYml.get("kind", None)
-            if resourceKind is None:
-                logging.warning("Skipping file '%s' as it does not define a 'kind' attribute.", filename)
-                continue
-
-            # Skip ignored or excluded resource types
-            if resourceKind in ignored_or_excluded_bundle_resource_types:
-                logging.warning("Skipping ignored/excluded resource type '%s' from file '%s'.", resourceKind, filename)
-                continue
-            
-            # Handle white-listed resources (allowed but not handled by the OLM bundle)
-            elif resourceKind in allowed_bundle_resource_types:
-                logging.info("Copying white listed resource '%s' from file '%s' to Helm chart.", resourceKind, filename)
+            if fileYml['kind'] in otherBundleResourceTypes:
                 shutil.copyfile(filePath, os.path.join(helmChart, "templates", os.path.basename(filePath)))
-                continue
-
-            # Handle expected resources (both required and optional)
-            elif resourceKind in expected_bundle_resource_types:
-                logging.info("Copying expected resource type '%s' from file '%s' to Helm chart.", resourceKind, filename)
-                shutil.copyfile(filePath, os.path.join(helmChart, "templates", os.path.basename(filePath)))
-                continue
-
-            # Log unsupported resources
-            else:
-                logging.warning("Unsupported resource type '%s' found in file '%s'.", resourceKind, filename)
-                unsupported_resources.append(resourceKind)
-
-    if unsupported_resources:
-        logging.error("Found unsupported resources in the bundle manifest: %s. Terminating process.",
-            ", ".join(set(unsupported_resources)))  # Use `set` to avoid duplicates
+            if fileYml['kind'] not in listOfFilesAdded:
+                logging.error("Found a file of a resource that is not being handled called '%s' in '%s", fileYml['kind'],dirPath)
+                handleAllFiles = True
+            continue
+        else:
+            continue
+    if handleAllFiles:
+        logging.error("Found a resource in either the manifest or csv we aren't handling")
         sys.exit(1)
-
 # Given a resource Kind, return all filepaths of that resource type in a chart directory
 def findTemplatesOfType(helmChart, kind):
     resources = []
@@ -1079,8 +1018,7 @@ def main():
 
             # Add all basic resources to the helm chart from the CSV
             logging.info("Adding Resources from CSV to helm chart '%s' ...", operator["name"])
-            extract_csv_resources(helmChart, csvPath)
-            copy_additional_resources(helmChart, csvPath)
+            addResources(helmChart, csvPath)
             logging.info("Resources added from CSV successfully.\n")
 
             # Copy over all ClusterManagementAddons to the destination directory
