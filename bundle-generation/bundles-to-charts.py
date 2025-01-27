@@ -7,7 +7,6 @@ import argparse
 import os
 import shutil
 import yaml
-import array
 import logging
 import coloredlogs
 import sys
@@ -270,64 +269,125 @@ def addNamespaceScopedRBAC(helmChart, rbacMap):
     logging.info("Rolebinding '%s-rolebinding.yaml' updated successfully.", name)
     logging.info("Namespace scoped RBAC created.\n")
 
+def process_csv_section(csv_data, section, handler_func, helm_chart):
+    section_data = csv_data.get('spec', {}).get('install', {}).get('spec', {}).get(section)
+    if section_data:
+        for item in section_data:
+            handler_func(helm_chart, item)
+
+def check_unsupported_csv_resources(csv_path, csv_data, supported_config_types):
+    """Check if there are unsupported resource types in the CSV."""
+    unsupported_resources = [
+        resource for resource in csv_data['spec']['install']['spec']
+        if resource not in supported_config_types
+    ]
+
+    if unsupported_resources:
+        logging.error("Found unsupported resources in the CSV: '%s' in '%s'",
+                      ", ".join(unsupported_resources), csv_path)
+        logging.error("Some resources in the CSV are not supported. Please review the CSV file.")
+        return True
+
+    return False
+
 # Adds resources identified in the CSV to the helmchart
-def addResources(helmChart, csvPath):
-    logging.info("Reading CSV '%s'\n", csvPath)
+def extract_csv_resources(helm_chart, csv_path):
+    logging.info("Reading CSV file: '%s'", csv_path)
 
-    # Read CSV    
-    with open(csvPath, 'r') as f:
-        csv = yaml.safe_load(f)
-    
+    try:
+        with open(csv_path, 'r') as f:
+            csv_data = yaml.safe_load(f)
+    except Exception as e:
+        logging.error("Unexpected error occured while processing file '%s': %s", csv_path, e)
+        return
+
     logging.info("Checking for deployments, clusterpermissions, and permissions.\n")
-    # Check for deployments
-    for deployment in csv['spec']['install']['spec']['deployments']:
-        addDeployment(helmChart, deployment)
-    # Check for clusterroles, clusterrolebindings, and serviceaccounts
-    if 'clusterPermissions' in csv['spec']['install']['spec']:
-        clusterPermissions = csv['spec']['install']['spec']['clusterPermissions']
-        for clusterRole in clusterPermissions:
-            addClusterScopedRBAC(helmChart, clusterRole)
-    # Check for roles, rolebindings, and serviceaccounts
-    if 'permissions' in csv['spec']['install']['spec']:
-        permissions = csv['spec']['install']['spec']['permissions']
-        for role in permissions:
-            addNamespaceScopedRBAC(helmChart, role)
-    logging.info("Resources have been successfully added to chart '%s' from CSV '%s'.\n", helmChart, csvPath)
-    
-    logging.info("Check to see if there are resources in the csv that aren't getting picked up")
-    handleAllFiles = False
-    # Current list of resources we handle
-    listOfResourcesAdded = ["deployments", "clusterPermissions", "permissions", "CustomResourceDefinition"]
-    for resource in csv['spec']['install']['spec']:
-        if resource not in listOfResourcesAdded:
-            logging.error("Found a resource in the csv not being handled called '%s' in '%s'", resource, csvPath)
-            handleAllFiles = True
+    supported_csv_install_spec_types = ["customResourceDefinitions","clusterPermissions", "deployments", "permissions"]
 
-    logging.info("Copying over other resources in the bundle if they exist ...")
+    # Process deployments
+    process_csv_section(csv_data, "deployments", addDeployment, helm_chart)
+
+    # Process clusterPermissions (ClusterRoles)
+    process_csv_section(csv_data, "clusterPermissions", addClusterScopedRBAC, helm_chart)
+
+    # Process permissions (Roles)
+    process_csv_section(csv_data, "permissions", addNamespaceScopedRBAC, helm_chart)
+
+    logging.info("Resources have been successfully added to chart '%s' from CSV '%s'.\n", helm_chart, csv_path)
+
+    if check_unsupported_csv_resources(csv_data, csv_data, supported_csv_install_spec_types):
+        exit(1)
+
+# Copies additional resources from the CSV directory to the Helm chart
+def copy_additional_resources(helmChart, csvPath):
+    logging.info("Copying additional resources from the bundle manifests if present ...")
+
     dirPath = os.path.dirname(csvPath)
-    logging.info("From directory '%s'", dirPath)
-    otherBundleResourceTypes = ["ClusterRole", "ClusterRoleBinding", "Role", "RoleBinding", "Service", "ConfigMap"]
-    # list of files we handle currently
-    listOfFilesAdded = ["ClusterRole", "ClusterRoleBinding", "Role", 
-    "RoleBinding", "Service", "ClusterManagementAddOn", "CustomResourceDefinition", "ClusterServiceVersion", "ConfigMap"]
+    logging.info("Reading resources from directory: '%s'", dirPath)
+
+    # List of resources that are required for the OLM bundle (currently, empty but can be expanded)
+    required_bundle_resource_types = []
+
+    # List of optional resources that are supported by the OLM bundle
+    optional_supported_bundle_resourceTypes = ["ClusterRole", "ClusterRoleBinding", "ConfigMap", "ConsoleCLIDownload",
+    "ConsoleLink", "ConsoleQuickStart", "ConsoleYamlSample", "PodDisruptionBudget", "PriorityClass", "PrometheusRule",
+    "Role", "RoleBinding", "Secret", "Service", "ServiceAccount", "ServiceMonitor", "VerticalPodAutoscaler"]
+
+    # List of resources that are allowed but not be explicitly handled by the OLM bundle
+    allowed_bundle_resource_types = ["AddOnTemplate", "ClusterManagementAddOn"]
+
+    # List of resources that should be ignored or excluded from the copy process (not copied to Helm chart)
+    ignored_or_excluded_bundle_resource_types = ["ClusterServiceVersion", "CustomResourceDefinition"]
+
+    # List of resources that should be **expected** in the OLM bundle, including both required and optional resources.
+    expected_bundle_resource_types = required_bundle_resource_types + optional_supported_bundle_resourceTypes 
+
+    # List of collected unsupported resource types found in the bundle manifest
+    unsupported_resources = []
+
     for filename in os.listdir(dirPath):
         if filename.endswith(".yaml") or filename.endswith(".yml"):
             filePath = os.path.join(dirPath, filename)
-            with open(filePath, 'r') as f:
-                fileYml = yaml.safe_load(f)
-            if "kind" not in fileYml:
+            try:
+                with open(filePath, 'r') as f:
+                    fileYml = yaml.safe_load(f)
+            except Exception as e:
+                logging.error("Unexpected error occured while processing file '%s': %s", filePath, e)
                 continue
-            if fileYml['kind'] in otherBundleResourceTypes:
+
+            # Extract the 'kind' of the resource from the YAML file
+            resourceKind = fileYml.get("kind", None)
+            if resourceKind is None:
+                logging.warning("Skipping file '%s' as it does not define a 'kind' attribute.", filename)
+                continue
+
+            # Skip ignored or excluded resource types
+            if resourceKind in ignored_or_excluded_bundle_resource_types:
+                logging.warning("Skipping ignored/excluded resource type '%s' from file '%s'.", resourceKind, filename)
+                continue
+
+            # Handle white-listed resources (allowed but not handled by the OLM bundle)
+            elif resourceKind in allowed_bundle_resource_types:
+                logging.info("Copying white listed resource '%s' from file '%s' to Helm chart.", resourceKind, filename)
                 shutil.copyfile(filePath, os.path.join(helmChart, "templates", os.path.basename(filePath)))
-            if fileYml['kind'] not in listOfFilesAdded:
-                logging.error("Found a file of a resource that is not being handled called '%s' in '%s", fileYml['kind'],dirPath)
-                handleAllFiles = True
-            continue
-        else:
-            continue
-    if handleAllFiles:
-        logging.error("Found a resource in either the manifest or csv we aren't handling")
+                continue
+
+            # Handle expected resources (both required and optional)
+            elif resourceKind in expected_bundle_resource_types:
+                logging.info("Copying expected resource type '%s' from file '%s' to Helm chart.", resourceKind, filename)
+                shutil.copyfile(filePath, os.path.join(helmChart, "templates", os.path.basename(filePath)))
+                continue
+
+            # Log unsupported resources
+            else:
+                logging.warning("Unsupported resource type '%s' found in file '%s'.", resourceKind, filename)
+                unsupported_resources.append(resourceKind)
+
+    if unsupported_resources:
+        logging.error("Found unsupported resources in the bundle manifest: %s. Terminating process.",
+            ", ".join(set(unsupported_resources)))  # Use `set` to avoid duplicates
         sys.exit(1)
+
 # Given a resource Kind, return all filepaths of that resource type in a chart directory
 def findTemplatesOfType(helmChart, kind):
     resources = []
@@ -356,12 +416,12 @@ def fixEnvVarImageReferences(helmChart, imageKeyMapping):
     for deployment in deployments:
         with open(deployment, 'r') as f:
             deploy = yaml.safe_load(f)
-        
+
         containers = deploy['spec']['template']['spec']['containers']
         for container in containers:
             if 'env' not in container: 
                 continue
-            
+
             for env in container['env']:
                 image_key = env['name']
                 if image_key.endswith('_IMAGE') == False:
@@ -390,14 +450,14 @@ def fixImageReferences(helmChart, imageKeyMapping):
     valuesYaml = os.path.join(helmChart, "values.yaml")
     with open(valuesYaml, 'r') as f:
         values = yaml.safe_load(f)
-    
+
     deployments = findTemplatesOfType(helmChart, 'Deployment')
     imageKeys = []
     temp = "" ## temporarily read image ref
     for deployment in deployments:
         with open(deployment, 'r') as f:
             deploy = yaml.safe_load(f)
-        
+
         containers = deploy['spec']['template']['spec']['containers']
         for container in containers:
             image_key = parse_image_ref(container['image'])["repository"]
@@ -439,15 +499,15 @@ def is_version_compatible(branch, min_release_version, min_backplane_version, mi
             return True
         else:
             return False
-    
+
     match = re.search(pattern, branch)
     if match:
         v = match.group(1)  # Extract the version
         branch_version = version.Version(v)  # Create a Version object
-        
+
         if "release-ocm" in branch:
             min_branch_version = version.Version(min_ocm_version)  # Use the minimum release version
-        
+
         elif "release" in branch:
             min_branch_version = version.Version(min_release_version)  # Use the minimum release version
 
@@ -585,7 +645,7 @@ def updateDeployments(helmChart, operator, exclusions, sizes, branch):
         if sizes:
             for  sizDeployment in sizes["deployments"]:
                 if sizDeployment["name"] == deploy["metadata"]["name"]:
-                    for i in deploy['spec']['template']['spec']['containers']:            
+                    for i in deploy['spec']['template']['spec']['containers']:
                         if not any(d['name'] == i['name'] for d in sizDeployment["containers"]):
                             logging.error("Missing container in sizes.yaml")
                             exit(1)
@@ -599,7 +659,7 @@ def updateDeployments(helmChart, operator, exclusions, sizes, branch):
         pod_template_spec['hostNetwork'] = False
         pod_template_spec['hostPID'] = False
         pod_template_spec['hostIPC'] = False
-        
+
         # Set automountServiceAccountToken only if is configured for the operator.
         if 'automountServiceAccountToken' in operator:
             automountSAToken = operator.get('automountServiceAccountToken')
@@ -645,7 +705,7 @@ def updateDeployments(helmChart, operator, exclusions, sizes, branch):
                     container_name = container['name']
                     logging.warning("Leaving non-standard seccompprofile setting for container %s" % container_name)
 
-        
+
         with open(deployment, 'w') as f:
             yaml.dump(deploy, f)
         logging.info("Deployments updated with antiaffinity, security policies, and tolerations successfully. \n")
@@ -679,34 +739,14 @@ def injectRequirements(helmChart, operator, exclusions, sizes, branch):
     fixImageReferences(helmChart, imageKeyMapping)
     fixEnvVarImageReferences(helmChart, imageKeyMapping)
 
+    fixImageReferencesForAddonTemplate(helmChart, imageKeyMapping)
+    injectAnnotationsForAddonTemplate(helmChart)
+
     # Updates RBAC and deployment configuration in the Helm chart.
     updateRBAC(helmChart)
     updateDeployments(helmChart, operator, exclusions, sizes, branch)
 
     logging.info("Updated Chart '%s' successfully\n", helmChart)
-
-def addCMAs(repo, operator, outputDir):
-    if 'bundlePath' in operator:
-        manifestsPath = os.path.join(os.path.dirname(os.path.realpath(__file__)), "tmp", repo, operator["bundlePath"])
-        if not os.path.exists(manifestsPath):
-            logging.critical("Could not validate bundlePath at given path: " + operator["bundlePath"])
-            exit(1)
-    else:
-        bundlePath = getBundleManifestsPath(repo, operator)
-        manifestsPath = os.path.join(bundlePath, "manifests")
-
-    for filename in os.listdir(manifestsPath):
-        if not filename.endswith(".yaml"): 
-            continue
-        filepath = os.path.join(manifestsPath, filename)
-        with open(filepath, 'r') as f:
-            resourceFile = yaml.safe_load(f)
-
-        if "kind" not in resourceFile:
-            continue
-        elif resourceFile["kind"] == "ClusterManagementAddOn":
-            logging.info("CMA")
-            shutil.copyfile(filepath, os.path.join(outputDir, "charts", "toggle", operator['name'], "templates", filename))
 
 def addCRDs(repo, operator, outputDir, preservedFiles=None, overwrite=False):
     """
@@ -813,36 +853,116 @@ def getBundleManifestsPath(repo, operator):
     latest_bundle_path = os.path.join(bundles_directory, latest_bundle_version)
     return latest_bundle_path
 
-def getCSVPath(repo, operator):
+def get_csv_path(repo, operator):
     if 'bundlePath' in operator:
-        manifestsPath = os.path.join(os.path.dirname(os.path.realpath(__file__)), "tmp", repo, operator["bundlePath"])
-        if not os.path.exists(manifestsPath):
+        manifests_path = os.path.join(os.path.dirname(os.path.realpath(__file__)), "tmp", repo, operator["bundlePath"])
+        if not os.path.exists(manifests_path):
             logging.critical("Could not validate bundlePath at given path: " + operator["bundlePath"])
             exit(1)
         else:
             logging.info("Using specified bundlePath: %s", operator["bundlePath"])
 
     else:
-        bundlePath = getBundleManifestsPath(repo, operator)
-        manifestsPath = os.path.join(bundlePath, "manifests")
-        logging.info("Using bundlePath derived from repository: %s", bundlePath)
+        bundle_path = getBundleManifestsPath(repo, operator)
+        manifests_path = os.path.join(bundle_path, "manifests")
+        logging.info("Using bundlePath derived from repository: %s", bundle_path)
 
-    for filename in os.listdir(manifestsPath):
-        logging.info("Checking manifestPath file: %s", filename)
-
-        if not filename.endswith(".yaml"): 
+    logging.info("Searching for CSV file in directory: %s", manifests_path)
+    for file_name in os.listdir(manifests_path):
+        if not file_name.endswith(".yaml"): 
             continue
 
-        filepath = os.path.join(manifestsPath, filename)
-        with open(filepath, 'r') as f:
-            resourceFile = yaml.safe_load(f)
+        file_path = os.path.join(manifests_path, file_name)
+        with open(file_path, 'r') as f:
+            resource_file = yaml.safe_load(f)
 
-        if "kind" not in resourceFile:
-            continue
+        if resource_file and resource_file.get("kind") == "ClusterServiceVersion":
+            logging.info("CSV file found: %s", file_path)
+            return file_path
 
-        elif resourceFile["kind"] == "ClusterServiceVersion":
-            logging.info("CSV file found: %s", filepath)
-            return filepath
+    logging.warning("No CSV file found in directory: %s", resource_file)
+    return None
+
+# injectAnnotationsForAddonTemplate injects following annotations for deployments in the AddonTemplate:
+# - target.workload.openshift.io/management: '{"effect": "PreferredDuringScheduling"}'
+def injectAnnotationsForAddonTemplate(helmChart):
+    logging.info("Injecting Annotations for deployments in the AddonTemplate ...")
+
+    addonTemplates = findTemplatesOfType(helmChart, 'AddOnTemplate')
+    for addonTemplate in addonTemplates:
+        injected = False
+        with open(addonTemplate, 'r') as f:
+            templateContent = yaml.safe_load(f)
+            agentSpec = templateContent['spec']['agentSpec']
+            if 'workload' not in agentSpec:
+                return
+            workload = agentSpec['workload']
+            if 'manifests' not in workload:
+                return
+            manifests = workload['manifests']
+            for manifest in manifests:
+                if manifest['kind'] == 'Deployment':
+                    metadata = manifest['spec']['template']['metadata']
+                    if 'annotations' not in metadata:
+                        metadata['annotations'] = {}
+                    if 'target.workload.openshift.io/management' not in metadata['annotations']:
+                        metadata['annotations']['target.workload.openshift.io/management'] = '{"effect": "PreferredDuringScheduling"}'
+                        injected = True
+        if injected:
+            with open(addonTemplate, 'w') as f:
+                yaml.dump(templateContent, f, width=float("inf"))
+                logging.info("Annotations injected successfully. \n")
+
+# fixImageReferencesForAddonTemplate identify the image references for every deployment in addontemplates, if any exist
+# in the image field, insert helm flow control code to reference it, and add image-key to the values.yaml file.
+# If the image-key referenced in the addon template deployment does not exist in `imageMappings` in the Config.yaml,
+# this will fail. Images must be explicitly defined
+def fixImageReferencesForAddonTemplate(helmChart, imageKeyMapping):
+    logging.info("Fixing image references in addon templates and values.yaml ...")
+
+    addonTemplates = findTemplatesOfType(helmChart, 'AddOnTemplate')
+    imageKeys = []
+    temp = "" ## temporarily read image ref
+    for addonTemplate in addonTemplates:
+        with open(addonTemplate, 'r') as f:
+            templateContent = yaml.safe_load(f)
+            agentSpec = templateContent['spec']['agentSpec']
+            if 'workload' not in agentSpec:
+                return
+            workload = agentSpec['workload']
+            if 'manifests' not in workload:
+                return
+            manifests = workload['manifests']
+            imageKeys = []
+            for manifest in manifests:
+                if manifest['kind'] == 'Deployment':
+                    containers = manifest['spec']['template']['spec']['containers']
+                    for container in containers:
+                        image_key = parse_image_ref(container['image'])["repository"]
+                        try:
+                            image_key = imageKeyMapping[image_key]
+                        except KeyError:
+                            logging.critical("No image key mapping provided for imageKey: %s" % image_key)
+                            exit(1)
+                        imageKeys.append(image_key)
+                        container['image'] = "{{ .Values.global.imageOverrides." + image_key + " }}"
+                        # container['imagePullPolicy'] = "{{ .Values.global.pullPolicy }}"
+        with open(addonTemplate, 'w') as f:
+            yaml.dump(templateContent, f, width=float("inf"))
+            logging.info("AddOnTemplate updated with image override successfully. \n")
+
+    if len(imageKeys) == 0:
+        return
+    valuesYaml = os.path.join(helmChart, "values.yaml")
+    with open(valuesYaml, 'r') as f:
+        values = yaml.safe_load(f)
+    if 'imageOverride' in values['global']['imageOverrides']:
+        del values['global']['imageOverrides']['imageOverride']
+    for imageKey in imageKeys:
+        values['global']['imageOverrides'][imageKey] = "" # set to temp to debug
+    with open(valuesYaml, 'w') as f:
+        yaml.dump(values, f, width=float("inf"))
+    logging.info("Image references and pull policy in addon templates and values.yaml updated successfully.\n")
 
 def main():
     logging.basicConfig(level=logging.INFO)
@@ -949,8 +1069,6 @@ def main():
             logging.critical("Config entry doesn't specify either a Git repo or a generation command")
             exit(1)
 
-        
-
         # Loop through each operator in the repo identified by the config
         for operator in repo["operators"]:
             logging.info("Helm Chartifying - %s!", operator["name"])
@@ -958,18 +1076,14 @@ def main():
             bundlepath = getBundleManifestsPath(repo["repo_name"], operator)
             logging.info("The latest bundle path for channel is %s", bundlepath)
 
-            csvPath = getCSVPath(repo["repo_name"], operator)
+            csvPath = get_csv_path(repo["repo_name"], operator)
             if csvPath == "":
                 # Validate the bundlePath exists in config.yaml
                 logging.error("Unable to find given channel: %s", operator.get("channel", "Channel not specified"))
                 exit(1)
 
-            if "branch" in repo:
-                branch = repo["branch"]
-            else:
-                branch = ""
+            branch = repo.get("branch", "")
 
-            logging.info("Reading CSV: %s ...",  csvPath)
             # Validate CSV exists
             if not os.path.isfile(csvPath):
                 logging.critical("Unable to find CSV at given path - '%s'.", csvPath)
@@ -988,7 +1102,7 @@ def main():
 
             # Get preserved files from config or set default value
             preservedFiles = operator.get("preserve_files", [])
-            
+
             # If preserve_files is provided, keep only those files; otherwise, remove directory and recreate
             if preservedFiles:
                 logging.info("Preserving files for operator '%s': %s", operator["name"], str(preservedFiles))
@@ -1009,7 +1123,7 @@ def main():
             # Creates a helm chart template
             templateHelmChart(destination, operator["name"], preservedFiles)
             logging.info("Helm chart template created successfully.\n")
-            
+
             # Generate the Chart.yaml file based off of the CSV
             helmChart = os.path.join(destination, "charts", "toggle", operator["name"])
             logging.info("Filling Chart.yaml for helm chart '%s' ...", operator["name"])
@@ -1018,13 +1132,9 @@ def main():
 
             # Add all basic resources to the helm chart from the CSV
             logging.info("Adding Resources from CSV to helm chart '%s' ...", operator["name"])
-            addResources(helmChart, csvPath)
+            extract_csv_resources(helmChart, csvPath)
+            copy_additional_resources(helmChart, csvPath)
             logging.info("Resources added from CSV successfully.\n")
-
-            # Copy over all ClusterManagementAddons to the destination directory
-            logging.info("Copying ClusterManagementAddons to helm chart '%s' ...", operator["name"])
-            addCMAs(repo["repo_name"], operator, destination)
-            logging.info("ClusterManagementAddons copied successfully.")
 
             if not skipOverrides:
                 logging.info("Adding Overrides to helm chart '%s' (set --skipOverrides=true to skip) ...", operator["name"])
