@@ -1083,11 +1083,6 @@ def main():
             copy_additional_resources(helmChart, csvPath)
             logging.info("Resources added from CSV successfully.\n")
 
-            # Copy over all ClusterManagementAddons to the destination directory
-            logging.info("Copying ClusterManagementAddons to helm chart '%s' ...", operator["name"])
-            addCMAs(repo["repo_name"], operator, destination)
-            logging.info("ClusterManagementAddons copied successfully.")
-
             if not skipOverrides:
                 logging.info("Adding Overrides to helm chart '%s' (set --skipOverrides=true to skip) ...", operator["name"])
                 exclusions = operator["exclusions"] if "exclusions" in operator else []
