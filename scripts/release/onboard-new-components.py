@@ -26,10 +26,10 @@ def prompt_user(prompt, default=None, required=False, example=None):
 def collect_image_mappings():
     """Collect image mappings interactively."""
     image_mappings = {}
-    print("Enter image mappings (key:value). Type 'done' when finished.")
+    print("Enter image mappings (key: value). Press Enter when finished.")
     while True:
-        image_input = input("Image mapping (e.g., key:value): ").strip()
-        if image_input.lower() == "done":
+        image_input = input("Image mapping (e.g., key: value): ").strip()
+        if not image_input:
             break
         if ":" in image_input:
             key, value = image_input.split(":", 1)
@@ -63,7 +63,7 @@ def onboarding_new_component(config_file, onboarding_type):
     config = utils.common.load_yaml(config_file)
 
     # Step 2: Collect basic repository details
-    org = prompt_user("Enter the GitHub organization or username", required=True, example="stolostron")
+    org = prompt_user("Enter the GitHub organization or username", required=True, default="solostron")
     repo = prompt_user("Enter the repository name", required=True, example="discovery")
     branch = prompt_user("Enter the branch name", default="main")
     github_ref = f"https://github.com/{org}/{repo}.git"
@@ -77,7 +77,11 @@ def onboarding_new_component(config_file, onboarding_type):
             bundle_path = prompt_user("Enter the bundle path (relative to the repo)", required=True, example="bundles/manifests/")
             image_mappings = collect_image_mappings()
             exclusions = collect_exclusions_or_inclusions("exclusions", ["readOnlyRootFilesystem"])
-            
+            escape_template_variables = collect_exclusions_or_inclusions("escape-template-variables", get_escaped_template_variables())
+
+            if not bundle_path.endswith("/"):
+                bundle_path += "/"
+
             operators.append({
                 "name": name,
                 "bundlePath": bundle_path,
@@ -111,6 +115,9 @@ def onboarding_new_component(config_file, onboarding_type):
             update_chart_version = prompt_user("Update chart version? (true/false)", default="true").lower() == "true"
             escape_template_variables = collect_exclusions_or_inclusions("escape-template-variables", get_escaped_template_variables())
             auto_install = prompt_user("Auto-install for all clusters? (true/false)", default="true").lower() == "true"
+
+            if not chart_path.endswith("/"):
+                chart_path += "/"
 
             charts.append({
                 "name": name,
