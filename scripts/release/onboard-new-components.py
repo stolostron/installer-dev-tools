@@ -26,10 +26,10 @@ def prompt_user(prompt, default=None, required=False, example=None):
 def collect_image_mappings():
     """Collect image mappings interactively."""
     image_mappings = {}
-    print("Enter image mappings (key:value). Type 'done' when finished.")
+    print("Enter image mappings (key: value). Press Enter when finished.")
     while True:
-        image_input = input("Image mapping (e.g., key:value): ").strip()
-        if image_input.lower() == "done":
+        image_input = input("Image mapping (e.g., key: value): ").strip()
+        if not image_input:
             break
         if ":" in image_input:
             key, value = image_input.split(":", 1)
@@ -51,6 +51,10 @@ def collect_exclusions_or_inclusions(type_name, options):
     answers = inquirer.prompt(questions)
     return answers.get(f"{type_name.capitalize()}", [])
 
+def get_escaped_template_variables():
+    return ["CLUSTER_NAME", "GITOPS_OPERATOR_IMAGE", "GITOPS_OPERATOR_NAMESPACE", "GITOPS_IMAGE",
+        "GITOPS_NAMESPACE", "HUB_KUBECONFIG", "INSTALL_NAMESPACE", "REDIS_IMAGE", "RECONCILE_SCOPE"]
+
 def onboarding_new_component(config_file, onboarding_type):
     """Interactive process to onboard a new repository entry."""
     print("\n--- Add a New Repository Entry ---")
@@ -59,9 +63,10 @@ def onboarding_new_component(config_file, onboarding_type):
     config = utils.common.load_yaml(config_file)
 
     # Step 2: Collect basic repository details
-    repo_name = prompt_user("Enter the repository name", required=True)
-    github_ref = prompt_user("Enter the GitHub repository URL", required=True, example="https://github.com/org/repo.git")
+    org = prompt_user("Enter the GitHub organization or username", required=True, default="solostron")
+    repo = prompt_user("Enter the repository name", required=True, example="discovery")
     branch = prompt_user("Enter the branch name", default="main")
+    github_ref = f"https://github.com/{org}/{repo}.git"
 
     if onboarding_type == "olm":
         # Collect OLM bundle details
@@ -72,12 +77,17 @@ def onboarding_new_component(config_file, onboarding_type):
             bundle_path = prompt_user("Enter the bundle path (relative to the repo)", required=True, example="bundles/manifests/")
             image_mappings = collect_image_mappings()
             exclusions = collect_exclusions_or_inclusions("exclusions", ["readOnlyRootFilesystem"])
-            
+            escape_template_variables = collect_exclusions_or_inclusions("escape-template-variables", get_escaped_template_variables())
+
+            if not bundle_path.endswith("/"):
+                bundle_path += "/"
+
             operators.append({
                 "name": name,
                 "bundlePath": bundle_path,
                 "imageMappings": image_mappings,
                 "exclusions": exclusions if exclusions else [],
+                "escape-template-variables": escape_template_variables if escape_template_variables else [],
             })
 
             add_another = prompt_user("Would you like to add another operator? (yes/no)", default="no")
@@ -86,7 +96,7 @@ def onboarding_new_component(config_file, onboarding_type):
 
         # Add to config
         config.append({
-            "repo_name": repo_name,
+            "repo_name": repo,
             "github_ref": github_ref,
             "branch": branch,
             "operators": operators,
@@ -104,8 +114,11 @@ def onboarding_new_component(config_file, onboarding_type):
             inclusions = collect_exclusions_or_inclusions("inclusions", ["pullSecretOverride"])
             skip_rbac = prompt_user("Skip RBAC overrides? (true/false)", default="true").lower() == "true"
             update_chart_version = prompt_user("Update chart version? (true/false)", default="true").lower() == "true"
-            escape_template_variables = collect_exclusions_or_inclusions("escape-template-variables", ["CLUSTER_NAME", "HUB_KUBECONFIG", "INSTALL_NAMESPACE"])
+            escape_template_variables = collect_exclusions_or_inclusions("escape-template-variables", get_escaped_template_variables())
             auto_install = prompt_user("Auto-install for all clusters? (true/false)", default="true").lower() == "true"
+
+            if not chart_path.endswith("/"):
+                chart_path += "/"
 
             charts.append({
                 "name": name,
@@ -115,7 +128,7 @@ def onboarding_new_component(config_file, onboarding_type):
                 "inclusions": inclusions if inclusions else [],
                 "skipRBACOverrides": skip_rbac,
                 "updateChartVersion": update_chart_version,
-                "escape-template-variables": escape_template_variables if escape_template_variables else None,
+                "escape-template-variables": escape_template_variables if escape_template_variables else [],
                 "auto-install-for-all-clusters": auto_install,
             })
 
@@ -125,7 +138,7 @@ def onboarding_new_component(config_file, onboarding_type):
 
         # Add to config
         config.append({
-            "repo_name": repo_name,
+            "repo_name": repo,
             "github_ref": github_ref,
             "branch": branch,
             "charts": charts,
@@ -133,7 +146,7 @@ def onboarding_new_component(config_file, onboarding_type):
 
     # Save the updated YAML
     utils.common.save_yaml(config_file, config)
-    print(f"\nSuccessfully added '{repo_name}' to the YAML config!")
+    print(f"\nSuccessfully added '{repo}' to the YAML config!")
 
 # Run the onboarding process
 if __name__ == "__main__":
