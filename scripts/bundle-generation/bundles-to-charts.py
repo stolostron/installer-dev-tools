@@ -290,6 +290,24 @@ def check_unsupported_csv_resources(csv_path, csv_data, supported_config_types):
 
     return False
 
+def escape_template_variables(helmChart, variables):
+    addonTemplates = findTemplatesOfType(helmChart, 'AddOnTemplate')
+    for addonTemplate in addonTemplates:
+        for variable in variables:
+            logging.info("Start to escape vriable %s", variable)
+            at = open(addonTemplate, "r")
+            lines = at.readlines()
+            v = "{{"+variable+"}}"
+            for i, line in enumerate(lines):
+                if v in line.strip():
+                    logging.info("Found variable %s in line: %s", v, line.strip())
+                    lines[i] = line.replace(v, "{{ `"+ v + "` }}")
+
+            a_file = open(addonTemplate, "w")
+            a_file.writelines(lines)
+            a_file.close()
+    logging.info("Escaped template variables.\n")
+
 # Adds resources identified in the CSV to the helmchart
 def extract_csv_resources(helm_chart, csv_path):
     logging.info("Reading CSV file: '%s'", csv_path)
@@ -1083,6 +1101,7 @@ def main():
                 exit(1)
 
             branch = repo.get("branch", "")
+            escaped_variables = operator.get("escape-template-variables", [])
 
             # Validate CSV exists
             if not os.path.isfile(csvPath):
@@ -1134,6 +1153,7 @@ def main():
             logging.info("Adding Resources from CSV to helm chart '%s' ...", operator["name"])
             extract_csv_resources(helmChart, csvPath)
             copy_additional_resources(helmChart, csvPath)
+            escape_template_variables(helmChart, escaped_variables)
             logging.info("Resources added from CSV successfully.\n")
 
             if not skipOverrides:
