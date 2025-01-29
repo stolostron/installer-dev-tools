@@ -51,6 +51,10 @@ def collect_exclusions_or_inclusions(type_name, options):
     answers = inquirer.prompt(questions)
     return answers.get(f"{type_name.capitalize()}", [])
 
+def get_escaped_template_variables():
+    return ["CLUSTER_NAME", "GITOPS_OPERATOR_IMAGE", "GITOPS_OPERATOR_NAMESPACE", "GITOPS_IMAGE",
+        "GITOPS_NAMESPACE", "HUB_KUBECONFIG", "INSTALL_NAMESPACE", "REDIS_IMAGE", "RECONCILE_SCOPE"]
+
 def onboarding_new_component(config_file, onboarding_type):
     """Interactive process to onboard a new repository entry."""
     print("\n--- Add a New Repository Entry ---")
@@ -104,7 +108,7 @@ def onboarding_new_component(config_file, onboarding_type):
             inclusions = collect_exclusions_or_inclusions("inclusions", ["pullSecretOverride"])
             skip_rbac = prompt_user("Skip RBAC overrides? (true/false)", default="true").lower() == "true"
             update_chart_version = prompt_user("Update chart version? (true/false)", default="true").lower() == "true"
-            escape_template_variables = collect_exclusions_or_inclusions("escape-template-variables", ["CLUSTER_NAME", "HUB_KUBECONFIG", "INSTALL_NAMESPACE"])
+            escape_template_variables = collect_exclusions_or_inclusions("escape-template-variables", get_escaped_template_variables())
             auto_install = prompt_user("Auto-install for all clusters? (true/false)", default="true").lower() == "true"
 
             charts.append({
