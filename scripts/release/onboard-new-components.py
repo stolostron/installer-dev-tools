@@ -63,9 +63,10 @@ def onboarding_new_component(config_file, onboarding_type):
     config = utils.common.load_yaml(config_file)
 
     # Step 2: Collect basic repository details
-    repo_name = prompt_user("Enter the repository name", required=True)
-    github_ref = prompt_user("Enter the GitHub repository URL", required=True, example="https://github.com/org/repo.git")
+    org = prompt_user("Enter the GitHub organization or username", required=True, example="stolostron")
+    repo = prompt_user("Enter the repository name", required=True, example="discovery")
     branch = prompt_user("Enter the branch name", default="main")
+    github_ref = f"https://github.com/{org}/{repo}.git"
 
     if onboarding_type == "olm":
         # Collect OLM bundle details
@@ -90,7 +91,7 @@ def onboarding_new_component(config_file, onboarding_type):
 
         # Add to config
         config.append({
-            "repo_name": repo_name,
+            "repo_name": repo,
             "github_ref": github_ref,
             "branch": branch,
             "operators": operators,
@@ -129,7 +130,7 @@ def onboarding_new_component(config_file, onboarding_type):
 
         # Add to config
         config.append({
-            "repo_name": repo_name,
+            "repo_name": repo,
             "github_ref": github_ref,
             "branch": branch,
             "charts": charts,
@@ -137,7 +138,7 @@ def onboarding_new_component(config_file, onboarding_type):
 
     # Save the updated YAML
     utils.common.save_yaml(config_file, config)
-    print(f"\nSuccessfully added '{repo_name}' to the YAML config!")
+    print(f"\nSuccessfully added '{repo}' to the YAML config!")
 
 # Run the onboarding process
 if __name__ == "__main__":
