@@ -87,6 +87,7 @@ def onboarding_new_component(config_file, onboarding_type):
                 "bundlePath": bundle_path,
                 "imageMappings": image_mappings,
                 "exclusions": exclusions if exclusions else [],
+                "escape-template-variables": escape_template_variables if escape_template_variables else [],
             })
 
             add_another = prompt_user("Would you like to add another operator? (yes/no)", default="no")
@@ -127,7 +128,7 @@ def onboarding_new_component(config_file, onboarding_type):
                 "inclusions": inclusions if inclusions else [],
                 "skipRBACOverrides": skip_rbac,
                 "updateChartVersion": update_chart_version,
-                "escape-template-variables": escape_template_variables if escape_template_variables else None,
+                "escape-template-variables": escape_template_variables if escape_template_variables else [],
                 "auto-install-for-all-clusters": auto_install,
             })
 
