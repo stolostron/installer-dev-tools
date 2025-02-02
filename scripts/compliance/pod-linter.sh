@@ -600,3 +600,4 @@ for ns in ${namespaces_with_non_conformances[@]}; do
 done
 
 exit 0
+
