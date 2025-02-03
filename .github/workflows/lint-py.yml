@@ -5,7 +5,7 @@ on:
   pull_request_target:
     types: [opened, synchronize, reopened]
     paths:
-      - "**.sh" # Only trigger when .sh files are modified
+      - "**.py" # Only trigger when .py files are modified
 
 jobs:
   shellcheck:
