@@ -1,0 +1,62 @@
+name: ShellCheck Linter
+
+on:
+  workflow_dispatch: {}
+  pull_request_target:
+    types: [opened, synchronize, reopened]
+    paths:
+      - "**.sh" # Only trigger when .sh files are modified
+
+jobs:
+  shellcheck:
+    name: Run ShellCheck on Updated Bash Scripts
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v3
+
+      - name: Install ShellCheck and shfmt
+        run: sudo apt-get install -y shellcheck shfmt
+
+      - name: Find Modified Shell Scripts
+        id: changed-files
+        uses: tj-actions/changed-files@v40
+        with:
+          files: "**.sh"
+
+      # Debugging step to check the modified files in the PR branch
+      - name: Debug Modified Files
+        run: |
+          echo "Modified files: ${{ steps.changed-files.outputs.all_changed_files }}"
+
+      - name: Run ShellCheck
+        continue-on-error: true # Allow continuing even if ShellCheck fails
+        if: steps.changed-files.outputs.any_changed == 'true'
+        run: |
+          IFS=' '  # Set IFS to space to split the list correctly
+          for file in ${{ steps.changed-files.outputs.all_changed_files }}; do
+              echo "🔍 Running ShellCheck on $file..."
+              shellcheck "$file"
+          done
+        
+      - name: Run shfmt and Check for Formatting Issues
+        continue-on-error: true # Allow continuing even if shfmt fails
+        if: steps.changed-files.outputs.any_changed == 'true'
+        run: |
+          IFS=' '  # Set IFS to space to split the list correctly
+          for file in ${{ steps.changed-files.outputs.all_changed_files }}; do
+              echo "🔍 Running shfmt on $file..."
+              # Check for formatting issues
+              shfmt -d "$file" || { 
+                echo "❌ shfmt detected formatting issues in $file. Please run 'shfmt -w $file' locally."; 
+                exit 1; 
+              }
+          done
+
+        # This step will only run if any previous step failed
+      - name: Fail Job if There Were Errors
+        if: failure()
+        run: |
+          echo "There were errors detected in the scripts. Please review the output above."
+          exit 1
