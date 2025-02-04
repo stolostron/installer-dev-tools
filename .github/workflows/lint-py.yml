@@ -1,0 +1,50 @@
+name: Python Linter
+
+on:
+  workflow_dispatch: {}
+  pull_request_target:
+    types: [opened, synchronize, reopened]
+    paths:
+      - "**.py" # Only trigger when .py files are modified
+
+jobs:
+  shellcheck:
+    name: Run Pylint on Updated Python Scripts
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v3
+
+      - name: Install Python and Pylint
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y python3-pip
+          pip3 install pylint
+
+      - name: Find Modified Python Scripts
+        id: changed-files
+        uses: tj-actions/changed-files@v40
+        with:
+          files: "**.py"
+
+      # Debugging step to check the modified files in the PR branch
+      - name: Debug Modified Files
+        run: |
+          echo "Modified files: ${{ steps.changed-files.outputs.all_changed_files }}"
+
+      - name: Run Pylint
+        if: steps.changed-files.outputs.any_changed == 'true'
+        run: |
+          IFS=' '  # Set IFS to space to split the list correctly
+          for file in ${{ steps.changed-files.outputs.all_changed_files }}; do
+              echo "🔍 Running Pylint on $file..."
+              pylint "$file"
+          done
+
+        # This step will only run if any previous step failed
+      - name: Fail Job if There Were Errors
+        if: failure()
+        run: |
+          echo "There were errors detected in the scripts. Please review the output above."
+          exit 1
