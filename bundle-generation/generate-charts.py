@@ -746,7 +746,7 @@ def update_helm_resources(chartName, helmChart, skip_rbac_overrides, exclusions,
                 if kind == 'PersistentVolumeClaim':
                     ensure_pvc_storage_class(resource_data, resource_name)
 
-                if chartName == 'flightctl':
+                if chartName == 'flight-control':
                     if kind == 'Route':
                         if resource_name == 'flightctl-api-route':
                             resource_data['spec']['host'] = """api.{{ .Values.global.baseDomain  }}"""
@@ -755,6 +755,10 @@ def update_helm_resources(chartName, helmChart, skip_rbac_overrides, exclusions,
 
                     if kind == 'ConfigMap':
                         resource_data['metadata']['namespace'] = '{{ .Values.global.namespace  }}'
+                        config_data = resource_data['metadata'].get('data')
+                        logging.info(f"config mapping {config_data}")
+
+                        exit(1)
                         if 'config.yaml' in resource_data['data']:
                             resource_data['data']['config.yaml'] = resource_data['data']['config.yaml'].replace('open-cluster-management', '{{ .Values.global.namespace  }}')
                             resource_data['data']['config.yaml'] = resource_data['data']['config.yaml'].replace('placeholder-url', '{{ .Values.global.aPIUrl  }}')
