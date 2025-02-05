@@ -762,7 +762,11 @@ def update_helm_resources(chartName, helmChart, skip_rbac_overrides, exclusions,
                                 logging.warning(f"key_data={key_data.get('database').get('hostname')}")
                                 key_data['database']['hostname'] = "foobar"
 
-                                yaml.dump(config_data, resource_data, width=float("inf"))
+                                updated_yaml = yaml.dump(key_data, default_flow_style=False, width=float("inf"))
+                                
+                                config_data[key] = updated_yaml
+                                resource_data['data'] = config_data
+                                # yaml.dump(config_data, resource_data, width=float("inf"))
                                 
                             # logging.warning(f"config_data {key} {value}")
                         # logging.warning(f"config mapping {config_data}")
