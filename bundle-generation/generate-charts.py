@@ -772,7 +772,9 @@ def update_helm_resources(chartName, helmChart, skip_rbac_overrides, exclusions,
                                 key_data = yaml.safe_load(value)
                                 logging.warning(f"key_data={key_data.get('database').get('hostname')}")
                                 hostname = key_data.get('database').get('hostname')
-                                key_data = replace_default(key_data, 'PLACEHOLDER_NAMESPACE', 'CAM')
+                                key_data = replace_default(key_data, 'PLACEHOLDER_NAMESPACE', '{{ .Values.global.namespace }}')
+                                key_data = replace_default(key_data, 'placeholder_apiurl', '{{ .Values.global.aPIUrl }}')
+                                key_data = replace_default(key_data, 'placeholder_basedomain', '{{ .Values.global.baseDomain }}')
                                 
 
                                 updated_yaml = yaml.dump(key_data, default_flow_style=False, allow_unicode=True, width=float("inf"))
@@ -784,10 +786,10 @@ def update_helm_resources(chartName, helmChart, skip_rbac_overrides, exclusions,
                             # logging.warning(f"config_data {key} {value}")
                         # logging.warning(f"config mapping {config_data}")
 
-                        if 'config.yaml' in resource_data['data']:
-                            resource_data['data']['config.yaml'] = resource_data['data']['config.yaml'].replace('open-cluster-management', '{{ .Values.global.namespace  }}')
-                            resource_data['data']['config.yaml'] = resource_data['data']['config.yaml'].replace('placeholder-url', '{{ .Values.global.aPIUrl  }}')
-                            resource_data['data']['config.yaml'] = resource_data['data']['config.yaml'].replace('placeholder-basedomain', '{{ .Values.global.baseDomain  }}')
+                        # if 'config.yaml' in resource_data['data']:
+                        #     resource_data['data']['config.yaml'] = resource_data['data']['config.yaml'].replace('open-cluster-management', '{{ .Values.global.namespace  }}')
+                        #     resource_data['data']['config.yaml'] = resource_data['data']['config.yaml'].replace('placeholder-url', '{{ .Values.global.aPIUrl  }}')
+                        #     resource_data['data']['config.yaml'] = resource_data['data']['config.yaml'].replace('placeholder-basedomain', '{{ .Values.global.baseDomain  }}')
                 
                     if kind == "ClusterRoleBinding":
                         resource_data['metadata']['name'] = 'flightctl-api-{{ .Values.global.namespace }}'
