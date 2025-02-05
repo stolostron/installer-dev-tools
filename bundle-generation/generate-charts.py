@@ -760,9 +760,11 @@ def update_helm_resources(chartName, helmChart, skip_rbac_overrides, exclusions,
                             if key.endswith(".yaml") or key.endswith(".yml"):
                                 key_data = yaml.safe_load(value)
                                 logging.warning(f"key_data={key_data.get('database').get('hostname')}")
-                                key_data['database']['hostname'] = "foobar"
+                                hostname = key_data.get('database').get('hostname')
+                                hostname = hostname.replace()
+                                # key_data['database']['hostname'] = 
 
-                                updated_yaml = yaml.dump(key_data, default_flow_style=False, width=float("inf"))
+                                updated_yaml = yaml.dump(key_data, default_flow_style=False, allow_unicode=True, width=float("inf"))
                                 
                                 config_data[key] = updated_yaml
                                 resource_data['data'] = config_data
@@ -802,7 +804,7 @@ def update_helm_resources(chartName, helmChart, skip_rbac_overrides, exclusions,
                             logging.info(f"Subject namespace for {resource_name} set to: {target_namespace} (Helm default used).\n")
 
                 with open(template_path, 'w') as f:
-                    yaml.dump(resource_data, f, width=float("inf"))
+                    yaml.dump(resource_data, f, width=float("inf"), default_flow_style=False, allow_unicode=True)
                     logging.info(f"Succesfully updated resource: {resource_name}\n")
             except Exception as e:
                 logging.error(f"Error processing template '{template_path}': {e}")
