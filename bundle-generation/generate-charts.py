@@ -757,7 +757,10 @@ def update_helm_resources(chartName, helmChart, skip_rbac_overrides, exclusions,
                         resource_data['metadata']['namespace'] = '{{ .Values.global.namespace  }}'
                         config_data = resource_data.get('data')
                         for key, value in config_data.items():
-                            logging.warning(f"config_data {key} {value}")
+                            if key.endswith(".yaml") or key.endswith(".yml"):
+                                key_data = yaml.safe_load(value)
+                                logging.warning(f"key_data={key_data}")
+                            # logging.warning(f"config_data {key} {value}")
                         # logging.warning(f"config mapping {config_data}")
 
                         if 'config.yaml' in resource_data['data']:
