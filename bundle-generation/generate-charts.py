@@ -760,7 +760,6 @@ def update_helm_resources(chartName, helmChart, skip_rbac_overrides, exclusions,
                             logging.warning(f"config_data {key} {value}")
                         # logging.warning(f"config mapping {config_data}")
 
-                        exit(1)
                         if 'config.yaml' in resource_data['data']:
                             resource_data['data']['config.yaml'] = resource_data['data']['config.yaml'].replace('open-cluster-management', '{{ .Values.global.namespace  }}')
                             resource_data['data']['config.yaml'] = resource_data['data']['config.yaml'].replace('placeholder-url', '{{ .Values.global.aPIUrl  }}')
@@ -794,9 +793,9 @@ def update_helm_resources(chartName, helmChart, skip_rbac_overrides, exclusions,
                 with open(template_path, 'w') as f:
                     yaml.dump(resource_data, f, width=float("inf"))
                     logging.info(f"Succesfully updated resource: {resource_name}\n")
-
             except Exception as e:
                 logging.error(f"Error processing template '{template_path}': {e}")
+            exit(1)
 
     logging.info("Resource updating process completed.")
 
