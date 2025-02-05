@@ -795,8 +795,9 @@ def update_helm_resources(chartName, helmChart, skip_rbac_overrides, exclusions,
                     logging.info(f"Succesfully updated resource: {resource_name}\n")
             except Exception as e:
                 logging.error(f"Error processing template '{template_path}': {e}")
-            exit(1)
 
+    if kind == "ConfigMap":
+        exit(1)
     logging.info("Resource updating process completed.")
 
 # injectAnnotationsForAddonTemplate injects following annotations for deployments in the AddonTemplate:
