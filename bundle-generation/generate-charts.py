@@ -66,7 +66,6 @@ def parse_image_ref(image_ref):
 def updateAddOnDeploymentConfig(yamlContent):
     yamlContent['metadata']['namespace'] = '{{ .Values.global.namespace }}'
 
-
 def updateClusterManagementAddOn(yamlContent):
     if 'spec' not in yamlContent:
         return
@@ -585,6 +584,37 @@ def updateDeployments(chartName, helmChart, exclusions, inclusions, branch):
         if 'pullSecretOverride' in inclusions:
             addPullSecretOverride(deployment)
 
+def ensure_addon_deployment_config_namespace(resource_data, resource_name, default_namespace):
+    resource_namespace = resource_data.get('namespace')
+
+    if resource_namespace is None:
+        # Use the default Helm namespace if not specified
+        resource_namespace = default_namespace
+
+    else:
+        # Update Helm templating to override existing namespace
+        resource_namespace = f"{{{{ default \"{resource_namespace}\" .Values.global.namespace }}}}"
+
+    resource_data['metadata']['namespace'] = resource_namespace
+    logging.info(f"AddonDeploymentConfig namespace for '{resource_name}' set to: '{resource_namespace}'.\n")
+
+def ensure_clusterrole_binding_subject_namespace(resource_data, resource_name, default_namespace):
+    if 'subjects' not in resource_data:
+        return
+    
+    for subject in resource_data.get('subjects', []):
+        subject_namespace = subject.get('namespace')
+        
+        if subject_namespace is None:
+            # Use the default Helm namespace if not specified
+            subject_namespace = default_namespace            
+        else:
+            # Update Helm templating to override existing namespace
+            subject_namespace = f"{{{{ default \"{subject_namespace}\" .Values.global.namespace }}}}"
+    
+        subject['namespace'] = subject_namespace
+    logging.info(f"Subject namespace for '{resource_name}' set to: '{subject_namespace}'\n")
+
 def ensure_pvc_storage_class(resource_data, resource_name):
     """
     Ensures that a PersistentVolumeClaim (PVC) has a storageClassName set.
@@ -602,10 +632,11 @@ def ensure_pvc_storage_class(resource_data, resource_name):
     """
     storage_class_name = resource_data['spec'].get('storageClassName', None)
     
+    # Use the default Helm namespace if not specified
     if storage_class_name is None:
         storage_class_name = """{{ .Values.global.storageClassName }}"""
-        logging.info(f"PersistentVolumeClaim storageClassName not set for {resource_name}. Using default {storage_class_name}.\n")
-    
+
+    # Update Helm templating to override existing namespace
     else:
         storage_class_name = f"{{{{ default \"{storage_class_name}\" .Values.global.storageClassName }}}}"
 
@@ -636,7 +667,9 @@ def ensure_webhook_namespace(resource_data, resource_name, default_namespace):
         if not service:
             continue
 
+        service_name = service.get('name')
         service_namespace = service.get('namespace')
+        service_path = service.get('path')
 
         if service_namespace is None:
             # Use the default Helm namespace if not specified
@@ -647,10 +680,15 @@ def ensure_webhook_namespace(resource_data, resource_name, default_namespace):
             service_namespace = f"{{{{ default \"{service_namespace}\" .Values.global.namespace }}}}"
 
         service['namespace'] = service_namespace
-        logging.info(f"Subject namespace for '{resource_name}' set to: '{service_namespace}'.\n")
+        
+        # Log details for each distinct service
+        logging.info(f"Webhook service for '{resource_name}' set to:")
+        logging.info(f"  Name: {service_name}")
+        logging.info(f"  Namespace: {service_namespace}")
+        logging.info(f"  Path: {service_path}\n")
 
 # updateHelmResources adds standard configuration to the generic kubernetes resources
-def updateHelmResources(chartName, helmChart, exclusions, inclusions, branch):
+def update_helm_resources(chartName, helmChart, skip_rbac_overrides, exclusions, inclusions, branch):
     logging.info(f"Updating resources chart: {chartName}")
 
     resource_kinds = [
@@ -667,9 +705,13 @@ def updateHelmResources(chartName, helmChart, exclusions, inclusions, branch):
     for kind in resource_kinds:
         resource_templates = findTemplatesOfType(helmChart, kind)
         if not resource_templates:
-            logging.warning(f"No {kind} templates found in the Helm chart. [Skipping]")
+            logging.info("------------------------------------------")
+            logging.warning(f"No {kind} templates found in the Helm chart [Skipping]")
+            logging.info("------------------------------------------\n")
         else:
-            logging.info(f"Found {len(resource_templates)} {kind} templates. Beginning processing...")
+            logging.info("------------------------------------------")
+            logging.info(f"Found {len(resource_templates)} {kind} templates")
+            logging.info("------------------------------------------")
 
         # Set the default namespace for the chart.
         default_namespace = """{{ .Values.global.namespace }}"""
@@ -695,11 +737,13 @@ def updateHelmResources(chartName, helmChart, exclusions, inclusions, branch):
                     resource_data['metadata']['namespace'] = resource_namespace
                     logging.info(f"Namespace for '{resource_name}' set to: {resource_namespace}")
 
-                # Ensure Mutating/Validating WebhookConfigurations has a service namespace set, defaulting to Helm values if not specified.
+                # Ensure Mutating/Validating WebhookConfigurations has a service namespace set,
+                # defaulting to Helm values if not specified.
                 if kind == "MutatingWebhookConfiguration" or kind == "ValidatingWebhookConfiguration":
                     ensure_webhook_namespace(resource_data, resource_name, default_namespace)
 
-                # Ensure the PersistentVolumeClaim has a storageClassName set, defaulting to Helm values if not specified.
+                # Ensure the PersistentVolumeClaim has a storageClassName set,
+                # defaulting to Helm values if not specified.
                 if kind == 'PersistentVolumeClaim':
                     ensure_pvc_storage_class(resource_data, resource_name)
 
@@ -744,12 +788,12 @@ def updateHelmResources(chartName, helmChart, exclusions, inclusions, branch):
 
                 with open(template_path, 'w') as f:
                     yaml.dump(resource_data, f, width=float("inf"))
-                logging.info(f"Succesfully updated the namespace for resource: {resource_name}")
+                    logging.info(f"Succesfully updated resource: {resource_name}\n")
 
             except Exception as e:
                 logging.error(f"Error processing template '{template_path}': {e}")
 
-    logging.info("Resource update process completed.")
+    logging.info("Resource updating process completed.")
 
 # injectAnnotationsForAddonTemplate injects following annotations for deployments in the AddonTemplate:
 # - target.workload.openshift.io/management: '{"effect": "PreferredDuringScheduling"}'
@@ -864,7 +908,7 @@ def injectRequirements(helmChart, chartName, imageKeyMapping, skipRBACOverrides,
         updateRBAC(helmChart, chartName)
     
     if is_version_compatible(branch, '2.13', '2.8', '2.13'):
-        updateHelmResources(chartName, helmChart, exclusions, inclusions, branch)
+        update_helm_resources(chartName, helmChart, skipRBACOverrides, exclusions, inclusions, branch)
 
     updateDeployments(chartName, helmChart, exclusions, inclusions, branch)
 
