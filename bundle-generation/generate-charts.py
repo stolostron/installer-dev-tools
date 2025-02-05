@@ -183,8 +183,7 @@ def updateResources(outputDir, repo, chart):
                 logging.warning(f"Skipping ClusterRoleBinding update (RBAC override is disabled) in {filePath}")
 
         else:
-            logging.warning(f"Skipping unsupported kind '{kind}' in {filePath}. No updates applied")
-            continue # Skip unsupported kinds
+            continue
 
         try:
             with open(filePath, 'w') as f:
