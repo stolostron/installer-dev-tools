@@ -686,6 +686,17 @@ def ensure_webhook_namespace(resource_data, resource_name, default_namespace):
         logging.info(f"  Namespace: {service_namespace}")
         logging.info(f"  Path: {service_path}\n")
 
+def replace_default(data, old, new):
+    if isinstance(data, dict):
+        for key, value in data.items():
+            data[key] = replace_default(value, old, new)
+    elif isinstance(data, list):
+        for i in range(len(data)):
+            data[i] = replace_default(data[i], old, new)
+    elif isinstance(data, str):
+        return data.replace(old, new)
+    return data
+
 # updateHelmResources adds standard configuration to the generic kubernetes resources
 def update_helm_resources(chartName, helmChart, skip_rbac_overrides, exclusions, inclusions, branch):
     logging.info(f"Updating resources chart: {chartName}")
@@ -761,8 +772,8 @@ def update_helm_resources(chartName, helmChart, skip_rbac_overrides, exclusions,
                                 key_data = yaml.safe_load(value)
                                 logging.warning(f"key_data={key_data.get('database').get('hostname')}")
                                 hostname = key_data.get('database').get('hostname')
-                                hostname = hostname.replace()
-                                # key_data['database']['hostname'] = 
+                                key_data = replace_default(key_data, 'PLACEHOLDER_NAMESPACE', 'CAM')
+                                
 
                                 updated_yaml = yaml.dump(key_data, default_flow_style=False, allow_unicode=True, width=float("inf"))
                                 
