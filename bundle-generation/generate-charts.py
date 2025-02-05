@@ -585,6 +585,33 @@ def updateDeployments(chartName, helmChart, exclusions, inclusions, branch):
         if 'pullSecretOverride' in inclusions:
             addPullSecretOverride(deployment)
 
+def ensure_pvc_storage_class(resource_data, resource_name):
+    """
+    Ensures that a PersistentVolumeClaim (PVC) has a storageClassName set.
+
+    If the storageClassName is not specified in the PVC spec, it assigns the default 
+    Helm value (`{{ .Values.global.storageClassName }}`). If a storageClassName is 
+    already set, it wraps it in a Helm `default` function to allow overriding.
+
+    Args:
+        resource_data (dict): The PVC resource data dictionary.
+        resource_name (str): The name of the PVC resource.
+
+    Returns:
+        None: Modifies resource_data in place.
+    """
+    storage_class_name = resource_data['spec'].get('storageClassName', None)
+    
+    if storage_class_name is None:
+        storage_class_name = """{{ .Values.global.storageClassName }}"""
+        logging.info(f"PersistentVolumeClaim storageClassName not set for {resource_name}. Using default {storage_class_name}.")
+    
+    else:
+        storage_class_name = f"{{{{ default \"{storage_class_name}\" .Values.global.storageClassName }}}}"
+        logging.info(f"PersistentVolumeClaim storageClassName for {resource_name} set to: {storage_class_name} (Helm default used).")
+
+    resource_data['spec']['storageClassName'] = storage_class_name
+
 # updateHelmResources adds standard configuration to the generic kubernetes resources
 def updateHelmResources(chartName, helmChart, exclusions, inclusions, branch):
     logging.info(f"Updating resources chart: {chartName}")
@@ -611,7 +638,7 @@ def updateHelmResources(chartName, helmChart, exclusions, inclusions, branch):
             try:
                 with open(template_path, 'r') as f:
                     resource_data = yaml.safe_load(f)
-                    resource_name = resource_data['metadata'].get('name', 'unknown')
+                    resource_name = resource_data['metadata'].get('name')
                     logging.info(f"Processing resource: {resource_name} from template: {template_path}")
 
                 # Not all resources are namespace-scoped, so we initialize target_namespace as None initially.
@@ -619,7 +646,7 @@ def updateHelmResources(chartName, helmChart, exclusions, inclusions, branch):
 
                 if kind in namespace_scoped_kinds:
                     current_namespace = resource_data['metadata'].get('namespace', None)
-                    if current_namespace is None or chartName == 'flightctl':
+                    if current_namespace is None:
                         # If no namespace is found, use the default Helm namespace
                         resource_data['metadata']['namespace'] = target_namespace
                         logging.info(f"Namespace not set for {resource_name}. Using default '{{ .Values.global.namespace }}'.")
@@ -629,6 +656,11 @@ def updateHelmResources(chartName, helmChart, exclusions, inclusions, branch):
                         target_namespace = f"{{{{ default \"{current_namespace}\" .Values.global.namespace }}}}"
                         resource_data['metadata']['namespace'] = target_namespace
                         logging.info(f"Namespace for {resource_name} set to: {target_namespace} (Helm default used).")
+
+                # Ensure the PersistentVolumeClaim has a storageClassName set, defaulting to Helm values if not specified.
+                if kind == 'PersistentVolumeClaim':
+                    ensure_pvc_storage_class(resource_data, resource_name)
+
                 if chartName == 'flightctl':
                     if kind == 'Route':
                         if resource_name == 'flightctl-api-route':
@@ -652,7 +684,6 @@ def updateHelmResources(chartName, helmChart, exclusions, inclusions, branch):
                     if kind == "NetworkPolicy":
                         new_values = ["{{ .Values.global.namespace }}", "openshift-console"]
                         resource_data['spec']['ingress'][0]['from'][0]['namespaceSelector']['matchExpressions'][0]['values'] = new_values
-
 
 
                 if chartName != "managed-serviceaccount":
