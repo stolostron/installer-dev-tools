@@ -760,6 +760,10 @@ def update_helm_resources(chartName, helmChart, skip_rbac_overrides, exclusions,
                             if key.endswith(".yaml") or key.endswith(".yml"):
                                 key_data = yaml.safe_load(value)
                                 logging.warning(f"key_data={key_data.get('database').get('hostname')}")
+                                key_data['database']['hostname'] = "foobar"
+
+                                yaml.dump(config_data, resource_data, width=float("inf"))
+                                
                             # logging.warning(f"config_data {key} {value}")
                         # logging.warning(f"config mapping {config_data}")
 
