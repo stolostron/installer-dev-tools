@@ -604,13 +604,50 @@ def ensure_pvc_storage_class(resource_data, resource_name):
     
     if storage_class_name is None:
         storage_class_name = """{{ .Values.global.storageClassName }}"""
-        logging.info(f"PersistentVolumeClaim storageClassName not set for {resource_name}. Using default {storage_class_name}.")
+        logging.info(f"PersistentVolumeClaim storageClassName not set for {resource_name}. Using default {storage_class_name}.\n")
     
     else:
         storage_class_name = f"{{{{ default \"{storage_class_name}\" .Values.global.storageClassName }}}}"
-        logging.info(f"PersistentVolumeClaim storageClassName for {resource_name} set to: {storage_class_name} (Helm default used).")
 
     resource_data['spec']['storageClassName'] = storage_class_name
+    logging.info(f"PersistentVolumeClaim storageClassName for '{resource_name}' set to: '{storage_class_name}'.\n")
+    
+def ensure_webhook_namespace(resource_data, resource_name, default_namespace):
+    """
+    Ensures that the namespace for webhooks in a MutatingWebhookConfiguration or 
+    ValidatingWebhookConfiguration is set correctly. Uses Helm templating to 
+    apply a default namespace if none is provided.
+
+    Args:
+        resource_data (dict): The webhook configuration resource data.
+        resource_name (str): The name of the webhook resource.
+        default_namespace (str): The default namespace to use if not set.
+
+    Returns:
+        None: Modifies resource_data in place.
+    """
+    if 'webhooks' not in resource_data:
+        return
+    
+    for webhook in resource_data.get('webhooks', []):
+        client_config = webhook.get('clientConfig', {})
+
+        service = client_config.get('service')
+        if not service:
+            continue
+
+        service_namespace = service.get('namespace')
+
+        if service_namespace is None:
+            # Use the default Helm namespace if not specified
+            service_namespace = default_namespace
+
+        else:
+            # Update Helm templating to override existing namespace
+            service_namespace = f"{{{{ default \"{service_namespace}\" .Values.global.namespace }}}}"
+
+        service['namespace'] = service_namespace
+        logging.info(f"Subject namespace for '{resource_name}' set to: '{service_namespace}'.\n")
 
 # updateHelmResources adds standard configuration to the generic kubernetes resources
 def updateHelmResources(chartName, helmChart, exclusions, inclusions, branch):
@@ -634,6 +671,9 @@ def updateHelmResources(chartName, helmChart, exclusions, inclusions, branch):
         else:
             logging.info(f"Found {len(resource_templates)} {kind} templates. Beginning processing...")
 
+        # Set the default namespace for the chart.
+        default_namespace = """{{ .Values.global.namespace }}"""
+
         for template_path in resource_templates:
             try:
                 with open(template_path, 'r') as f:
@@ -641,21 +681,23 @@ def updateHelmResources(chartName, helmChart, exclusions, inclusions, branch):
                     resource_name = resource_data['metadata'].get('name')
                     logging.info(f"Processing resource: {resource_name} from template: {template_path}")
 
-                # Not all resources are namespace-scoped, so we initialize target_namespace as None initially.
-                target_namespace = """{{ .Values.global.namespace }}"""
-
+                # Ensure namespace is set for namespace-scoped resources
                 if kind in namespace_scoped_kinds:
-                    current_namespace = resource_data['metadata'].get('namespace', None)
-                    if current_namespace is None:
-                        # If no namespace is found, use the default Helm namespace
-                        resource_data['metadata']['namespace'] = target_namespace
-                        logging.info(f"Namespace not set for {resource_name}. Using default '{{ .Values.global.namespace }}'.")
+                    resource_namespace = resource_data['metadata'].get('namespace')
 
+                    if resource_namespace is None:
+                        # Use the default Helm namespace if not specified
+                        resource_namespace = default_namespace
                     else:
-                        # Update target_namespace to reflect the current_namespace
-                        target_namespace = f"{{{{ default \"{current_namespace}\" .Values.global.namespace }}}}"
-                        resource_data['metadata']['namespace'] = target_namespace
-                        logging.info(f"Namespace for {resource_name} set to: {target_namespace} (Helm default used).")
+                        # Allow Helm templating to override existing namespace
+                        resource_namespace = f"{{{{ default \"{resource_namespace}\" .Values.global.namespace }}}}"
+
+                    resource_data['metadata']['namespace'] = resource_namespace
+                    logging.info(f"Namespace for '{resource_name}' set to: {resource_namespace}")
+
+                # Ensure Mutating/Validating WebhookConfigurations has a service namespace set, defaulting to Helm values if not specified.
+                if kind == "MutatingWebhookConfiguration" or kind == "ValidatingWebhookConfiguration":
+                    ensure_webhook_namespace(resource_data, resource_name, default_namespace)
 
                 # Ensure the PersistentVolumeClaim has a storageClassName set, defaulting to Helm values if not specified.
                 if kind == 'PersistentVolumeClaim':
@@ -685,7 +727,6 @@ def updateHelmResources(chartName, helmChart, exclusions, inclusions, branch):
                         new_values = ["{{ .Values.global.namespace }}", "openshift-console"]
                         resource_data['spec']['ingress'][0]['from'][0]['namespaceSelector']['matchExpressions'][0]['values'] = new_values
 
-
                 if chartName != "managed-serviceaccount":
                     if kind == "ClusterRoleBinding" or kind == "RoleBinding":
                         if 'subjects' in resource_data:
@@ -699,24 +740,7 @@ def updateHelmResources(chartName, helmChart, exclusions, inclusions, branch):
                                     # Update target_namespace to reflect the subject_namespace
                                     target_namespace = f"{{{{ default \"{subject_namespace}\" .Values.global.namespace }}}}"
                                     subject['namespace'] = target_namespace
-                            logging.info(f"Subject namespace for {resource_name} set to: {target_namespace} (Helm default used).")
-
-                if kind == "MutatingWebhookConfiguration" or kind == "ValidatingWebhookConfiguration":
-                    if 'webhooks' in resource_data:
-                        for webhook in resource_data['webhooks']:
-                            if 'clientConfig' in webhook:
-                                client_config = webhook['clientConfig']
-                                if 'service' in client_config:
-                                    service = client_config['service']
-                                    service_namespace = service.get('namespace', None)
-                                    if service_namespace is None:
-                                        service['namespace'] = target_namespace
-
-                                    else:
-                                        # Update target_namespace to reflect the service_namespace
-                                        target_namespace = f"{{{{ default \"{service_namespace}\" .Values.global.namespace }}}}"
-                                        service['namespace'] = target_namespace
-                        logging.info(f"Subject namespace for {resource_name} set to: {target_namespace} (Helm default used).")
+                            logging.info(f"Subject namespace for {resource_name} set to: {target_namespace} (Helm default used).\n")
 
                 with open(template_path, 'w') as f:
                     yaml.dump(resource_data, f, width=float("inf"))
