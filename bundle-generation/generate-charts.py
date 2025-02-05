@@ -726,7 +726,7 @@ def update_helm_resources(chartName, helmChart, skip_rbac_overrides, exclusions,
                 if kind in namespace_scoped_kinds:
                     resource_namespace = resource_data['metadata'].get('namespace')
 
-                    if resource_namespace is None:
+                    if resource_namespace is None or resource_namespace == "PLACEHOLDER_NAMESPACE":
                         # Use the default Helm namespace if not specified
                         resource_namespace = default_namespace
                     else:
