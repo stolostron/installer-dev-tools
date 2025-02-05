@@ -755,8 +755,8 @@ def update_helm_resources(chartName, helmChart, skip_rbac_overrides, exclusions,
 
                     if kind == 'ConfigMap':
                         resource_data['metadata']['namespace'] = '{{ .Values.global.namespace  }}'
-                        config_data = resource_data['metadata'].get('data')
-                        logging.info(f"config mapping {config_data}")
+                        config_data = resource_data.get('data')
+                        logging.warning(f"config mapping {config_data}")
 
                         exit(1)
                         if 'config.yaml' in resource_data['data']:
