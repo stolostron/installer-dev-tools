@@ -704,12 +704,12 @@ def update_helm_resources(chartName, helmChart, skip_rbac_overrides, exclusions,
     resource_kinds = [
         "ClusterRole", "ClusterRoleBinding", "ConfigMap", "Deployment", "MutatingWebhookConfiguration",
         "NetworkPolicy", "PersistentVolumeClaim", "RoleBinding", "Role", "Route", "Secret", "Service", "StatefulSet",
-        "ValidatingWebhookConfiguration"
+        "ValidatingWebhookConfiguration", "Job"
     ]
 
     namespace_scoped_kinds = [
         "ConfigMap", "Deployment", "NetworkPolicy", "PersistentVolumeClaim", "RoleBinding", "Role", "Route",
-        "Secret", "Service", "StatefulSet"
+        "Secret", "Service", "StatefulSet", "Job"
     ]
 
     for kind in resource_kinds:
@@ -781,15 +781,7 @@ def update_helm_resources(chartName, helmChart, skip_rbac_overrides, exclusions,
                                 
                                 config_data[key] = updated_yaml
                                 resource_data['data'] = config_data
-                                # yaml.dump(config_data, resource_data, width=float("inf"))
                                 
-                            # logging.warning(f"config_data {key} {value}")
-                        # logging.warning(f"config mapping {config_data}")
-
-                        # if 'config.yaml' in resource_data['data']:
-                        #     resource_data['data']['config.yaml'] = resource_data['data']['config.yaml'].replace('open-cluster-management', '{{ .Values.global.namespace  }}')
-                        #     resource_data['data']['config.yaml'] = resource_data['data']['config.yaml'].replace('placeholder-url', '{{ .Values.global.aPIUrl  }}')
-                        #     resource_data['data']['config.yaml'] = resource_data['data']['config.yaml'].replace('placeholder-basedomain', '{{ .Values.global.baseDomain  }}')
                 
                     if kind == "ClusterRoleBinding":
                         resource_data['metadata']['name'] = 'flightctl-api-{{ .Values.global.namespace }}'
@@ -822,8 +814,6 @@ def update_helm_resources(chartName, helmChart, skip_rbac_overrides, exclusions,
             except Exception as e:
                 logging.error(f"Error processing template '{template_path}': {e}")
 
-    if kind == "ConfigMap":
-        exit(1)
     logging.info("Resource updating process completed.")
 
 # injectAnnotationsForAddonTemplate injects following annotations for deployments in the AddonTemplate:
