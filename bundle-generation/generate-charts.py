@@ -614,6 +614,39 @@ def ensure_clusterrole_binding_subject_namespace(resource_data, resource_name, d
         subject['namespace'] = subject_namespace
     logging.info(f"Subject namespace for '{resource_name}' set to: '{subject_namespace}'\n")
 
+def ensure_stateful_set_storage_class(resource_data, resource_name):
+    """
+    Ensures that a StatefulSet has a storageClassName set.
+
+    If the storageClassName is not specified in the StatefulSet spec, it assigns the default 
+    Helm value (`{{ .Values.global.storageClassName }}`). If a storageClassName is 
+    already set, it wraps it in a Helm `default` function to allow overriding.
+
+    Args:
+        resource_data (dict): The StatefulSet resource data dictionary.ß
+        resource_name (str): The name of the StatefulSet resource.
+
+    Returns:
+        None: Modifies resource_data in place.
+    """
+    statefulset_vc_templates = resource_data['spec'].get('volumeClaimTemplates', [])
+    
+    for claim in statefulset_vc_templates:
+        # Use the default Helm namespace if not specified
+        claim_storage_class_name = claim.get('spec', {}).get('storageClassName')
+
+        if claim_storage_class_name is None:
+          claim_storage_class_name = """{{ .Values.global.storageClassName }}"""
+
+        # Update Helm templating to override existing namespace
+        else:
+            claim_storage_class_name = f"{{{{ default \"{claim_storage_class_name}\" .Values.global.storageClassName }}}}"
+        
+        claim['spec']['storageClassName'] = claim_storage_class_name
+        logging.info(f"StatefulSet volumeClaimTemplate storageClassName for '{resource_name}' set to: '{claim_storage_class_name}'\n")
+
+    resource_data['spec']['volumeClaimTemplates'] = statefulset_vc_templates    
+
 def ensure_pvc_storage_class(resource_data, resource_name):
     """
     Ensures that a PersistentVolumeClaim (PVC) has a storageClassName set.
@@ -740,6 +773,11 @@ def update_helm_resources(chartName, helmChart, skip_rbac_overrides, exclusions,
                 # defaulting to Helm values if not specified.
                 if kind == "MutatingWebhookConfiguration" or kind == "ValidatingWebhookConfiguration":
                     ensure_webhook_namespace(resource_data, resource_name, default_namespace)
+
+                # Ensure the StatefulSet has a storageClassName set,
+                # defaulting to Helm values if not specified.
+                if kind == 'StatefulSet':
+                    ensure_pvc_storage_class(resource_data, resource_name)
 
                 # Ensure the PersistentVolumeClaim has a storageClassName set,
                 # defaulting to Helm values if not specified.
