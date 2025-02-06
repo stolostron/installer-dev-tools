@@ -798,13 +798,12 @@ def update_helm_resources(chartName, helmChart, skip_rbac_overrides, exclusions,
                     if kind == "NetworkPolicy":
                         logging.warning(resource_name)
                         resource_data['metadata']['namespace'] = '{{ .Values.global.namespace }}'
-                        new_values = ["{{ .Values.global.namespace }}", "openshift-console"]
-                        resource_data['spec']['ingress'][0]['from'][0]['namespaceSelector']['matchExpressions'][0]['values'] = new_values
+                        # new_values = ["{{ .Values.global.namespace }}", "openshift-console"]
+                        # resource_data['spec']['ingress'][0]['from'][0]['namespaceSelector']['matchExpressions'][0]['values'] = new_values
+                        resource_data['data'] = replace_default(resource_data['data'], 'PLACEHOLDER_NAMESPACE', '{{ .Values.global.namespace }}')
                     if kind == "Job":
                         resource_data = replace_default(resource_data, 'PLACEHOLDER_NAMESPACE', '{{ .Values.global.namespace }}')
-                    if resource_name == "flightctl-api-from-ingress":
-                        logging.warning("found the culprit")
-                        resource_data['metadata']['namespace'] = '{{ .Values.global.namespace }}'
+
 
 
                 if chartName != "managed-serviceaccount":
