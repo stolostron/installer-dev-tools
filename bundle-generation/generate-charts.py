@@ -732,8 +732,9 @@ def update_helm_resources(chartName, helmChart, skip_rbac_overrides, exclusions,
                     resource_data = yaml.safe_load(f)
                     resource_name = resource_data['metadata'].get('name')
                     logging.info(f"Processing resource: {resource_name} from template: {template_path}")
-                if kind == 'ConsolePlugin':
-                    resource_data = replace_default(resource_data, 'PLACEHOLDER_NAMESPACE', '{{ .Values.global.namespace }}')
+                if chartName == 'flight-control':
+                    if kind == 'ConsolePlugin':
+                        resource_data = replace_default(resource_data, 'PLACEHOLDER_NAMESPACE', '{{ .Values.global.namespace }}')
                     
 
                 # Ensure namespace is set for namespace-scoped resources
@@ -766,7 +767,6 @@ def update_helm_resources(chartName, helmChart, skip_rbac_overrides, exclusions,
                             resource_data['spec']['host'] = """api.{{ .Values.global.baseDomain  }}"""
                         if resource_name == 'flightctl-api-route-agent':
                             resource_data['spec']['host'] = """agent-api.{{ .Values.global.baseDomain  }}"""
-                    if kind == 'ConfigMap':
                     if kind == 'ConfigMap':
                         resource_data['metadata']['namespace'] = '{{ .Values.global.namespace  }}'
                         config_data = resource_data.get('data')
