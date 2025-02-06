@@ -786,7 +786,7 @@ def update_helm_resources(chartName, helmChart, skip_rbac_overrides, exclusions,
                                 
                                 config_data[key] = updated_yaml
                                 resource_data['data'] = config_data
-                        resource_data['data'] = replace_default(resource_data['data'], 'PLACEHOLDER_NAMESPACE', '{{ .Values.global.namespace }}')
+                        resource_data = replace_default(resource_data, 'PLACEHOLDER_NAMESPACE', '{{ .Values.global.namespace }}')
                                 
                 
                     if kind == "ClusterRoleBinding":
