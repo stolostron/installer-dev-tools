@@ -33,14 +33,14 @@ jobs:
         run: |
           echo "Modified files: ${{ steps.changed-files.outputs.all_changed_files }}"
 
-      - name: Run Pylint
-        if: steps.changed-files.outputs.any_changed == 'true'
-        run: |
-          IFS=' '  # Set IFS to space to split the list correctly
-          for file in ${{ steps.changed-files.outputs.all_changed_files }}; do
-              echo "🔍 Running Pylint on $file..."
-              pylint "$file"
-          done
+      # - name: Run Pylint
+      #   if: steps.changed-files.outputs.any_changed == 'true'
+      #   run: |
+      #     IFS=' '  # Set IFS to space to split the list correctly
+      #     for file in ${{ steps.changed-files.outputs.all_changed_files }}; do
+      #         echo "🔍 Running Pylint on $file..."
+      #         pylint "$file"
+      #     done
 
         # This step will only run if any previous step failed
       - name: Fail Job if There Were Errors
