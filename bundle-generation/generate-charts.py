@@ -686,6 +686,17 @@ def ensure_webhook_namespace(resource_data, resource_name, default_namespace):
         logging.info(f"  Namespace: {service_namespace}")
         logging.info(f"  Path: {service_path}\n")
 
+def replace_default(data, old, new):
+    if isinstance(data, dict):
+        for key, value in data.items():
+            data[key] = replace_default(value, old, new)
+    elif isinstance(data, list):
+        for i in range(len(data)):
+            data[i] = replace_default(data[i], old, new)
+    elif isinstance(data, str):
+        return data.replace(old, new)
+    return data
+
 # updateHelmResources adds standard configuration to the generic kubernetes resources
 def update_helm_resources(chartName, helmChart, skip_rbac_overrides, exclusions, inclusions, branch):
     logging.info(f"Updating resources chart: {chartName}")
@@ -693,12 +704,12 @@ def update_helm_resources(chartName, helmChart, skip_rbac_overrides, exclusions,
     resource_kinds = [
         "ClusterRole", "ClusterRoleBinding", "ConfigMap", "Deployment", "MutatingWebhookConfiguration",
         "NetworkPolicy", "PersistentVolumeClaim", "RoleBinding", "Role", "Route", "Secret", "Service", "StatefulSet",
-        "ValidatingWebhookConfiguration"
+        "ValidatingWebhookConfiguration", "Job", "ConsolePlugin"
     ]
 
     namespace_scoped_kinds = [
         "ConfigMap", "Deployment", "NetworkPolicy", "PersistentVolumeClaim", "RoleBinding", "Role", "Route",
-        "Secret", "Service", "StatefulSet"
+        "Secret", "Service", "StatefulSet", "Job"
     ]
 
     for kind in resource_kinds:
@@ -721,6 +732,10 @@ def update_helm_resources(chartName, helmChart, skip_rbac_overrides, exclusions,
                     resource_data = yaml.safe_load(f)
                     resource_name = resource_data['metadata'].get('name')
                     logging.info(f"Processing resource: {resource_name} from template: {template_path}")
+
+                if chartName == 'flight-control':
+                    if kind == 'ConsolePlugin':
+                        resource_data = replace_default(resource_data, 'PLACEHOLDER_NAMESPACE', '{{ .Values.global.namespace }}')
 
                 # Ensure namespace is set for namespace-scoped resources
                 if kind in namespace_scoped_kinds:
@@ -746,7 +761,7 @@ def update_helm_resources(chartName, helmChart, skip_rbac_overrides, exclusions,
                 if kind == 'PersistentVolumeClaim':
                     ensure_pvc_storage_class(resource_data, resource_name)
 
-                if chartName == 'flightctl':
+                if chartName == 'flight-control':
                     if kind == 'Route':
                         if resource_name == 'flightctl-api-route':
                             resource_data['spec']['host'] = """api.{{ .Values.global.baseDomain  }}"""
@@ -755,10 +770,19 @@ def update_helm_resources(chartName, helmChart, skip_rbac_overrides, exclusions,
 
                     if kind == 'ConfigMap':
                         resource_data['metadata']['namespace'] = '{{ .Values.global.namespace  }}'
-                        if 'config.yaml' in resource_data['data']:
-                            resource_data['data']['config.yaml'] = resource_data['data']['config.yaml'].replace('open-cluster-management', '{{ .Values.global.namespace  }}')
-                            resource_data['data']['config.yaml'] = resource_data['data']['config.yaml'].replace('placeholder-url', '{{ .Values.global.aPIUrl  }}')
-                            resource_data['data']['config.yaml'] = resource_data['data']['config.yaml'].replace('placeholder-basedomain', '{{ .Values.global.baseDomain  }}')
+                        config_data = resource_data.get('data')
+                        for key, value in config_data.items():
+                            if key.endswith(".yaml") or key.endswith(".yml"):
+                                key_data = yaml.safe_load(value)
+                                logging.warning(f"key_data={key_data.get('database').get('hostname')}")
+                                hostname = key_data.get('database').get('hostname')
+                                key_data = replace_default(key_data, 'PLACEHOLDER_NAMESPACE', '{{ .Values.global.namespace }}')
+                                key_data = replace_default(key_data, 'placeholder_apiurl', '{{ .Values.global.apiUrl }}')
+                                key_data = replace_default(key_data, 'placeholder_basedomain', '{{ .Values.global.baseDomain }}')
+                                updated_yaml = yaml.dump(key_data, default_flow_style=False, allow_unicode=True, width=float("inf"))
+                                config_data[key] = updated_yaml
+                                resource_data['data'] = config_data
+                        resource_data['data'] = replace_default(resource_data['data'], 'PLACEHOLDER_NAMESPACE', '{{ .Values.global.namespace }}')
                 
                     if kind == "ClusterRoleBinding":
                         resource_data['metadata']['name'] = 'flightctl-api-{{ .Values.global.namespace }}'
@@ -767,8 +791,10 @@ def update_helm_resources(chartName, helmChart, skip_rbac_overrides, exclusions,
                         resource_data['metadata']['name'] = 'flightctl-api-{{ .Values.global.namespace }}'
 
                     if kind == "NetworkPolicy":
-                        new_values = ["{{ .Values.global.namespace }}", "openshift-console"]
-                        resource_data['spec']['ingress'][0]['from'][0]['namespaceSelector']['matchExpressions'][0]['values'] = new_values
+                        resource_data['metadata']['namespace'] = '{{ .Values.global.namespace }}'
+                        resource_data = replace_default(resource_data, 'PLACEHOLDER_NAMESPACE', '{{ .Values.global.namespace }}')
+                    if kind == "Job":
+                        resource_data = replace_default(resource_data, 'PLACEHOLDER_NAMESPACE', '{{ .Values.global.namespace }}')
 
                 if chartName != "managed-serviceaccount":
                     if kind == "ClusterRoleBinding" or kind == "RoleBinding":
