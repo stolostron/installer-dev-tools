@@ -735,8 +735,6 @@ def update_helm_resources(chartName, helmChart, skip_rbac_overrides, exclusions,
                 if chartName == 'flight-control':
                     if kind == 'ConsolePlugin':
                         resource_data = replace_default(resource_data, 'PLACEHOLDER_NAMESPACE', '{{ .Values.global.namespace }}')
-                    # if kind == 'NetworkPolicy':
-                    #     resource_data = replace_default(resource_data, 'PLACEHOLDER_NAMESPACE', '{{ .Values.global.namespace }}')
                     
 
                 # Ensure namespace is set for namespace-scoped resources
@@ -804,8 +802,6 @@ def update_helm_resources(chartName, helmChart, skip_rbac_overrides, exclusions,
                     if kind == "Job":
                         resource_data = replace_default(resource_data, 'PLACEHOLDER_NAMESPACE', '{{ .Values.global.namespace }}')
 
-
-
                 if chartName != "managed-serviceaccount":
                     if kind == "ClusterRoleBinding" or kind == "RoleBinding":
                         if 'subjects' in resource_data:
@@ -824,6 +820,7 @@ def update_helm_resources(chartName, helmChart, skip_rbac_overrides, exclusions,
                 with open(template_path, 'w') as f:
                     yaml.dump(resource_data, f, width=float("inf"), default_flow_style=False, allow_unicode=True)
                     logging.info(f"Succesfully updated resource: {resource_name}\n")
+
             except Exception as e:
                 logging.error(f"Error processing template '{template_path}': {e}")
 
