@@ -66,7 +66,6 @@ def parse_image_ref(image_ref):
 def updateAddOnDeploymentConfig(yamlContent):
     yamlContent['metadata']['namespace'] = '{{ .Values.global.namespace }}'
 
-
 def updateClusterManagementAddOn(yamlContent):
     if 'spec' not in yamlContent:
         return
@@ -184,8 +183,7 @@ def updateResources(outputDir, repo, chart):
                 logging.warning(f"Skipping ClusterRoleBinding update (RBAC override is disabled) in {filePath}")
 
         else:
-            logging.warning(f"Skipping unsupported kind '{kind}' in {filePath}. No updates applied")
-            continue # Skip unsupported kinds
+            continue
 
         try:
             with open(filePath, 'w') as f:
@@ -585,8 +583,111 @@ def updateDeployments(chartName, helmChart, exclusions, inclusions, branch):
         if 'pullSecretOverride' in inclusions:
             addPullSecretOverride(deployment)
 
+def ensure_addon_deployment_config_namespace(resource_data, resource_name, default_namespace):
+    resource_namespace = resource_data.get('namespace')
+
+    if resource_namespace is None:
+        # Use the default Helm namespace if not specified
+        resource_namespace = default_namespace
+
+    else:
+        # Update Helm templating to override existing namespace
+        resource_namespace = f"{{{{ default \"{resource_namespace}\" .Values.global.namespace }}}}"
+
+    resource_data['metadata']['namespace'] = resource_namespace
+    logging.info(f"AddonDeploymentConfig namespace for '{resource_name}' set to: '{resource_namespace}'.\n")
+
+def ensure_clusterrole_binding_subject_namespace(resource_data, resource_name, default_namespace):
+    if 'subjects' not in resource_data:
+        return
+    
+    for subject in resource_data.get('subjects', []):
+        subject_namespace = subject.get('namespace')
+        
+        if subject_namespace is None:
+            # Use the default Helm namespace if not specified
+            subject_namespace = default_namespace            
+        else:
+            # Update Helm templating to override existing namespace
+            subject_namespace = f"{{{{ default \"{subject_namespace}\" .Values.global.namespace }}}}"
+    
+        subject['namespace'] = subject_namespace
+    logging.info(f"Subject namespace for '{resource_name}' set to: '{subject_namespace}'\n")
+
+def ensure_pvc_storage_class(resource_data, resource_name):
+    """
+    Ensures that a PersistentVolumeClaim (PVC) has a storageClassName set.
+
+    If the storageClassName is not specified in the PVC spec, it assigns the default 
+    Helm value (`{{ .Values.global.storageClassName }}`). If a storageClassName is 
+    already set, it wraps it in a Helm `default` function to allow overriding.
+
+    Args:
+        resource_data (dict): The PVC resource data dictionary.
+        resource_name (str): The name of the PVC resource.
+
+    Returns:
+        None: Modifies resource_data in place.
+    """
+    storage_class_name = resource_data['spec'].get('storageClassName', None)
+    
+    # Use the default Helm namespace if not specified
+    if storage_class_name is None:
+        storage_class_name = """{{ .Values.global.storageClassName }}"""
+
+    # Update Helm templating to override existing namespace
+    else:
+        storage_class_name = f"{{{{ default \"{storage_class_name}\" .Values.global.storageClassName }}}}"
+
+    resource_data['spec']['storageClassName'] = storage_class_name
+    logging.info(f"PersistentVolumeClaim storageClassName for '{resource_name}' set to: '{storage_class_name}'.\n")
+    
+def ensure_webhook_namespace(resource_data, resource_name, default_namespace):
+    """
+    Ensures that the namespace for webhooks in a MutatingWebhookConfiguration or 
+    ValidatingWebhookConfiguration is set correctly. Uses Helm templating to 
+    apply a default namespace if none is provided.
+
+    Args:
+        resource_data (dict): The webhook configuration resource data.
+        resource_name (str): The name of the webhook resource.
+        default_namespace (str): The default namespace to use if not set.
+
+    Returns:
+        None: Modifies resource_data in place.
+    """
+    if 'webhooks' not in resource_data:
+        return
+    
+    for webhook in resource_data.get('webhooks', []):
+        client_config = webhook.get('clientConfig', {})
+
+        service = client_config.get('service')
+        if not service:
+            continue
+
+        service_name = service.get('name')
+        service_namespace = service.get('namespace')
+        service_path = service.get('path')
+
+        if service_namespace is None:
+            # Use the default Helm namespace if not specified
+            service_namespace = default_namespace
+
+        else:
+            # Update Helm templating to override existing namespace
+            service_namespace = f"{{{{ default \"{service_namespace}\" .Values.global.namespace }}}}"
+
+        service['namespace'] = service_namespace
+        
+        # Log details for each distinct service
+        logging.info(f"Webhook service for '{resource_name}' set to:")
+        logging.info(f"  Name: {service_name}")
+        logging.info(f"  Namespace: {service_namespace}")
+        logging.info(f"  Path: {service_path}\n")
+
 # updateHelmResources adds standard configuration to the generic kubernetes resources
-def updateHelmResources(chartName, helmChart, exclusions, inclusions, branch):
+def update_helm_resources(chartName, helmChart, skip_rbac_overrides, exclusions, inclusions, branch):
     logging.info(f"Updating resources chart: {chartName}")
 
     resource_kinds = [
@@ -603,44 +704,71 @@ def updateHelmResources(chartName, helmChart, exclusions, inclusions, branch):
     for kind in resource_kinds:
         resource_templates = findTemplatesOfType(helmChart, kind)
         if not resource_templates:
-            logging.warning(f"No {kind} templates found in the Helm chart. [Skipping]")
+            logging.info("------------------------------------------")
+            logging.warning(f"No {kind} templates found in the Helm chart [Skipping]")
+            logging.info("------------------------------------------\n")
         else:
-            logging.info(f"Found {len(resource_templates)} {kind} templates. Beginning processing...")
+            logging.info("------------------------------------------")
+            logging.info(f"Found {len(resource_templates)} {kind} templates")
+            logging.info("------------------------------------------")
+
+        # Set the default namespace for the chart.
+        default_namespace = """{{ .Values.global.namespace }}"""
 
         for template_path in resource_templates:
             try:
                 with open(template_path, 'r') as f:
                     resource_data = yaml.safe_load(f)
-                    resource_name = resource_data['metadata'].get('name', 'unknown')
+                    resource_name = resource_data['metadata'].get('name')
                     logging.info(f"Processing resource: {resource_name} from template: {template_path}")
 
-                # Not all resources are namespace-scoped, so we initialize target_namespace as None initially.
-                target_namespace = """{{ .Values.global.namespace }}"""
-
+                # Ensure namespace is set for namespace-scoped resources
                 if kind in namespace_scoped_kinds:
-                    current_namespace = resource_data['metadata'].get('namespace', None)
-                    if current_namespace is None or chartName == 'flight-control':
-                        # If no namespace is found, use the default Helm namespace
-                        resource_data['metadata']['namespace'] = target_namespace
-                        logging.info(f"Namespace not set for {resource_name}. Using default '{{ .Values.global.namespace }}'.")
+                    resource_namespace = resource_data['metadata'].get('namespace')
 
+                    if resource_namespace is None:
+                        # Use the default Helm namespace if not specified
+                        resource_namespace = default_namespace
                     else:
-                        # Update target_namespace to reflect the current_namespace
-                        target_namespace = f"{{{{ default \"{current_namespace}\" .Values.global.namespace }}}}"
-                        resource_data['metadata']['namespace'] = target_namespace
-                        logging.info(f"Namespace for {resource_name} set to: {target_namespace} (Helm default used).")
-                if kind == 'Route':
-                    if resource_name == 'flightctl-api-route':
-                        resource_data['spec']['host'] = """api.{{ .Values.global.baseDomain  }}"""
-                    if resource_name == 'flightctl-api-route-agent':
-                        resource_data['spec']['host'] = """agent-api.{{ .Values.global.baseDomain  }}"""
+                        # Allow Helm templating to override existing namespace
+                        resource_namespace = f"{{{{ default \"{resource_namespace}\" .Values.global.namespace }}}}"
 
-                if kind == 'ConfigMap':
-                    # if resource_name == 'flightctl-api-config':
-                    resource_data['metadata']['namespace'] = '{{ .Values.global.namespace  }}'
-                    resource_data['data']['config.yaml'] = resource_data['data']['config.yaml'].replace('open-cluster-management', '{{ .Values.global.namespace  }}')
-                    resource_data['data']['config.yaml'] = resource_data['data']['config.yaml'].replace('placeholder-url', '{{ .Values.global.aPIUrl  }}')
-                    resource_data['data']['config.yaml'] = resource_data['data']['config.yaml'].replace('placeholder-basedomain', '{{ .Values.global.baseDomain  }}')
+                    resource_data['metadata']['namespace'] = resource_namespace
+                    logging.info(f"Namespace for '{resource_name}' set to: {resource_namespace}")
+
+                # Ensure Mutating/Validating WebhookConfigurations has a service namespace set,
+                # defaulting to Helm values if not specified.
+                if kind == "MutatingWebhookConfiguration" or kind == "ValidatingWebhookConfiguration":
+                    ensure_webhook_namespace(resource_data, resource_name, default_namespace)
+
+                # Ensure the PersistentVolumeClaim has a storageClassName set,
+                # defaulting to Helm values if not specified.
+                if kind == 'PersistentVolumeClaim':
+                    ensure_pvc_storage_class(resource_data, resource_name)
+
+                if chartName == 'flightctl':
+                    if kind == 'Route':
+                        if resource_name == 'flightctl-api-route':
+                            resource_data['spec']['host'] = """api.{{ .Values.global.baseDomain  }}"""
+                        if resource_name == 'flightctl-api-route-agent':
+                            resource_data['spec']['host'] = """agent-api.{{ .Values.global.baseDomain  }}"""
+
+                    if kind == 'ConfigMap':
+                        resource_data['metadata']['namespace'] = '{{ .Values.global.namespace  }}'
+                        if 'config.yaml' in resource_data['data']:
+                            resource_data['data']['config.yaml'] = resource_data['data']['config.yaml'].replace('open-cluster-management', '{{ .Values.global.namespace  }}')
+                            resource_data['data']['config.yaml'] = resource_data['data']['config.yaml'].replace('placeholder-url', '{{ .Values.global.aPIUrl  }}')
+                            resource_data['data']['config.yaml'] = resource_data['data']['config.yaml'].replace('placeholder-basedomain', '{{ .Values.global.baseDomain  }}')
+                
+                    if kind == "ClusterRoleBinding":
+                        resource_data['metadata']['name'] = 'flightctl-api-{{ .Values.global.namespace }}'
+                        resource_data['roleRef']['name'] = 'flightctl-api-{{ .Values.global.namespace }}'
+                    if kind == "ClusterRole":
+                        resource_data['metadata']['name'] = 'flightctl-api-{{ .Values.global.namespace }}'
+
+                    if kind == "NetworkPolicy":
+                        new_values = ["{{ .Values.global.namespace }}", "openshift-console"]
+                        resource_data['spec']['ingress'][0]['from'][0]['namespaceSelector']['matchExpressions'][0]['values'] = new_values
 
                 if chartName != "managed-serviceaccount":
                     if kind == "ClusterRoleBinding" or kind == "RoleBinding":
@@ -655,33 +783,16 @@ def updateHelmResources(chartName, helmChart, exclusions, inclusions, branch):
                                     # Update target_namespace to reflect the subject_namespace
                                     target_namespace = f"{{{{ default \"{subject_namespace}\" .Values.global.namespace }}}}"
                                     subject['namespace'] = target_namespace
-                            logging.info(f"Subject namespace for {resource_name} set to: {target_namespace} (Helm default used).")
-
-                if kind == "MutatingWebhookConfiguration" or kind == "ValidatingWebhookConfiguration":
-                    if 'webhooks' in resource_data:
-                        for webhook in resource_data['webhooks']:
-                            if 'clientConfig' in webhook:
-                                client_config = webhook['clientConfig']
-                                if 'service' in client_config:
-                                    service = client_config['service']
-                                    service_namespace = service.get('namespace', None)
-                                    if service_namespace is None:
-                                        service['namespace'] = target_namespace
-
-                                    else:
-                                        # Update target_namespace to reflect the service_namespace
-                                        target_namespace = f"{{{{ default \"{service_namespace}\" .Values.global.namespace }}}}"
-                                        service['namespace'] = target_namespace
-                        logging.info(f"Subject namespace for {resource_name} set to: {target_namespace} (Helm default used).")
+                            logging.info(f"Subject namespace for {resource_name} set to: {target_namespace} (Helm default used).\n")
 
                 with open(template_path, 'w') as f:
                     yaml.dump(resource_data, f, width=float("inf"))
-                logging.info(f"Succesfully updated the namespace for resource: {resource_name}")
+                    logging.info(f"Succesfully updated resource: {resource_name}\n")
 
             except Exception as e:
                 logging.error(f"Error processing template '{template_path}': {e}")
 
-    logging.info("Resource update process completed.")
+    logging.info("Resource updating process completed.")
 
 # injectAnnotationsForAddonTemplate injects following annotations for deployments in the AddonTemplate:
 # - target.workload.openshift.io/management: '{"effect": "PreferredDuringScheduling"}'
@@ -796,7 +907,7 @@ def injectRequirements(helmChart, chartName, imageKeyMapping, skipRBACOverrides,
         updateRBAC(helmChart, chartName)
     
     if is_version_compatible(branch, '2.13', '2.8', '2.13'):
-        updateHelmResources(chartName, helmChart, exclusions, inclusions, branch)
+        update_helm_resources(chartName, helmChart, skipRBACOverrides, exclusions, inclusions, branch)
 
     updateDeployments(chartName, helmChart, exclusions, inclusions, branch)
 
