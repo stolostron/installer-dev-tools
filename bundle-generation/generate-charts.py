@@ -735,6 +735,8 @@ def update_helm_resources(chartName, helmChart, skip_rbac_overrides, exclusions,
                 if chartName == 'flight-control':
                     if kind == 'ConsolePlugin':
                         resource_data = replace_default(resource_data, 'PLACEHOLDER_NAMESPACE', '{{ .Values.global.namespace }}')
+                    if kind == 'NetworkPolicy':
+                        resource_data = replace_default(resource_data, 'PLACEHOLDER_NAMESPACE', '{{ .Values.global.namespace }}')
                     
 
                 # Ensure namespace is set for namespace-scoped resources
@@ -794,7 +796,7 @@ def update_helm_resources(chartName, helmChart, skip_rbac_overrides, exclusions,
                         resource_data['metadata']['name'] = 'flightctl-api-{{ .Values.global.namespace }}'
 
                     if kind == "NetworkPolicy":
-                        resource_data['metadata']['namespace'] = '{{ .Values.global.namespace }}'
+                        # resource_data['metadata']['namespace'] = '{{ .Values.global.namespace }}'
                         new_values = ["{{ .Values.global.namespace }}", "openshift-console"]
                         resource_data['spec']['ingress'][0]['from'][0]['namespaceSelector']['matchExpressions'][0]['values'] = new_values
                     if kind == "Job":
