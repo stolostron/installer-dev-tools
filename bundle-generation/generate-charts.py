@@ -736,7 +736,7 @@ def update_helm_resources(chartName, helmChart, skip_rbac_overrides, exclusions,
                     if kind == 'ConsolePlugin':
                         resource_data = replace_default(resource_data, 'PLACEHOLDER_NAMESPACE', '{{ .Values.global.namespace }}')
                     if kind == 'NetworkPolicy':
-                        resource_data = replace_default(resource_data, 'PLACEHOLDER_NAMESPACE ', '{{ .Values.global.namespace }}')
+                        resource_data = replace_default(resource_data, 'PLACEHOLDER_NAMESPACE', '{{ .Values.global.namespace }}')
                     
 
                 # Ensure namespace is set for namespace-scoped resources
