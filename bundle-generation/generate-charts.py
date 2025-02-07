@@ -792,7 +792,7 @@ def update_helm_resources(chartName, helmChart, skip_rbac_overrides, exclusions,
                 # Ensure the StatefulSet has a storageClassName set,
                 # defaulting to Helm values if not specified.
                 if kind == 'StatefulSet':
-                    ensure_pvc_storage_class(resource_data, resource_name)
+                    ensure_stateful_set_storage_class(resource_data, resource_name)
 
                 # Ensure the PersistentVolumeClaim has a storageClassName set,
                 # defaulting to Helm values if not specified.
