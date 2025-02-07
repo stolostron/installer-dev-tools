@@ -244,7 +244,7 @@ def copyHelmChart(destinationChartPath, repo, chart, chartVersion):
         logging.warning(f"No specific values.yaml found for chart '{chartName}'")
 
     logging.info(f"Running 'helm template' for chart: '{chartName}'")
-    helmTemplateOutput = subprocess.getoutput(['helm template '+ chartPath])
+    helmTemplateOutput = subprocess.getoutput(['helm template '+ chartPath + ' --namespace=PLACEHOLDER_NAMESPACE'])
 
     yamlList = helmTemplateOutput.split('---')
     for outputContent in yamlList:
@@ -774,7 +774,7 @@ def update_helm_resources(chartName, helmChart, skip_rbac_overrides, exclusions,
                 if kind in namespace_scoped_kinds:
                     resource_namespace = resource_data['metadata'].get('namespace')
 
-                    if resource_namespace is None:
+                    if resource_namespace is None or resource_namespace == "PLACEHOLDER_NAMESPACE":
                         # Use the default Helm namespace if not specified
                         resource_namespace = default_namespace
                     else:
@@ -850,7 +850,7 @@ def update_helm_resources(chartName, helmChart, skip_rbac_overrides, exclusions,
                             logging.info(f"Subject namespace for {resource_name} set to: {target_namespace} (Helm default used).\n")
 
                 with open(template_path, 'w') as f:
-                    yaml.dump(resource_data, f, width=float("inf"))
+                    yaml.dump(resource_data, f, width=float("inf"), default_flow_style=False, allow_unicode=True)
                     logging.info(f"Succesfully updated resource: {resource_name}\n")
 
             except Exception as e:
