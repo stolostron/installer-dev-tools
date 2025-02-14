@@ -269,8 +269,73 @@ def addNamespaceScopedRBAC(helmChart, rbacMap):
     logging.info("Rolebinding '%s-rolebinding.yaml' updated successfully.", name)
     logging.info("Namespace scoped RBAC created.\n")
 
+def add_webhook_configuration(helm_chart, webhook_map):
+    """Generates a Validating or Mutating WebhookConfiguration based on webhook_map."""
+    
+    deployment_name = webhook_map.get("deploymentName")
+    logging.info("Adding webhook for deployment: %s", deployment_name)
+
+    name = webhook_map.get("generateName")
+    if not name:
+        logging.warning("Missing 'generateName' in webhookdefinitions")
+        return
+    
+    webhook_type = webhook_map.get("type", "ValidatingAdmissionWebhook")
+    is_validating = webhook_type == "ValidatingAdmissionWebhook"
+
+    # Set appropriate filenames and annotations based on webhook type
+    template_filename = "validatingwebhookconfiguration.yaml" if is_validating else "mutatingwebhookconfiguration.yaml"
+    resource_filename = f"{name}-{template_filename}"
+    
+    logging.info("Templating WebhookConfiguration '%s' ...", resource_filename)
+
+    source_template = os.path.join(os.path.dirname(__file__), f"chart-templates/templates/{template_filename}")
+    destination_template = os.path.join(helm_chart, "templates", resource_filename)
+
+    shutil.copyfile(source_template, destination_template)
+
+    with open(destination_template, 'r') as f:
+        webhook_config = yaml.safe_load(f)
+
+    # Ensure 'metadata.name' is set
+    webhook_config["metadata"]["name"] = name
+
+    # Prepare webhook entry
+    webhook_entry = {
+        "name": name,
+        "admissionReviewVersions": webhook_map.get("admissionReviewVersions", ["v1"]),
+        "clientConfig": {
+            "service": {
+                "name": "webhook-service",
+                "namespace": """{{ .Values.global.namespace }}""",
+                "path": webhook_map.get("webhookPath")
+            },
+        },
+        "failurePolicy": webhook_map.get("failurePolicy", "Fail"),
+        "matchPolicy": webhook_map.get("matchPolicy", "Equivalent"),
+        "sideEffects": webhook_map.get("sideEffects", "None"),
+        "rules": webhook_map.get("rules", [])
+    }
+
+    # Append the new webhook entry
+    webhook_config["webhooks"].append(webhook_entry)
+
+    # Save updated WebhookConfiguration
+    with open(destination_template, 'w') as f:
+        yaml.dump(webhook_config, f)
+
+    logging.info("%sWebhookConfiguration '%s' updated successfully.", 
+                 "Validating" if is_validating else "Mutating", resource_filename)
+
+
 def process_csv_section(csv_data, section, handler_func, helm_chart):
     section_data = csv_data.get('spec', {}).get('install', {}).get('spec', {}).get(section)
+    if section_data:
+        for item in section_data:
+            handler_func(helm_chart, item)
+
+def process_csv_webhook_section(csv_data, section, handler_func, helm_chart):
+    section_data = csv_data.get('spec', {}).get(section)
     if section_data:
         for item in section_data:
             handler_func(helm_chart, item)
@@ -309,7 +374,7 @@ def escape_template_variables(helmChart, variables):
     logging.info("Escaped template variables.\n")
 
 # Adds resources identified in the CSV to the helmchart
-def extract_csv_resources(helm_chart, csv_path):
+def extract_csv_resources(helm_chart, csv_path, ignore_webhook_definitions=True):
     logging.info("Reading CSV file: '%s'", csv_path)
 
     try:
@@ -330,6 +395,10 @@ def extract_csv_resources(helm_chart, csv_path):
 
     # Process permissions (Roles)
     process_csv_section(csv_data, "permissions", addNamespaceScopedRBAC, helm_chart)
+
+    # Process webhookdefinitions
+    if not ignore_webhook_definitions:
+        process_csv_webhook_section(csv_data, "webhookdefinitions", add_webhook_configuration, helm_chart)
 
     logging.info("Resources have been successfully added to chart '%s' from CSV '%s'.\n", helm_chart, csv_path)
 
@@ -1149,9 +1218,12 @@ def main():
             fillChartYaml(helmChart, operator["name"], csvPath)
             logging.info("Chart.yaml filled successfully.\n")
 
+            # Check to see if we should ignore webhook definitions defined in the CSV
+            ignore_webhook_definitions = operator.get("ignore-webhook-definitions", True)
+
             # Add all basic resources to the helm chart from the CSV
             logging.info("Adding Resources from CSV to helm chart '%s' ...", operator["name"])
-            extract_csv_resources(helmChart, csvPath)
+            extract_csv_resources(helmChart, csvPath, ignore_webhook_definitions)
             copy_additional_resources(helmChart, csvPath)
             escape_template_variables(helmChart, escaped_variables)
             logging.info("Resources added from CSV successfully.\n")
