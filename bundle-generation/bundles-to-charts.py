@@ -3,17 +3,26 @@
 # Copyright Contributors to the Open Cluster Management project
 # Assumes: Python 3.6+
 
+"""_summary_
+
+Raises:
+    ValueError: _description_
+
+Returns:
+    _type_: _description_
+"""
+
 import argparse
 import os
 import shutil
-import yaml
 import logging
-import coloredlogs
-import sys
 import re
-from git import Repo, exc
-from packaging import version
+import sys
+import coloredlogs
+import yaml
 
+from git import Repo
+from packaging import version
 from validate_csv import *
 
 # Configure logging with coloredlogs
@@ -22,6 +31,16 @@ coloredlogs.install(level='DEBUG')  # Set the logging level as needed
 # Split a string at a specified delimiter.  If delimiter doesn't exist, consider the
 # string to be all "left-part" (before delimiter) or "right-part" as requested.
 def split_at(the_str, the_delim, favor_right=True):
+    """_summary_
+
+    Args:
+        the_str (_type_): _description_
+        the_delim (_type_): _description_
+        favor_right (bool, optional): _description_. Defaults to True.
+
+    Returns:
+        _type_: _description_
+    """
     split_pos = the_str.find(the_delim)
     if split_pos > 0:
         left_part  = the_str[0:split_pos]
@@ -38,6 +57,14 @@ def split_at(the_str, the_delim, favor_right=True):
 
 # Parse an image reference, return dict containing image reference information
 def parse_image_ref(image_ref):
+    """_summary_
+
+    Args:
+        image_ref (_type_): _description_
+
+    Returns:
+        _type_: _description_
+    """
     # Image ref:  [registry-and-ns/]repository-name[:tag][@digest]
     parsed_ref = dict()
 
@@ -124,6 +151,13 @@ def templateHelmChart(outputDir, helmChart, preservedFiles=None, overwrite=False
 
 # Fill in the chart.yaml template with information from the CSV
 def fillChartYaml(helmChart, name, csvPath):
+    """_summary_
+
+    Args:
+        helmChart (_type_): _description_
+        name (_type_): _description_
+        csvPath (_type_): _description_
+    """
     logging.info("Updating '%s' Chart.yaml file ...", helmChart)
     chartYml = os.path.join(helmChart, "Chart.yaml")
 
@@ -132,16 +166,16 @@ def fillChartYaml(helmChart, name, csvPath):
         chart = yaml.safe_load(f)
 
     # logging.info("%s", csvPath)
-    # Read CSV    
+    # Read CSV
     with open(csvPath, 'r') as f:
         csv = yaml.safe_load(f)
 
     logging.info("Chart Name: %s", helmChart)
-    
+
 
     # Write to Chart.yaml
     chart['name'] = name
-    
+
     if 'metadata' in csv:
         if 'annotations' in csv ["metadata"]:
             if 'description' in csv["metadata"]["annotations"]:
@@ -153,7 +187,13 @@ def fillChartYaml(helmChart, name, csvPath):
     logging.info("'%s' Chart.yaml updated successfully.\n", helmChart)
 
 # Copy chart-templates/deployment, update it with CSV deployment information, and add to chart
-def addDeployment(helmChart, deployment):
+def add_deployment(helmChart, deployment):
+    """_summary_
+
+    Args:
+        helmChart (_type_): _description_
+        deployment (_type_): _description_
+    """
     name = deployment["name"]
     logging.info("Templating deployment '%s.yaml' ...", name)
 
@@ -162,7 +202,7 @@ def addDeployment(helmChart, deployment):
 
     with open(deployYaml, 'r') as f:
         deploy = yaml.safe_load(f)
-        
+
     deploy['spec'] = deployment['spec']
     if 'spec' in deploy:
         if 'template' in deploy['spec']:
@@ -175,13 +215,19 @@ def addDeployment(helmChart, deployment):
     logging.info("Deployment '%s.yaml' updated successfully.\n", name)
 
 # Copy chart-templates/clusterrole,clusterrolebinding,serviceaccount.yaml update it with CSV information, and add to chart
-def addClusterScopedRBAC(helmChart, rbacMap):
+def add_cluster_scoped_rbac(helmChart, rbacMap):
+    """_summary_
+
+    Args:
+        helmChart (_type_): _description_
+        rbacMap (_type_): _description_
+    """
     name = rbacMap["serviceAccountName"]
     # name = "not-default"
-    
+
     logging.info("Setting cluster scoped RBAC ...")
     logging.info("Templating clusterrole '%s-clusterrole.yaml' ...", name)
-    
+
     # Create Clusterrole
     clusterroleYaml = os.path.join(helmChart, "templates",  name + "-clusterrole.yaml")
     shutil.copyfile(os.path.join(os.path.dirname(os.path.realpath(__file__)), "chart-templates/templates/clusterrole.yaml"), clusterroleYaml)
@@ -194,7 +240,7 @@ def addClusterScopedRBAC(helmChart, rbacMap):
     with open(clusterroleYaml, 'w') as f:
         yaml.dump(clusterrole, f)
     logging.info("Clusterrole '%s-clusterrole.yaml' updated successfully.", name)
-    
+
     logging.info("Templating serviceaccount '%s-serviceaccount.yaml' ...", name)
     # Create Serviceaccount
     serviceAccountYaml = os.path.join(helmChart, "templates",  name + "-serviceaccount.yaml")
@@ -223,7 +269,13 @@ def addClusterScopedRBAC(helmChart, rbacMap):
     logging.info("Cluster scoped RBAC created.\n")
 
 # Copy over role, rolebinding, and serviceaccount templates from chart-templates/templates, update with CSV information, and add to chart
-def addNamespaceScopedRBAC(helmChart, rbacMap):
+def add_namespace_scoped_rbac(helmChart, rbacMap):
+    """_summary_
+
+    Args:
+        helmChart (_type_): _description_
+        rbacMap (_type_): _description_
+    """
     name = rbacMap["serviceAccountName"]
     # name = "not-default"
     logging.info("Setting namespaced scoped RBAC ...")
@@ -240,7 +292,7 @@ def addNamespaceScopedRBAC(helmChart, rbacMap):
     with open(roleYaml, 'w') as f:
         yaml.dump(role, f)
     logging.info("Role '%s-role.yaml' updated successfully.", name)
-    
+
     # Create Serviceaccount
     serviceAccountYaml = os.path.join(helmChart, "templates",  name + "-serviceaccount.yaml")
     if not os.path.isfile(serviceAccountYaml):
@@ -271,7 +323,7 @@ def addNamespaceScopedRBAC(helmChart, rbacMap):
 
 def add_webhook_configuration(helm_chart, webhook_map):
     """Generates a Validating or Mutating WebhookConfiguration based on webhook_map."""
-    
+
     deployment_name = webhook_map.get("deploymentName")
     logging.info("Adding webhook for deployment: %s", deployment_name)
 
@@ -279,14 +331,14 @@ def add_webhook_configuration(helm_chart, webhook_map):
     if not name:
         logging.warning("Missing 'generateName' in webhookdefinitions")
         return
-    
+
     webhook_type = webhook_map.get("type", "ValidatingAdmissionWebhook")
     is_validating = webhook_type == "ValidatingAdmissionWebhook"
 
     # Set appropriate filenames and annotations based on webhook type
     template_filename = "validatingwebhookconfiguration.yaml" if is_validating else "mutatingwebhookconfiguration.yaml"
     resource_filename = f"{name}-{template_filename}"
-    
+
     logging.info("Templating WebhookConfiguration '%s' ...", resource_filename)
 
     source_template = os.path.join(os.path.dirname(__file__), f"chart-templates/templates/{template_filename}")
@@ -324,17 +376,33 @@ def add_webhook_configuration(helm_chart, webhook_map):
     with open(destination_template, 'w') as f:
         yaml.dump(webhook_config, f)
 
-    logging.info("%sWebhookConfiguration '%s' updated successfully.", 
+    logging.info("%sWebhookConfiguration '%s' updated successfully.",
                  "Validating" if is_validating else "Mutating", resource_filename)
 
 
 def process_csv_section(csv_data, section, handler_func, helm_chart):
+    """_summary_
+
+    Args:
+        csv_data (_type_): _description_
+        section (_type_): _description_
+        handler_func (_type_): _description_
+        helm_chart (_type_): _description_
+    """
     section_data = csv_data.get('spec', {}).get('install', {}).get('spec', {}).get(section)
     if section_data:
         for item in section_data:
             handler_func(helm_chart, item)
 
 def process_csv_webhook_section(csv_data, section, handler_func, helm_chart):
+    """_summary_
+
+    Args:
+        csv_data (_type_): _description_
+        section (_type_): _description_
+        handler_func (_type_): _description_
+        helm_chart (_type_): _description_
+    """
     section_data = csv_data.get('spec', {}).get(section)
     if section_data:
         for item in section_data:
@@ -356,6 +424,12 @@ def check_unsupported_csv_resources(csv_path, csv_data, supported_config_types):
     return False
 
 def escape_template_variables(helmChart, variables):
+    """_summary_
+
+    Args:
+        helmChart (_type_): _description_
+        variables (_type_): _description_
+    """
     addonTemplates = findTemplatesOfType(helmChart, 'AddOnTemplate')
     for addonTemplate in addonTemplates:
         for variable in variables:
@@ -375,6 +449,13 @@ def escape_template_variables(helmChart, variables):
 
 # Adds resources identified in the CSV to the helmchart
 def extract_csv_resources(helm_chart, csv_path, ignore_webhook_definitions=True):
+    """_summary_
+
+    Args:
+        helm_chart (_type_): _description_
+        csv_path (_type_): _description_
+        ignore_webhook_definitions (bool, optional): _description_. Defaults to True.
+    """
     logging.info("Reading CSV file: '%s'", csv_path)
 
     try:
@@ -388,25 +469,31 @@ def extract_csv_resources(helm_chart, csv_path, ignore_webhook_definitions=True)
     supported_csv_install_spec_types = ["customResourceDefinitions","clusterPermissions", "deployments", "permissions"]
 
     # Process deployments
-    process_csv_section(csv_data, "deployments", addDeployment, helm_chart)
+    process_csv_section(csv_data, "deployments", add_deployment, helm_chart)
 
     # Process clusterPermissions (ClusterRoles)
-    process_csv_section(csv_data, "clusterPermissions", addClusterScopedRBAC, helm_chart)
+    process_csv_section(csv_data, "clusterPermissions", add_cluster_scoped_rbac, helm_chart)
 
     # Process permissions (Roles)
-    process_csv_section(csv_data, "permissions", addNamespaceScopedRBAC, helm_chart)
+    process_csv_section(csv_data, "permissions", add_namespace_scoped_rbac, helm_chart)
 
     # Process webhookdefinitions
-    if not ignore_webhook_definitions:
-        process_csv_webhook_section(csv_data, "webhookdefinitions", add_webhook_configuration, helm_chart)
+    # if not ignore_webhook_definitions:
+    #     process_csv_webhook_section(csv_data, "webhookdefinitions", add_webhook_configuration, helm_chart)
 
     logging.info("Resources have been successfully added to chart '%s' from CSV '%s'.\n", helm_chart, csv_path)
 
     if check_unsupported_csv_resources(csv_data, csv_data, supported_csv_install_spec_types):
-        exit(1)
+        sys.exit(1)
 
 # Copies additional resources from the CSV directory to the Helm chart
 def copy_additional_resources(helmChart, csvPath):
+    """_summary_
+
+    Args:
+        helmChart (_type_): _description_
+        csvPath (_type_): _description_
+    """
     logging.info("Copying additional resources from the bundle manifests if present ...")
 
     dirPath = os.path.dirname(csvPath)
@@ -427,7 +514,7 @@ def copy_additional_resources(helmChart, csvPath):
     ignored_or_excluded_bundle_resource_types = ["ClusterServiceVersion", "CustomResourceDefinition"]
 
     # List of resources that should be **expected** in the OLM bundle, including both required and optional resources.
-    expected_bundle_resource_types = required_bundle_resource_types + optional_supported_bundle_resourceTypes 
+    expected_bundle_resource_types = required_bundle_resource_types + optional_supported_bundle_resourceTypes
 
     # List of collected unsupported resource types found in the bundle manifest
     unsupported_resources = []
@@ -477,6 +564,15 @@ def copy_additional_resources(helmChart, csvPath):
 
 # Given a resource Kind, return all filepaths of that resource type in a chart directory
 def findTemplatesOfType(helmChart, kind):
+    """_summary_
+
+    Args:
+        helmChart (_type_): _description_
+        kind (_type_): _description_
+
+    Returns:
+        _type_: _description_
+    """
     resources = []
     for filename in os.listdir(os.path.join(helmChart, "templates")):
         if filename.endswith(".yaml") or filename.endswith(".yml"):
@@ -493,6 +589,12 @@ def findTemplatesOfType(helmChart, kind):
 # For each deployment, identify the image references if any exist in the environment variable fields, insert helm flow control code to reference it, and add image-key to the values.yaml file.
 # If the image-key referenced in the deployment does not exist in `imageMappings` in the Config.yaml, this will fail. Images must be explicitly defined
 def fixEnvVarImageReferences(helmChart, imageKeyMapping):
+    """_summary_
+
+    Args:
+        helmChart (_type_): _description_
+        imageKeyMapping (_type_): _description_
+    """
     logging.info("Fixing image references in container 'env' section in deployments and values.yaml ...")
     valuesYaml = os.path.join(helmChart, "values.yaml")
     with open(valuesYaml, 'r') as f:
@@ -506,7 +608,7 @@ def fixEnvVarImageReferences(helmChart, imageKeyMapping):
 
         containers = deploy['spec']['template']['spec']['containers']
         for container in containers:
-            if 'env' not in container: 
+            if 'env' not in container:
                 continue
 
             for env in container['env']:
@@ -517,8 +619,8 @@ def fixEnvVarImageReferences(helmChart, imageKeyMapping):
                 try:
                     image_key = imageKeyMapping[image_key]
                 except KeyError:
-                    logging.critical("No image key mapping provided for imageKey: %s" % image_key)
-                    exit(1)
+                    logging.critical("No image key mapping provided for imageKey: %s", image_key)
+                    sys.exit(1)
                 imageKeys.append(image_key)
                 env['value'] = "{{ .Values.global.imageOverrides." + image_key + " }}"
         with open(deployment, 'w') as f:
@@ -533,6 +635,12 @@ def fixEnvVarImageReferences(helmChart, imageKeyMapping):
 # For each deployment, identify the image references if any exist in the image field, insert helm flow control code to reference it, and add image-key to the values.yaml file.
 # If the image-key referenced in the deployment does not exist in `imageMappings` in the Config.yaml, this will fail. Images must be explicitly defined
 def fixImageReferences(helmChart, imageKeyMapping):
+    """_summary_
+
+    Args:
+        helmChart (_type_): _description_
+        imageKeyMapping (_type_): _description_
+    """
     logging.info("Fixing image and pull policy references in deployments and values.yaml ...")
     valuesYaml = os.path.join(helmChart, "values.yaml")
     with open(valuesYaml, 'r') as f:
@@ -551,10 +659,10 @@ def fixImageReferences(helmChart, imageKeyMapping):
             try:
                 image_key = imageKeyMapping[image_key]
             except KeyError:
-                logging.critical("No image key mapping provided for imageKey: %s" % image_key)
-                exit(1)
+                logging.critical("No image key mapping provided for imageKey: %s", image_key)
+                sys.exit(1)
             imageKeys.append(image_key)
-            # temp = container['image'] 
+            # temp = container['image']
             container['image'] = "{{ .Values.global.imageOverrides." + image_key + " }}"
             container['imagePullPolicy'] = "{{ .Values.global.pullPolicy }}"
         with open(deployment, 'w') as f:
@@ -571,16 +679,36 @@ def fixImageReferences(helmChart, imageKeyMapping):
         yaml.dump(values, f)
     logging.info("Image references and pull policy in deployments and values.yaml updated successfully.\n")
 
-# insers Heml flow control if/end block around a first and last line without changing
+# insert Heml flow control if/end block around a first and last line without changing
 # the indexes of the lines list (so as to not mess up iteration across the lines).
 def insertFlowControlIfAround(lines_list, first_line_index, last_line_index, if_condition):
-   lines_list[first_line_index] = "{{- if %s }}\n%s" % (if_condition, lines_list[first_line_index])
-   lines_list[last_line_index] = "%s{{- end }}\n" % lines_list[last_line_index]
+    """_summary_
+
+    Args:
+        lines_list (_type_): _description_
+        first_line_index (_type_): _description_
+        last_line_index (_type_): _description_
+        if_condition (_type_): _description_
+    """
+    lines_list[first_line_index] = "{{- if %s }}\n%s" % (if_condition, lines_list[first_line_index])
+    lines_list[last_line_index] = "%s{{- end }}\n" % lines_list[last_line_index]
 
 def is_version_compatible(branch, min_release_version, min_backplane_version, min_ocm_version, enforce_master_check=True):
+    """_summary_
+
+    Args:
+        branch (_type_): _description_
+        min_release_version (_type_): _description_
+        min_backplane_version (_type_): _description_
+        min_ocm_version (_type_): _description_
+        enforce_master_check (bool, optional): _description_. Defaults to True.
+
+    Returns:
+        _type_: _description_
+    """
     # Extract the version part from the branch name (e.g., '2.12-integration' -> '2.12')
     pattern = r'(\d+\.\d+)'  # Matches versions like '2.12'
-    
+
     if branch == "main" or branch == "master":
         if enforce_master_check:
             return True
@@ -602,18 +730,28 @@ def is_version_compatible(branch, min_release_version, min_backplane_version, mi
             min_branch_version = version.Version(min_backplane_version)  # Use the minimum backplane version
 
         else:
-            logging.error(f"Unrecognized branch type for branch: {branch}")
+            logging.error("Unrecognized branch type for branch: %s", branch)
             return False
 
         # Check if the branch version is compatible with the specified minimum branch
         return branch_version >= min_branch_version
 
     else:
-        logging.error(f"Version not found in branch: {branch}")
+        logging.error("Version not found in branch: %s", branch)
         return False
 
 # injectHelmFlowControl injects advanced helm flow control which would typically make a .yaml file more difficult to parse. This should be called last.
 def injectHelmFlowControl(deployment, sizes, branch):
+    """_summary_
+
+    Args:
+        deployment (_type_): _description_
+        sizes (_type_): _description_
+        branch (_type_): _description_
+
+    Returns:
+        _type_: _description_
+    """
     logging.info("Adding Helm flow control for NodeSelector, Proxy Overrides and SecCompProfile...")
     deploy = open(deployment, "r")
     with open(deployment, 'r') as f:
@@ -625,7 +763,7 @@ def injectHelmFlowControl(deployment, sizes, branch):
       nodeSelector:
 {{ toYaml . | indent 8 }}
 {{- end }}
-"""     
+"""
         if line.strip() == "imagePullSecrets: \'\'":
             lines[i] = """{{- if .Values.global.pullSecret }}
       imagePullSecrets:
@@ -655,13 +793,13 @@ def injectHelmFlowControl(deployment, sizes, branch):
         - name: NO_PROXY
           value: {{ .Values.hubconfig.proxyConfigs.NO_PROXY }}
 {{- end }}
-"""     
+"""
 
         if is_version_compatible(branch, '9.9', '9.9', '9.9', False):
             if 'replicas:' in line.strip():
                 lines[i] = """  replicas: {{ .Values.hubconfig.replicaCount }}
 """
-            
+
         if sizes:
             for sizDeployment in sizes["deployments"]:
                 if sizDeployment["name"] == deployx["metadata"]["name"]:
@@ -715,6 +853,15 @@ def injectHelmFlowControl(deployment, sizes, branch):
 
 # updateDeployments adds standard configuration to the deployments (antiaffinity, security policies, and tolerations)
 def updateDeployments(helmChart, operator, exclusions, sizes, branch):
+    """_summary_
+
+    Args:
+        helmChart (_type_): _description_
+        operator (_type_): _description_
+        exclusions (_type_): _description_
+        sizes (_type_): _description_
+        branch (_type_): _description_
+    """
     logging.info("Updating deployments with antiaffinity, security policies, and tolerations ...")
     deploySpecYaml = os.path.join(os.path.dirname(os.path.realpath(__file__)), "chart-templates/templates/deploymentspec.yaml")
     with open(deploySpecYaml, 'r') as f:
@@ -735,7 +882,7 @@ def updateDeployments(helmChart, operator, exclusions, sizes, branch):
                     for i in deploy['spec']['template']['spec']['containers']:
                         if not any(d['name'] == i['name'] for d in sizDeployment["containers"]):
                             logging.error("Missing container in sizes.yaml")
-                            exit(1)
+                            sys.exit(1)
                         for sizContainer in sizDeployment["containers"]:
                             if sizContainer["name"] == i["name"]:
                                 i['resources'] = 'REPLACE-' + i['name']
@@ -775,7 +922,7 @@ def updateDeployments(helmChart, operator, exclusions, sizes, branch):
             if 'env' not in container:
                 container['env'] = {}
 
-            if 'securityContext' not in container: 
+            if 'securityContext' not in container:
                 container['securityContext'] = {}
             container_security_context = container['securityContext']
             container_security_context['allowPrivilegeEscalation'] = False
@@ -790,7 +937,7 @@ def updateDeployments(helmChart, operator, exclusions, sizes, branch):
                     del container_security_context['seccompProfile']
                 else:
                     container_name = container['name']
-                    logging.warning("Leaving non-standard seccompprofile setting for container %s" % container_name)
+                    logging.warning("Leaving non-standard seccompprofile setting for container %s", container_name)
 
 
         with open(deployment, 'w') as f:
@@ -801,6 +948,11 @@ def updateDeployments(helmChart, operator, exclusions, sizes, branch):
 
 # updateRBAC adds standard configuration to the RBAC resources (clusterroles, roles, clusterrolebindings, and rolebindings)
 def updateRBAC(helmChart):
+    """_summary_
+
+    Args:
+        helmChart (_type_): _description_
+    """
     logging.info("Updating clusterroles, roles, clusterrolebindings, and rolebindings ...")
     clusterroles = findTemplatesOfType(helmChart, 'ClusterRole')
     roles = findTemplatesOfType(helmChart, 'Role')
@@ -819,6 +971,15 @@ def updateRBAC(helmChart):
 
 
 def injectRequirements(helmChart, operator, exclusions, sizes, branch):
+    """_summary_
+
+    Args:
+        helmChart (_type_): _description_
+        operator (_type_): _description_
+        exclusions (_type_): _description_
+        sizes (_type_): _description_
+        branch (_type_): _description_
+    """
     logging.info("Updating Helm chart '%s' with onboarding requirements ...", helmChart)
     imageKeyMapping = operator.get('imageMappings', {})
 
@@ -880,7 +1041,7 @@ def addCRDs(repo, operator, outputDir, preservedFiles=None, overwrite=False):
         logging.debug("Created directory for CRDs: %s", directoryPath)
 
     for filename in os.listdir(manifestsPath):
-        if not filename.endswith(".yaml"): 
+        if not filename.endswith(".yaml"):
             continue
 
         filepath = os.path.join(manifestsPath, filename)
@@ -906,32 +1067,32 @@ def getBundleManifestsPath(repo, operator):
     if 'bundlePath' in operator:
         bundlePath = os.path.join(os.path.dirname(os.path.realpath(__file__)), "tmp", repo, operator["bundlePath"])
         if not os.path.exists(bundlePath):
-            logging.critical("Could not validate bundlePath at given path: " + operator["bundlePath"])
-            exit(1)
+            logging.critical("Could not validate bundlePath at given path: %s", operator["bundlePath"])
+            sys.exit(1)
         return bundlePath
-    
+
     # check every bundle's metadata for its supported channels
     bundles_directory = os.path.join(os.path.dirname(os.path.realpath(__file__)), "tmp", repo, operator["bundles-directory"])
     if not os.path.exists(bundles_directory):
-        logging.critical("Could not find bundles at given path: " + operator["bundles-directory"])
-        exit(1)
+        logging.critical("Could not find bundles at given path: %s", operator["bundles-directory"])
+        sys.exit(1)
 
     latest_bundle_version = "0.0.0"
     directories = [dir for dir in os.listdir(bundles_directory) if os.path.isdir(os.path.join(bundles_directory, dir))]
     for dir_name in directories:
         bundle_path = os.path.join(bundles_directory, dir_name)
-        
+
         # Read metadata annotations
         annotations_file = os.path.join(bundle_path, "metadata", "annotations.yaml")
         if not os.path.isfile(annotations_file):
-            logging.critical("Could not find annotations at given path: " + annotations_file)
-            exit(1)
+            logging.critical("Could not find annotations at given path: %s", annotations_file)
+            sys.exit(1)
         with open(annotations_file, 'r') as f:
             annotations = yaml.safe_load(f)
             channels = annotations.get('annotations', {}).get('operators.operatorframework.io.bundle.channels.v1').split(',')
             if not channels:
-                logging.critical("Could not find channels in annotations file at given path: " + annotations_file)
-                exit(1)
+                logging.critical("Could not find channels in annotations file at given path: %s", annotations_file)
+                sys.exit(1)
             if operator["channel"] in channels:
                 # compare semantic version based on directory name
                 if version.parse(dir_name) > version.parse(latest_bundle_version):
@@ -941,11 +1102,20 @@ def getBundleManifestsPath(repo, operator):
     return latest_bundle_path
 
 def get_csv_path(repo, operator):
+    """_summary_
+
+    Args:
+        repo (_type_): _description_
+        operator (_type_): _description_
+
+    Returns:
+        _type_: _description_
+    """
     if 'bundlePath' in operator:
         manifests_path = os.path.join(os.path.dirname(os.path.realpath(__file__)), "tmp", repo, operator["bundlePath"])
         if not os.path.exists(manifests_path):
-            logging.critical("Could not validate bundlePath at given path: " + operator["bundlePath"])
-            exit(1)
+            logging.critical("Could not validate bundlePath at given path: %s", operator["bundlePath"])
+            sys.exit(1)
         else:
             logging.info("Using specified bundlePath: %s", operator["bundlePath"])
 
@@ -956,7 +1126,7 @@ def get_csv_path(repo, operator):
 
     logging.info("Searching for CSV file in directory: %s", manifests_path)
     for file_name in os.listdir(manifests_path):
-        if not file_name.endswith(".yaml"): 
+        if not file_name.endswith(".yaml"):
             continue
 
         file_path = os.path.join(manifests_path, file_name)
@@ -973,6 +1143,11 @@ def get_csv_path(repo, operator):
 # injectAnnotationsForAddonTemplate injects following annotations for deployments in the AddonTemplate:
 # - target.workload.openshift.io/management: '{"effect": "PreferredDuringScheduling"}'
 def injectAnnotationsForAddonTemplate(helmChart):
+    """_summary_
+
+    Args:
+        helmChart (_type_): _description_
+    """
     logging.info("Injecting Annotations for deployments in the AddonTemplate ...")
 
     addonTemplates = findTemplatesOfType(helmChart, 'AddOnTemplate')
@@ -1005,6 +1180,12 @@ def injectAnnotationsForAddonTemplate(helmChart):
 # If the image-key referenced in the addon template deployment does not exist in `imageMappings` in the Config.yaml,
 # this will fail. Images must be explicitly defined
 def fixImageReferencesForAddonTemplate(helmChart, imageKeyMapping):
+    """_summary_
+
+    Args:
+        helmChart (_type_): _description_
+        imageKeyMapping (_type_): _description_
+    """
     logging.info("Fixing image references in addon templates and values.yaml ...")
 
     addonTemplates = findTemplatesOfType(helmChart, 'AddOnTemplate')
@@ -1029,8 +1210,8 @@ def fixImageReferencesForAddonTemplate(helmChart, imageKeyMapping):
                         try:
                             image_key = imageKeyMapping[image_key]
                         except KeyError:
-                            logging.critical("No image key mapping provided for imageKey: %s" % image_key)
-                            exit(1)
+                            logging.critical("No image key mapping provided for imageKey: %s", image_key)
+                            sys.exit(1)
                         imageKeys.append(image_key)
                         container['image'] = "{{ .Values.global.imageOverrides." + image_key + " }}"
                         # container['imagePullPolicy'] = "{{ .Values.global.pullPolicy }}"
@@ -1052,6 +1233,8 @@ def fixImageReferencesForAddonTemplate(helmChart, imageKeyMapping):
     logging.info("Image references and pull policy in addon templates and values.yaml updated successfully.\n")
 
 def main():
+    """_summary_
+    """
     logging.basicConfig(level=logging.INFO)
     logging.info("Script started.")
 
@@ -1070,7 +1253,7 @@ def main():
 
     if lint == False and not destination:
         logging.critical("Destination directory is required when not linting.")
-        exit(1)
+        sys.exit(1)
 
     # Config.yaml holds the configurations for Operator bundle locations to be used
     configYaml = os.path.join(os.path.dirname(os.path.realpath(__file__)),"config.yaml")
@@ -1128,14 +1311,14 @@ def main():
 
             except KeyError:
                 logging.critical("branch and bundlePath are required for tool-generated bundles")
-                exit(1)
+                sys.exit(1)
             cmd = "%s %s %s %s" % (repo["gen_command"], branch, sha, bundlePath)
 
             logging.info("Running bundle-gen tool: %s", cmd)
             rc = os.system(cmd)
             if rc != 0:
                 logging.critical("Bundle-generation script exited with errors.")
-                exit(1)
+                sys.exit(1)
 
             # Convert the repo entry  to the format used for Github-sourced bundles
             # so we can use a common path for both below.
@@ -1154,7 +1337,7 @@ def main():
 
         else:
             logging.critical("Config entry doesn't specify either a Git repo or a generation command")
-            exit(1)
+            sys.exit(1)
 
         # Loop through each operator in the repo identified by the config
         for operator in repo["operators"]:
@@ -1167,7 +1350,7 @@ def main():
             if csvPath == "":
                 # Validate the bundlePath exists in config.yaml
                 logging.error("Unable to find given channel: %s", operator.get("channel", "Channel not specified"))
-                exit(1)
+                sys.exit(1)
 
             branch = repo.get("branch", "")
             escaped_variables = operator.get("escape-template-variables", [])
@@ -1175,7 +1358,7 @@ def main():
             # Validate CSV exists
             if not os.path.isfile(csvPath):
                 logging.critical("Unable to find CSV at given path - '%s'.", csvPath)
-                exit(1)
+                sys.exit(1)
 
             if lint:
                 # Lint the CSV
@@ -1184,9 +1367,17 @@ def main():
                     logging.error("CSV Validation errors detected")
                     for err in errs:
                         logging.error(err)
-                    exit(1)
+                    sys.exit(1)
                 logging.info("CSV validated successfully!\n")
                 continue
+
+            additional_files = []
+            for file in operator.get("additional_resource_files", []):
+                additional_files.append(
+                    os.path.join(os.path.dirname(os.path.realpath(__file__)), "tmp", repo, file)
+                )
+
+            logging.info("additional_files: %s", str(additional_files))
 
             # Get preserved files from config or set default value
             preservedFiles = operator.get("preserve_files", [])
@@ -1202,7 +1393,7 @@ def main():
             helmChart = operator["name"]
             if helmChart == "":
                 logging.critical("Unable to generate helm chart without a name.")
-                exit(1)
+                sys.exit(1)
 
             logging.info("Creating helm chart: '%s' ...", operator["name"])
             # Template Helm Chart Directory from 'chart-templates'
