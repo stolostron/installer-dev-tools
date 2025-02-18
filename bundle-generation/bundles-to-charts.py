@@ -28,6 +28,9 @@ from validate_csv import *
 # Configure logging with coloredlogs
 coloredlogs.install(level='DEBUG')  # Set the logging level as needed
 
+# Config Constants
+SCRIPT_DIR = os.path.join(os.path.dirname(os.path.realpath(__file__)))
+
 # Split a string at a specified delimiter.  If delimiter doesn't exist, consider the
 # string to be all "left-part" (before delimiter) or "right-part" as requested.
 def split_at(the_str, the_delim, favor_right=True):
@@ -162,12 +165,12 @@ def fillChartYaml(helmChart, name, csvPath):
     chartYml = os.path.join(helmChart, "Chart.yaml")
 
     # Read Chart.yaml
-    with open(chartYml, 'r') as f:
+    with open(chartYml, 'r', encoding='utf-8') as f:
         chart = yaml.safe_load(f)
 
     # logging.info("%s", csvPath)
     # Read CSV
-    with open(csvPath, 'r') as f:
+    with open(csvPath, 'r', encoding='utf-8') as f:
         csv = yaml.safe_load(f)
 
     logging.info("Chart Name: %s", helmChart)
@@ -182,7 +185,7 @@ def fillChartYaml(helmChart, name, csvPath):
                 logging.info("Description: %s", csv["metadata"]["annotations"]["description"])
                 chart['description'] = csv["metadata"]["annotations"]["description"]
     # chart['version'] = csv['metadata']['name'].split(".", 1)[1][1:]
-    with open(chartYml, 'w') as f:
+    with open(chartYml, 'w', encoding='utf-8') as f:
         yaml.dump(chart, f)
     logging.info("'%s' Chart.yaml updated successfully.\n", helmChart)
 
@@ -200,7 +203,7 @@ def add_deployment(helmChart, deployment):
     deployYaml = os.path.join(helmChart, "templates",  name + ".yaml")
     shutil.copyfile(os.path.join(os.path.dirname(os.path.realpath(__file__)), "chart-templates/templates/deployment.yaml"), deployYaml)
 
-    with open(deployYaml, 'r') as f:
+    with open(deployYaml, 'r', encoding='utf-8') as f:
         deploy = yaml.safe_load(f)
 
     deploy['spec'] = deployment['spec']
@@ -210,7 +213,7 @@ def add_deployment(helmChart, deployment):
                 if 'imagePullPolicy' in deploy['spec']['template']['spec']:
                     del deploy['spec']['template']['spec']['imagePullPolicy']
     deploy['metadata']['name'] = name
-    with open(deployYaml, 'w') as f:
+    with open(deployYaml, 'w', encoding='utf-8') as f:
         yaml.dump(deploy, f)
     logging.info("Deployment '%s.yaml' updated successfully.\n", name)
 
@@ -231,13 +234,13 @@ def add_cluster_scoped_rbac(helmChart, rbacMap):
     # Create Clusterrole
     clusterroleYaml = os.path.join(helmChart, "templates",  name + "-clusterrole.yaml")
     shutil.copyfile(os.path.join(os.path.dirname(os.path.realpath(__file__)), "chart-templates/templates/clusterrole.yaml"), clusterroleYaml)
-    with open(clusterroleYaml, 'r') as f:
+    with open(clusterroleYaml, 'r', encoding='utf-8') as f:
         clusterrole = yaml.safe_load(f)
     # Edit Clusterrole
     clusterrole["rules"] = rbacMap["rules"]
     clusterrole["metadata"]["name"] = name
     # Save Clusterrole
-    with open(clusterroleYaml, 'w') as f:
+    with open(clusterroleYaml, 'w', encoding='utf-8') as f:
         yaml.dump(clusterrole, f)
     logging.info("Clusterrole '%s-clusterrole.yaml' updated successfully.", name)
 
@@ -245,12 +248,12 @@ def add_cluster_scoped_rbac(helmChart, rbacMap):
     # Create Serviceaccount
     serviceAccountYaml = os.path.join(helmChart, "templates",  name + "-serviceaccount.yaml")
     shutil.copyfile(os.path.join(os.path.dirname(os.path.realpath(__file__)), "chart-templates/templates/serviceaccount.yaml"), serviceAccountYaml)
-    with open(serviceAccountYaml, 'r') as f:
+    with open(serviceAccountYaml, 'r', encoding='utf-8') as f:
         serviceAccount = yaml.safe_load(f)
     # Edit Serviceaccount
     serviceAccount["metadata"]["name"] = name
     # Save Serviceaccount
-    with open(serviceAccountYaml, 'w') as f:
+    with open(serviceAccountYaml, 'w', encoding='utf-8') as f:
         yaml.dump(serviceAccount, f)
     logging.info("Serviceaccount '%s-serviceaccount.yaml' updated successfully.", name)
 
@@ -258,12 +261,12 @@ def add_cluster_scoped_rbac(helmChart, rbacMap):
     # Create Clusterrolebinding
     clusterrolebindingYaml = os.path.join(helmChart, "templates",  name + "-clusterrolebinding.yaml")
     shutil.copyfile(os.path.join(os.path.dirname(os.path.realpath(__file__)), "chart-templates/templates/clusterrolebinding.yaml"), clusterrolebindingYaml)
-    with open(clusterrolebindingYaml, 'r') as f:
+    with open(clusterrolebindingYaml, 'r', encoding='utf-8') as f:
         clusterrolebinding = yaml.safe_load(f)
     clusterrolebinding['metadata']['name'] = name
     clusterrolebinding['roleRef']['name'] = clusterrole["metadata"]["name"]
     clusterrolebinding['subjects'][0]['name'] = name
-    with open(clusterrolebindingYaml, 'w') as f:
+    with open(clusterrolebindingYaml, 'w', encoding='utf-8') as f:
         yaml.dump(clusterrolebinding, f)
     logging.info("Clusterrolebinding '%s-clusterrolebinding.yaml' updated successfully.", name)
     logging.info("Cluster scoped RBAC created.\n")
@@ -283,13 +286,13 @@ def add_namespace_scoped_rbac(helmChart, rbacMap):
     # Create role
     roleYaml = os.path.join(helmChart, "templates",  name + "-role.yaml")
     shutil.copyfile(os.path.join(os.path.dirname(os.path.realpath(__file__)), "chart-templates/templates/role.yaml"), roleYaml)
-    with open(roleYaml, 'r') as f:
+    with open(roleYaml, 'r', encoding='utf-8') as f:
         role = yaml.safe_load(f)
     # Edit role
     role["rules"] = rbacMap["rules"]
     role["metadata"]["name"] = name
     # Save role
-    with open(roleYaml, 'w') as f:
+    with open(roleYaml, 'w', encoding='utf-8') as f:
         yaml.dump(role, f)
     logging.info("Role '%s-role.yaml' updated successfully.", name)
 
@@ -298,12 +301,12 @@ def add_namespace_scoped_rbac(helmChart, rbacMap):
     if not os.path.isfile(serviceAccountYaml):
         logging.info("Serviceaccount doesnt exist. Templating '%s-serviceaccount.yaml' ...", name)
         shutil.copyfile(os.path.join(os.path.dirname(os.path.realpath(__file__)), "chart-templates/templates/serviceaccount.yaml"), serviceAccountYaml)
-        with open(serviceAccountYaml, 'r') as f:
+        with open(serviceAccountYaml, 'r', encoding='utf-8') as f:
             serviceAccount = yaml.safe_load(f)
         # Edit Serviceaccount
         serviceAccount["metadata"]["name"] = name
         # Save Serviceaccount
-        with open(serviceAccountYaml, 'w') as f:
+        with open(serviceAccountYaml, 'w', encoding='utf-8') as f:
             yaml.dump(serviceAccount, f)
         logging.info("Serviceaccount '%s-serviceaccount.yaml' updated successfully.", name)
 
@@ -311,74 +314,15 @@ def add_namespace_scoped_rbac(helmChart, rbacMap):
     # Create rolebinding
     rolebindingYaml = os.path.join(helmChart, "templates",  name + "-rolebinding.yaml")
     shutil.copyfile(os.path.join(os.path.dirname(os.path.realpath(__file__)), "chart-templates/templates/rolebinding.yaml"), rolebindingYaml)
-    with open(rolebindingYaml, 'r') as f:
+    with open(rolebindingYaml, 'r', encoding='utf-8') as f:
         rolebinding = yaml.safe_load(f)
     rolebinding['metadata']['name'] = name
     rolebinding['roleRef']['name'] = role["metadata"]["name"] = name
     rolebinding['subjects'][0]['name'] = name
-    with open(rolebindingYaml, 'w') as f:
+    with open(rolebindingYaml, 'w', encoding='utf-8') as f:
         yaml.dump(rolebinding, f)
     logging.info("Rolebinding '%s-rolebinding.yaml' updated successfully.", name)
     logging.info("Namespace scoped RBAC created.\n")
-
-def add_webhook_configuration(helm_chart, webhook_map):
-    """Generates a Validating or Mutating WebhookConfiguration based on webhook_map."""
-
-    deployment_name = webhook_map.get("deploymentName")
-    logging.info("Adding webhook for deployment: %s", deployment_name)
-
-    name = webhook_map.get("generateName")
-    if not name:
-        logging.warning("Missing 'generateName' in webhookdefinitions")
-        return
-
-    webhook_type = webhook_map.get("type", "ValidatingAdmissionWebhook")
-    is_validating = webhook_type == "ValidatingAdmissionWebhook"
-
-    # Set appropriate filenames and annotations based on webhook type
-    template_filename = "validatingwebhookconfiguration.yaml" if is_validating else "mutatingwebhookconfiguration.yaml"
-    resource_filename = f"{name}-{template_filename}"
-
-    logging.info("Templating WebhookConfiguration '%s' ...", resource_filename)
-
-    source_template = os.path.join(os.path.dirname(__file__), f"chart-templates/templates/{template_filename}")
-    destination_template = os.path.join(helm_chart, "templates", resource_filename)
-
-    shutil.copyfile(source_template, destination_template)
-
-    with open(destination_template, 'r') as f:
-        webhook_config = yaml.safe_load(f)
-
-    # Ensure 'metadata.name' is set
-    webhook_config["metadata"]["name"] = name
-
-    # Prepare webhook entry
-    webhook_entry = {
-        "name": name,
-        "admissionReviewVersions": webhook_map.get("admissionReviewVersions", ["v1"]),
-        "clientConfig": {
-            "service": {
-                "name": "webhook-service",
-                "namespace": """{{ .Values.global.namespace }}""",
-                "path": webhook_map.get("webhookPath")
-            },
-        },
-        "failurePolicy": webhook_map.get("failurePolicy", "Fail"),
-        "matchPolicy": webhook_map.get("matchPolicy", "Equivalent"),
-        "sideEffects": webhook_map.get("sideEffects", "None"),
-        "rules": webhook_map.get("rules", [])
-    }
-
-    # Append the new webhook entry
-    webhook_config["webhooks"].append(webhook_entry)
-
-    # Save updated WebhookConfiguration
-    with open(destination_template, 'w') as f:
-        yaml.dump(webhook_config, f)
-
-    logging.info("%sWebhookConfiguration '%s' updated successfully.",
-                 "Validating" if is_validating else "Mutating", resource_filename)
-
 
 def process_csv_section(csv_data, section, handler_func, helm_chart):
     """_summary_
@@ -390,20 +334,6 @@ def process_csv_section(csv_data, section, handler_func, helm_chart):
         helm_chart (_type_): _description_
     """
     section_data = csv_data.get('spec', {}).get('install', {}).get('spec', {}).get(section)
-    if section_data:
-        for item in section_data:
-            handler_func(helm_chart, item)
-
-def process_csv_webhook_section(csv_data, section, handler_func, helm_chart):
-    """_summary_
-
-    Args:
-        csv_data (_type_): _description_
-        section (_type_): _description_
-        handler_func (_type_): _description_
-        helm_chart (_type_): _description_
-    """
-    section_data = csv_data.get('spec', {}).get(section)
     if section_data:
         for item in section_data:
             handler_func(helm_chart, item)
@@ -448,18 +378,17 @@ def escape_template_variables(helmChart, variables):
     logging.info("Escaped template variables.\n")
 
 # Adds resources identified in the CSV to the helmchart
-def extract_csv_resources(helm_chart, csv_path, ignore_webhook_definitions=True):
+def extract_csv_resources(helm_chart, csv_path):
     """_summary_
 
     Args:
         helm_chart (_type_): _description_
         csv_path (_type_): _description_
-        ignore_webhook_definitions (bool, optional): _description_. Defaults to True.
     """
     logging.info("Reading CSV file: '%s'", csv_path)
 
     try:
-        with open(csv_path, 'r') as f:
+        with open(csv_path, 'r', encoding='utf-8') as f:
             csv_data = yaml.safe_load(f)
     except Exception as e:
         logging.error("Unexpected error occured while processing file '%s': %s", csv_path, e)
@@ -477,12 +406,7 @@ def extract_csv_resources(helm_chart, csv_path, ignore_webhook_definitions=True)
     # Process permissions (Roles)
     process_csv_section(csv_data, "permissions", add_namespace_scoped_rbac, helm_chart)
 
-    # Process webhookdefinitions
-    # if not ignore_webhook_definitions:
-    #     process_csv_webhook_section(csv_data, "webhookdefinitions", add_webhook_configuration, helm_chart)
-
     logging.info("Resources have been successfully added to chart '%s' from CSV '%s'.\n", helm_chart, csv_path)
-
     if check_unsupported_csv_resources(csv_data, csv_data, supported_csv_install_spec_types):
         sys.exit(1)
 
@@ -523,7 +447,7 @@ def copy_additional_resources(helmChart, csvPath):
         if filename.endswith(".yaml") or filename.endswith(".yml"):
             filePath = os.path.join(dirPath, filename)
             try:
-                with open(filePath, 'r') as f:
+                with open(filePath, 'r', encoding='utf-8') as f:
                     fileYml = yaml.safe_load(f)
             except Exception as e:
                 logging.error("Unexpected error occured while processing file '%s': %s", filePath, e)
@@ -562,6 +486,177 @@ def copy_additional_resources(helmChart, csvPath):
             ", ".join(set(unsupported_resources)))  # Use `set` to avoid duplicates
         sys.exit(1)
 
+def print_title(title: str):
+    separator = '-' * (len(title) + 10)
+    logging.info(separator)
+    logging.info(f"{title.center(len(separator))}")
+    logging.info(separator)
+
+# Copies webhook resources from the target directory to the Helm chart
+def copy_webhook_configuration_manifests(dest_helm_chart_path, webhook_path):
+    """_summary_
+
+    Args:
+        dest_helm_chart_path (_type_): _description_
+        webhook_path (_type_): _description_
+    """
+    logging.info("Copying webhook configuration resources from the repo if present ...")
+
+    # Check if webhook_path itself is a directory
+    if not os.path.exists(webhook_path) or not os.path.isfile(webhook_path):
+        logging.warning("Webhook file not found: '%s'. Skipping webhook creation.", webhook_path)
+        return
+
+    logging.info("Found webhook configuration file: '%s'", webhook_path)
+    with open(webhook_path, 'r') as file:
+        content = file.read()
+
+    # Split the content by '---' if it's a multi-document YAML file
+    output = content.split('---')
+    for _, doc in enumerate(output):
+        try:
+            # Load the YAML content of the document
+            yaml_content = yaml.safe_load(doc)
+            if yaml_content is None:
+                logging.warning("Skipped empty or invalid YAML content during template processing")
+                continue
+
+            # Extract the kind and name from the resource
+            kind = yaml_content.get('kind')
+            name = yaml_content.get('metadata', {}).get('name')
+
+            # if not kind or not name:
+            logging.warning(
+                f"YAML content is missing a kind or name attribute. Skipping resource processing: {yaml_content}")
+
+            # Generate the new filename based on kind and name
+            new_filename = f"{name.lower()}-{kind.lower()}.yaml"
+
+            # Path to save the new file
+            new_file_path = os.path.join(dest_helm_chart_path, "templates", new_filename)
+
+            # Ensure the templates directory exists
+            os.makedirs(os.path.dirname(new_file_path), exist_ok=True)
+
+            # Write the YAML content to the new file
+            with open(new_file_path, 'w') as new_file:
+                yaml.dump(yaml_content, new_file, default_flow_style=False, sort_keys=True)
+
+        except Exception as e:
+            logging.warning(f"Unexpected error occurred while processing yaml content: {e}")
+
+def ensure_webhook_namespace(resource_data, resource_name, default_namespace):
+    """
+    Ensures that the namespace for webhooks in a MutatingWebhookConfiguration or 
+    ValidatingWebhookConfiguration is set correctly. Uses Helm templating to 
+    apply a default namespace if none is provided.
+    Args:
+        resource_data (dict): The webhook configuration resource data.
+        resource_name (str): The name of the webhook resource.
+        default_namespace (str): The default namespace to use if not set.
+    Returns:
+        None: Modifies resource_data in place.
+    """
+    if 'webhooks' not in resource_data:
+        return
+
+    for webhook in resource_data.get('webhooks', []):
+        client_config = webhook.get('clientConfig', {})
+
+        service = client_config.get('service')
+        if not service:
+            continue
+
+        service_name = service.get('name')
+        service_namespace = service.get('namespace')
+        service_path = service.get('path')
+
+        if service_namespace is None:
+            # Use the default Helm namespace if not specified
+            service_namespace = default_namespace
+
+        else:
+            # Update Helm templating to override existing namespace
+            service_namespace = f"{{{{ default \"{service_namespace}\" .Values.global.namespace }}}}"
+
+        service['namespace'] = service_namespace
+
+        # Log details for each distinct service
+        logging.info(f"Webhook service for '{resource_name}' set to:")
+        logging.info(f"  Name: {service_name}")
+        logging.info(f"  Namespace: {service_namespace}")
+        logging.info(f"  Path: {service_path}\n")
+
+# updateHelmResources adds standard configuration to the generic kubernetes resources
+def update_helm_resources(chartName, helmChart, skip_rbac_overrides, exclusions, inclusions, branch, preserved_files=[]):
+    logging.info(f"Updating resources chart: {chartName}")
+
+    resource_kinds = [
+        "ClusterRole", "ClusterRoleBinding", "ConfigMap", "Deployment", "MutatingWebhookConfiguration",
+        "NetworkPolicy", "PersistentVolumeClaim", "RoleBinding", "Role", "Route", "Secret", "Service", "StatefulSet",
+        "ValidatingWebhookConfiguration", "Job", "ConsolePlugin"
+    ]
+
+    namespace_scoped_kinds = [
+        "ConfigMap", "Deployment", "NetworkPolicy", "PersistentVolumeClaim", "RoleBinding", "Role", "Route",
+        "Secret", "Service", "StatefulSet", "Job"
+    ]
+
+    for kind in resource_kinds:
+        resource_templates = findTemplatesOfType(helmChart, kind)
+        if not resource_templates:
+            logging.info("------------------------------------------")
+            logging.warning(f"No {kind} templates found in the Helm chart [Skipping]")
+            logging.info("------------------------------------------\n")
+            continue
+
+        else:
+            logging.info("------------------------------------------")
+            logging.info(f"Found {len(resource_templates)} {kind} templates")
+            logging.info("------------------------------------------")
+
+        # Set the default namespace for the chart.
+        default_namespace = """{{ .Values.global.namespace }}"""
+
+        for template_path in resource_templates:
+            if os.path.basename(template_path) in preserved_files:
+                logging.warning("File '%s' is marked as preserved, skipping template update.", template_path)
+                continue  # Skip this file
+
+            try:
+                with open(template_path, 'r') as f:
+                    resource_data = yaml.safe_load(f)
+                    resource_name = resource_data['metadata'].get('name')
+                    logging.info(f"Processing resource: {resource_name} from template: {template_path}")
+
+                # Ensure namespace is set for namespace-scoped resources
+                if kind in namespace_scoped_kinds:
+                    resource_namespace = resource_data['metadata'].get('namespace')
+
+                    if resource_namespace is None or resource_namespace == "PLACEHOLDER_NAMESPACE":
+                        # Use the default Helm namespace if not specified
+                        resource_namespace = default_namespace
+                    else:
+                        # Allow Helm templating to override existing namespace
+                        resource_namespace = f"{{{{ default \"{resource_namespace}\" .Values.global.namespace }}}}"
+
+                    resource_data['metadata']['namespace'] = resource_namespace
+                    logging.info(f"Namespace for '{resource_name}' set to: {resource_namespace}")
+
+                # Ensure Mutating/Validating WebhookConfigurations has a service namespace set,
+                # defaulting to Helm values if not specified.
+                if kind == "MutatingWebhookConfiguration" or kind == "ValidatingWebhookConfiguration":
+                    ensure_webhook_namespace(resource_data, resource_name, default_namespace)
+
+                with open(template_path, 'w') as f:
+                    yaml.dump(resource_data, f, width=float("inf"), default_flow_style=False, allow_unicode=True)
+                    logging.info(f"Succesfully updated resource: {resource_name}\n")
+
+            except Exception as e:
+                logging.error(f"Error processing template '{template_path}': {e}")
+
+    logging.info("Resource updating process completed.")
+
 # Given a resource Kind, return all filepaths of that resource type in a chart directory
 def findTemplatesOfType(helmChart, kind):
     """_summary_
@@ -577,7 +672,7 @@ def findTemplatesOfType(helmChart, kind):
     for filename in os.listdir(os.path.join(helmChart, "templates")):
         if filename.endswith(".yaml") or filename.endswith(".yml"):
             filePath = os.path.join(helmChart, "templates", filename)
-            with open(filePath, 'r') as f:
+            with open(filePath, 'r', encoding='utf-8') as f:
                 fileYml = yaml.safe_load(f)
             if fileYml['kind'] == kind:
                 resources.append(filePath)
@@ -597,13 +692,13 @@ def fixEnvVarImageReferences(helmChart, imageKeyMapping):
     """
     logging.info("Fixing image references in container 'env' section in deployments and values.yaml ...")
     valuesYaml = os.path.join(helmChart, "values.yaml")
-    with open(valuesYaml, 'r') as f:
+    with open(valuesYaml, 'r', encoding='utf-8') as f:
         values = yaml.safe_load(f)
     deployments = findTemplatesOfType(helmChart, 'Deployment')
 
     imageKeys = []
     for deployment in deployments:
-        with open(deployment, 'r') as f:
+        with open(deployment, 'r', encoding='utf-8') as f:
             deploy = yaml.safe_load(f)
 
         containers = deploy['spec']['template']['spec']['containers']
@@ -623,12 +718,12 @@ def fixEnvVarImageReferences(helmChart, imageKeyMapping):
                     sys.exit(1)
                 imageKeys.append(image_key)
                 env['value'] = "{{ .Values.global.imageOverrides." + image_key + " }}"
-        with open(deployment, 'w') as f:
+        with open(deployment, 'w', encoding='utf-8') as f:
             yaml.dump(deploy, f)
 
     for imageKey in imageKeys:
         values['global']['imageOverrides'][imageKey] = ""
-    with open(valuesYaml, 'w') as f:
+    with open(valuesYaml, 'w', encoding='utf-8') as f:
         yaml.dump(values, f)
     logging.info("Image container env references in deployments and values.yaml updated successfully.\n")
 
@@ -643,14 +738,14 @@ def fixImageReferences(helmChart, imageKeyMapping):
     """
     logging.info("Fixing image and pull policy references in deployments and values.yaml ...")
     valuesYaml = os.path.join(helmChart, "values.yaml")
-    with open(valuesYaml, 'r') as f:
+    with open(valuesYaml, 'r', encoding='utf-8') as f:
         values = yaml.safe_load(f)
 
     deployments = findTemplatesOfType(helmChart, 'Deployment')
     imageKeys = []
     temp = "" ## temporarily read image ref
     for deployment in deployments:
-        with open(deployment, 'r') as f:
+        with open(deployment, 'r', encoding='utf-8') as f:
             deploy = yaml.safe_load(f)
 
         containers = deploy['spec']['template']['spec']['containers']
@@ -665,7 +760,7 @@ def fixImageReferences(helmChart, imageKeyMapping):
             # temp = container['image']
             container['image'] = "{{ .Values.global.imageOverrides." + image_key + " }}"
             container['imagePullPolicy'] = "{{ .Values.global.pullPolicy }}"
-        with open(deployment, 'w') as f:
+        with open(deployment, 'w', encoding='utf-8') as f:
             yaml.dump(deploy, f)
 
     # Remove the placeholder/dummy image overrides we might get from our values template
@@ -675,7 +770,7 @@ def fixImageReferences(helmChart, imageKeyMapping):
         pass
     for imageKey in imageKeys:
         values['global']['imageOverrides'][imageKey] = "" # set to temp to debug
-    with open(valuesYaml, 'w') as f:
+    with open(valuesYaml, 'w', encoding='utf-8') as f:
         yaml.dump(values, f)
     logging.info("Image references and pull policy in deployments and values.yaml updated successfully.\n")
 
@@ -754,7 +849,7 @@ def injectHelmFlowControl(deployment, sizes, branch):
     """
     logging.info("Adding Helm flow control for NodeSelector, Proxy Overrides and SecCompProfile...")
     deploy = open(deployment, "r")
-    with open(deployment, 'r') as f:
+    with open(deployment, 'r', encoding='utf-8') as f:
         deployx = yaml.safe_load(f)
     lines = deploy.readlines()
     for i, line in enumerate(lines):
@@ -864,11 +959,11 @@ def updateDeployments(helmChart, operator, exclusions, sizes, branch):
     """
     logging.info("Updating deployments with antiaffinity, security policies, and tolerations ...")
     deploySpecYaml = os.path.join(os.path.dirname(os.path.realpath(__file__)), "chart-templates/templates/deploymentspec.yaml")
-    with open(deploySpecYaml, 'r') as f:
+    with open(deploySpecYaml, 'r', encoding='utf-8') as f:
         deploySpec = yaml.safe_load(f)
     deployments = findTemplatesOfType(helmChart, 'Deployment')
     for deployment in deployments:
-        with open(deployment, 'r') as f:
+        with open(deployment, 'r', encoding='utf-8') as f:
             deploy = yaml.safe_load(f)
         affinityList = deploySpec['affinity']['podAntiAffinity']['preferredDuringSchedulingIgnoredDuringExecution']
         for antiaffinity in affinityList:
@@ -940,7 +1035,7 @@ def updateDeployments(helmChart, operator, exclusions, sizes, branch):
                     logging.warning("Leaving non-standard seccompprofile setting for container %s", container_name)
 
 
-        with open(deployment, 'w') as f:
+        with open(deployment, 'w', encoding='utf-8') as f:
             yaml.dump(deploy, f)
         logging.info("Deployments updated with antiaffinity, security policies, and tolerations successfully. \n")
 
@@ -960,12 +1055,12 @@ def updateRBAC(helmChart):
     rolebindings = findTemplatesOfType(helmChart, 'RoleBinding')
 
     for rbacFile in clusterroles + roles + clusterrolebindings + rolebindings:
-        with open(rbacFile, 'r') as f:
+        with open(rbacFile, 'r', encoding='utf-8') as f:
             rbac = yaml.safe_load(f)
         rbac['metadata']['name'] = "{{ .Values.org }}:{{ .Chart.Name }}:" + rbac['metadata']['name']
         if rbac['kind'] in ['RoleBinding', 'ClusterRoleBinding']:
             rbac['roleRef']['name'] = "{{ .Values.org }}:{{ .Chart.Name }}:" + rbac['roleRef']['name']
-        with open(rbacFile, 'w') as f:
+        with open(rbacFile, 'w', encoding='utf-8') as f:
             yaml.dump(rbac, f)
     logging.info("Clusterroles, roles, clusterrolebindings, and rolebindings updated. \n")
 
@@ -981,14 +1076,22 @@ def injectRequirements(helmChart, operator, exclusions, sizes, branch):
         branch (_type_): _description_
     """
     logging.info("Updating Helm chart '%s' with onboarding requirements ...", helmChart)
-    imageKeyMapping = operator.get('imageMappings', {})
+    image_key_mapping = operator.get("imageMappings", {})
+    operator_name = operator.get("name")
+    exclusion = operator.get("exclusions")
+    inclusion = operator.get("inclusions")
+    skip_rbac_overrides = operator.get("skipRBACOverrides", True)
+    preserved_files = operator.get("preserve_files", [])
 
     # Fixes image references in the Helm chart.
-    fixImageReferences(helmChart, imageKeyMapping)
-    fixEnvVarImageReferences(helmChart, imageKeyMapping)
+    fixImageReferences(helmChart, image_key_mapping)
+    fixEnvVarImageReferences(helmChart, image_key_mapping)
 
-    fixImageReferencesForAddonTemplate(helmChart, imageKeyMapping)
+    fixImageReferencesForAddonTemplate(helmChart, image_key_mapping)
     injectAnnotationsForAddonTemplate(helmChart)
+
+    if is_version_compatible(branch, '2.13', '2.7', '2.13'):
+        update_helm_resources(operator_name, helmChart, skip_rbac_overrides, exclusion, inclusion, branch, preserved_files)
 
     # Updates RBAC and deployment configuration in the Helm chart.
     updateRBAC(helmChart)
@@ -1045,7 +1148,7 @@ def addCRDs(repo, operator, outputDir, preservedFiles=None, overwrite=False):
             continue
 
         filepath = os.path.join(manifestsPath, filename)
-        with open(filepath, 'r') as f:
+        with open(filepath, 'r', encoding='utf-8') as f:
             resourceFile = yaml.safe_load(f)
 
         if "kind" not in resourceFile:
@@ -1087,7 +1190,7 @@ def getBundleManifestsPath(repo, operator):
         if not os.path.isfile(annotations_file):
             logging.critical("Could not find annotations at given path: %s", annotations_file)
             sys.exit(1)
-        with open(annotations_file, 'r') as f:
+        with open(annotations_file, 'r', encoding='utf-8') as f:
             annotations = yaml.safe_load(f)
             channels = annotations.get('annotations', {}).get('operators.operatorframework.io.bundle.channels.v1').split(',')
             if not channels:
@@ -1130,7 +1233,7 @@ def get_csv_path(repo, operator):
             continue
 
         file_path = os.path.join(manifests_path, file_name)
-        with open(file_path, 'r') as f:
+        with open(file_path, 'r', encoding='utf-8') as f:
             resource_file = yaml.safe_load(f)
 
         if resource_file and resource_file.get("kind") == "ClusterServiceVersion":
@@ -1153,7 +1256,7 @@ def injectAnnotationsForAddonTemplate(helmChart):
     addonTemplates = findTemplatesOfType(helmChart, 'AddOnTemplate')
     for addonTemplate in addonTemplates:
         injected = False
-        with open(addonTemplate, 'r') as f:
+        with open(addonTemplate, 'r', encoding='utf-8') as f:
             templateContent = yaml.safe_load(f)
             agentSpec = templateContent['spec']['agentSpec']
             if 'workload' not in agentSpec:
@@ -1171,7 +1274,7 @@ def injectAnnotationsForAddonTemplate(helmChart):
                         metadata['annotations']['target.workload.openshift.io/management'] = '{"effect": "PreferredDuringScheduling"}'
                         injected = True
         if injected:
-            with open(addonTemplate, 'w') as f:
+            with open(addonTemplate, 'w', encoding='utf-8') as f:
                 yaml.dump(templateContent, f, width=float("inf"))
                 logging.info("Annotations injected successfully. \n")
 
@@ -1192,7 +1295,7 @@ def fixImageReferencesForAddonTemplate(helmChart, imageKeyMapping):
     imageKeys = []
     temp = "" ## temporarily read image ref
     for addonTemplate in addonTemplates:
-        with open(addonTemplate, 'r') as f:
+        with open(addonTemplate, 'r', encoding='utf-8') as f:
             templateContent = yaml.safe_load(f)
             agentSpec = templateContent['spec']['agentSpec']
             if 'workload' not in agentSpec:
@@ -1215,20 +1318,20 @@ def fixImageReferencesForAddonTemplate(helmChart, imageKeyMapping):
                         imageKeys.append(image_key)
                         container['image'] = "{{ .Values.global.imageOverrides." + image_key + " }}"
                         # container['imagePullPolicy'] = "{{ .Values.global.pullPolicy }}"
-        with open(addonTemplate, 'w') as f:
+        with open(addonTemplate, 'w', encoding='utf-8') as f:
             yaml.dump(templateContent, f, width=float("inf"))
             logging.info("AddOnTemplate updated with image override successfully. \n")
 
     if len(imageKeys) == 0:
         return
     valuesYaml = os.path.join(helmChart, "values.yaml")
-    with open(valuesYaml, 'r') as f:
+    with open(valuesYaml, 'r', encoding='utf-8') as f:
         values = yaml.safe_load(f)
     if 'imageOverride' in values['global']['imageOverrides']:
         del values['global']['imageOverrides']['imageOverride']
     for imageKey in imageKeys:
         values['global']['imageOverrides'][imageKey] = "" # set to temp to debug
-    with open(valuesYaml, 'w') as f:
+    with open(valuesYaml, 'w', encoding='utf-8') as f:
         yaml.dump(values, f, width=float("inf"))
     logging.info("Image references and pull policy in addon templates and values.yaml updated successfully.\n")
 
@@ -1247,25 +1350,36 @@ def main():
     parser.set_defaults(lint=False)
 
     args = parser.parse_args()
-    skipOverrides = args.skipOverrides
     destination = args.destination
+    skipOverrides = args.skipOverrides
     lint = args.lint
 
     if lint == False and not destination:
         logging.critical("Destination directory is required when not linting.")
         sys.exit(1)
 
-    # Config.yaml holds the configurations for Operator bundle locations to be used
-    configYaml = os.path.join(os.path.dirname(os.path.realpath(__file__)),"config.yaml")
-    with open(configYaml, 'r') as f:
-        config = yaml.safe_load(f)
+    # Load configuration file
+    # config.yaml holds the configurations for Operator bundle locations to be used
+    config_yaml = os.path.join(SCRIPT_DIR, "config.yaml")
+
+    if not os.path.exists(config_yaml):
+        logging.critical("Configuration file '%s' not found. Exiting.", config_yaml)
+        sys.exit(1)
+
+    try:
+        with open(config_yaml, 'r', encoding='utf-8') as f:
+            config = yaml.safe_load(f)
+        logging.info("Loaded configuration from '%s'", config_yaml)
+
+    except Exception as e:
+        logging.critical("Unexpected error while loading configuration '%s'", config_yaml)
+        sys.exit(1)
 
     # Loop through each repo in the config.yaml
     for repo in config:
-        csvPath = ""
         # We support two ways of getting bundle input:
-
-        # - Pikcing up already generated input from a Github repo
+        #
+        # - Picking up already generated input from a Github repo
         #
         #   Entries for this approach include a "github_ref" property specifying the
         #   Git repo we clone.  Such a repo can supply input for multiple operators
@@ -1283,17 +1397,47 @@ def main():
         #   to do its job, but needs to be told a branch-name or Git SHA to use
         #   to obtain bundle input info.
 
-        if "github_ref" in repo:
-            logging.info("Cloning: %s", repo["repo_name"])
-            repo_path = os.path.join(os.path.dirname(os.path.realpath(__file__)), "tmp/" + repo["repo_name"]) # Path to clone repo to
-            if os.path.exists(repo_path): # If path exists, remove and re-clone
+        csvPath = ""
+
+        # Retrieve the repository name from the configuration
+        # Ensure 'repo_name' is present in the configuration to proceed with
+        # the tool-specific tasks.
+        repo_name = repo.get("repo_name")
+        if not repo_name:
+            logging.critical(
+                "Missing required field 'repo_name'. "
+                "This is necessary for generating tool-specific bundles. "
+                "Please provide a valid repository name."
+            )
+            sys.exit(1)
+
+        # Retrieve the branch name from the repository configuration
+        # If the 'branch' is not defined, handle it appropriately.
+        branch = repo.get("branch")
+        if not branch:
+            logging.critical(
+                "Missing required field 'branch'. "
+                "This is necessary for generating tool-specific bundles. "
+                "Please provide a valid branch value."   
+            )
+            sys.exit(1)
+
+        # Retrieve the GitHub reference (e.g., branch, tag, or pull request)
+        # The 'github_ref' identifies the exact Git reference that triggered the workflow.
+        github_ref = repo.get("github_ref")
+        if github_ref:
+            logging.info("Cloning repository: %s from %s", repo_name, github_ref)
+            repo_path = os.path.join(SCRIPT_DIR, "tmp", repo_name)
+
+            if os.path.exists(repo_path):
                 shutil.rmtree(repo_path)
-            repository = Repo.clone_from(repo["github_ref"], repo_path) # Clone repo to above path
-            if 'branch' in repo:
-                repository.git.checkout(repo['branch']) # If a branch is specified, checkout that branch
+
+            repository = Repo.clone_from(github_ref, repo_path)
+            repository.git.checkout(branch)
+
             sizesyaml = repo_path + "/bundle/manifests/sizes.yaml"
             if os.path.isfile(sizesyaml):
-                with open(sizesyaml, 'r') as f:
+                with open(sizesyaml, 'r', encoding='utf-8') as f:
                     sizes = yaml.safe_load(f)
             else:
                 sizes = {}
@@ -1302,10 +1446,8 @@ def main():
             try:
                 # repo.brnach specifies the branch or SHA the tool should use for input.
                 # repo.bundlePath specifies the directory into which the bundle manifest
-
                 # should be generated, and where they are fetched from for chartifying.
 
-                branch = repo["branch"]
                 sha = repo["sha"]
                 bundlePath = repo["bundlePath"]
 
@@ -1323,14 +1465,14 @@ def main():
             # Convert the repo entry  to the format used for Github-sourced bundles
             # so we can use a common path for both below.
             op = {
-               "name": repo["name"],
+               "name": repo_name,
                "imageMappings": repo["imageMappings"],
                "bundlePath": bundlePath
             }
             repo["operators"] = [op]
             sizesyaml = bundlePath + "/sizes.yaml"
             if os.path.isfile(sizesyaml):
-                with open(sizesyaml, 'r') as f:
+                with open(sizesyaml, 'r', encoding='utf-8') as f:
                     sizes = yaml.safe_load(f)
             else:
                 sizes = {}
@@ -1352,7 +1494,6 @@ def main():
                 logging.error("Unable to find given channel: %s", operator.get("channel", "Channel not specified"))
                 sys.exit(1)
 
-            branch = repo.get("branch", "")
             escaped_variables = operator.get("escape-template-variables", [])
 
             # Validate CSV exists
@@ -1370,14 +1511,6 @@ def main():
                     sys.exit(1)
                 logging.info("CSV validated successfully!\n")
                 continue
-
-            additional_files = []
-            for file in operator.get("additional_resource_files", []):
-                additional_files.append(
-                    os.path.join(os.path.dirname(os.path.realpath(__file__)), "tmp", repo, file)
-                )
-
-            logging.info("additional_files: %s", str(additional_files))
 
             # Get preserved files from config or set default value
             preservedFiles = operator.get("preserve_files", [])
@@ -1409,13 +1542,18 @@ def main():
             fillChartYaml(helmChart, operator["name"], csvPath)
             logging.info("Chart.yaml filled successfully.\n")
 
-            # Check to see if we should ignore webhook definitions defined in the CSV
-            ignore_webhook_definitions = operator.get("ignore-webhook-definitions", True)
-
             # Add all basic resources to the helm chart from the CSV
             logging.info("Adding Resources from CSV to helm chart '%s' ...", operator["name"])
-            extract_csv_resources(helmChart, csvPath, ignore_webhook_definitions)
+            extract_csv_resources(helmChart, csvPath)
             copy_additional_resources(helmChart, csvPath)
+
+            # In ACM 2.12+ we need to handle webhooks for components, so it's necessary to verify if any webhook paths
+            # are available and include manifest files for processing.
+            webhook_paths = operator.get("webhook_paths", [])
+            if webhook_paths is not None:
+                for path in webhook_paths:
+                    copy_webhook_configuration_manifests(helmChart, os.path.join(SCRIPT_DIR, "tmp", repo_name, path))
+
             escape_template_variables(helmChart, escaped_variables)
             logging.info("Resources added from CSV successfully.\n")
 
