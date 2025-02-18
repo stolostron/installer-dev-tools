@@ -1465,7 +1465,7 @@ def main():
             # Convert the repo entry  to the format used for Github-sourced bundles
             # so we can use a common path for both below.
             op = {
-               "name": repo_name,
+               "name": repo.get("name"),
                "imageMappings": repo["imageMappings"],
                "bundlePath": bundlePath
             }

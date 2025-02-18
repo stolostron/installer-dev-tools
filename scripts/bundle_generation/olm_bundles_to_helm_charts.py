@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-# Copyright (c) 2025 Red Hat, Inc.
+# Copyright (c) 2021 Red Hat, Inc.
 # Copyright Contributors to the Open Cluster Management project
 # Assumes: Python 3.6+
 
@@ -1465,7 +1465,7 @@ def main():
             # Convert the repo entry  to the format used for Github-sourced bundles
             # so we can use a common path for both below.
             op = {
-               "name": repo_name,
+               "name": repo.get("name"),
                "imageMappings": repo["imageMappings"],
                "bundlePath": bundlePath
             }
