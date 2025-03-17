@@ -227,7 +227,7 @@ def updateValues(overwrite, original):
         originalValues = yaml.safe_load(values_file)
 
     deep_update(overwriteValues, originalValues)
-    
+
     # Write the updated dictionary back to values.yaml
     with open(original, 'w') as values_file:
         yaml.dump(originalValues, values_file, default_flow_style=False)
@@ -265,7 +265,7 @@ def copyHelmChart(destinationChartPath, repo, chart, chartVersion):
         with open(chartYamlPath, 'w') as f:
             yaml.dump(chartYaml, f, width=float("inf"))
 
-    specificValues = os.path.join(os.path.dirname(os.path.realpath(__file__)), "chart-values", chart['name'], "values.yaml")
+    specificValues = os.path.join(os.path.dirname(os.path.realpath(__file__)), "chart-values", chart['name'], "overwriteValues.yaml")
     if os.path.exists(specificValues):
         logging.info(f"Using specific values.yaml for chart '{chartName}' from: {specificValues}")
         updateValues(specificValues, os.path.join(chartPath, "values.yaml"))
