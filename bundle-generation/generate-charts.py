@@ -358,35 +358,39 @@ def fixImageReferences(helmChart, imageKeyMapping):
     with open(valuesYaml, 'r') as f:
         values = yaml.safe_load(f)
     
-    deployments = findTemplatesOfType(helmChart, 'Deployment')
+    resource_kinds = ["Deployment", "Job", "StatefulSet"]
     imageKeys = []
-    temp = "" ## temporarily read image ref
-    for deployment in deployments:
-        with open(deployment, 'r') as f:
-            deploy = yaml.safe_load(f)
-        
-        containers = deploy['spec']['template']['spec']['containers']
-        for container in containers:
-            image_key = parse_image_ref(container['image'])["repository"]
-            try:
-                image_key = imageKeyMapping[image_key]
-            except KeyError:
-                logging.critical("No image key mapping provided for imageKey: %s" % image_key)
-                exit(1)
-            imageKeys.append(image_key)
-            container['image'] = "{{ .Values.global.imageOverrides." + image_key + " }}"
-            container['imagePullPolicy'] = "{{ .Values.global.pullPolicy }}"
+    for kind in resource_kinds:
+        resource_templates = findTemplatesOfType(helmChart, kind)
 
-            args = container.get('args', [])
-            refreshed_args = []
-            for arg in args:
-                if "--agent-image-name" not in arg:
-                    refreshed_args.append(arg)
-                else:
-                    refreshed_args.append("--agent-image-name="+"{{ .Values.global.imageOverrides." + image_key + " }}")
-            container['args'] = refreshed_args
-        with open(deployment, 'w') as f:
-            yaml.dump(deploy, f, width=float("inf"))
+        for template_path in resource_templates:
+            with open(template_path, 'r') as f:
+                resource_data = yaml.safe_load(f)
+            
+            containers = resource_data['spec']['template']['spec']['containers']
+            for container in containers:
+                image_key = parse_image_ref(container['image'])["repository"]
+                try:
+                    image_key = imageKeyMapping[image_key]
+                except KeyError:
+                    logging.critical("No image key mapping provided for imageKey: %s" % image_key)
+                    exit(1)
+                imageKeys.append(image_key)
+                container['image'] = "{{ .Values.global.imageOverrides." + image_key + " }}"
+                container['imagePullPolicy'] = "{{ .Values.global.pullPolicy }}"
+
+                if kind == "Deployment":
+                    args = container.get('args', [])
+                    refreshed_args = []
+                    for arg in args:
+                        if "--agent-image-name" not in arg:
+                            refreshed_args.append(arg)
+                        else:
+                            refreshed_args.append("--agent-image-name="+"{{ .Values.global.imageOverrides." + image_key + " }}")
+                    container['args'] = refreshed_args
+
+            with open(template_path, 'w') as f:
+                yaml.dump(resource_data, f, width=float("inf"))
 
     if 'imageOverride' in values['global']['imageOverrides']:
         del values['global']['imageOverrides']['imageOverride']
