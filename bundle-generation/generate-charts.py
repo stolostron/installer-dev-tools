@@ -211,7 +211,7 @@ def deep_update(overwrite, original):
     for key, value in overwrite.items():
         if isinstance(value, dict) and key in original and isinstance(original[key], dict):
             # If both the original and overwrite values are dictionaries, recurse into the dictionary
-            deep_update(original[key], value)
+            deep_update(value, original[key])
         elif key in original:
             # Otherwise, directly replace the value
             original[key] = value
