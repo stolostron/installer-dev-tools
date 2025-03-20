@@ -234,7 +234,7 @@ def updateValues(overwrite, original):
 
 
 # Copy chart-templates to a new helmchart directory
-def copyHelmChart(destinationChartPath, repo, chart, chartVersion):
+def copyHelmChart(destinationChartPath, repo, chart, chartVersion, branch):
     chartName = chart.get('name', '')
     logging.info(f"Starting to process chart '{chartName}' chart directory")
 
@@ -1198,7 +1198,7 @@ def main():
 
             # Template Helm Chart Directory from 'chart-templates'
             logging.info(f"Templating helm chart '{chart_name}'")
-            copyHelmChart(destinationChartPath, repo["repo_name"], chart, chartVersion)
+            copyHelmChart(destinationChartPath, repo["repo_name"], chart, chartVersion, branch)
 
             # Render the helm chart before updating the chart resources.
             if not renderChart(destinationChartPath):
