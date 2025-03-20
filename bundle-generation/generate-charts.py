@@ -203,9 +203,38 @@ def updateResources(outputDir, repo, chart):
 
     logging.info("All resources updated successfully.")
 
+def deep_update(overwrite, original):
+    """
+    Recursively updates the original dictionary with values from the overwrite dictionary.
+    If the value is a dictionary, it will recurse into the nested dictionaries.
+    """
+    for key, value in overwrite.items():
+        if isinstance(value, dict) and key in original and isinstance(original[key], dict):
+            # If both the original and overwrite values are dictionaries, recurse into the dictionary
+            deep_update(value, original[key])
+        elif key in original:
+            # Otherwise, directly replace the value
+            original[key] = value
+
+
+def updateValues(overwrite, original):
+    # Load overwrite_values.yaml into a dictionary called overwriteValues
+    with open(overwrite, 'r') as overwrite_file:
+        overwriteValues = yaml.safe_load(overwrite_file)
+
+    # Load values.yaml into a dictionary called originalValues
+    with open(original, 'r') as values_file:
+        originalValues = yaml.safe_load(values_file)
+
+    deep_update(overwriteValues, originalValues)
+
+    # Write the updated dictionary back to values.yaml
+    with open(original, 'w') as values_file:
+        yaml.dump(originalValues, values_file, default_flow_style=False)
+
 
 # Copy chart-templates to a new helmchart directory
-def copyHelmChart(destinationChartPath, repo, chart, chartVersion):
+def copyHelmChart(destinationChartPath, repo, chart, chartVersion, branch):
     chartName = chart.get('name', '')
     logging.info(f"Starting to process chart '{chartName}' chart directory")
 
@@ -236,10 +265,16 @@ def copyHelmChart(destinationChartPath, repo, chart, chartVersion):
         with open(chartYamlPath, 'w') as f:
             yaml.dump(chartYaml, f, width=float("inf"))
 
+    overwriteValues = os.path.join(os.path.dirname(os.path.realpath(__file__)), "chart-values", chart['name'], "overwriteValues.yaml")
     specificValues = os.path.join(os.path.dirname(os.path.realpath(__file__)), "chart-values", chart['name'], "values.yaml")
-    if os.path.exists(specificValues):
+    if os.path.exists(overwriteValues) or os.path.exists(specificValues):
         logging.info(f"Using specific values.yaml for chart '{chartName}' from: {specificValues}")
-        shutil.copyfile(specificValues, os.path.join(chartPath, "values.yaml"))
+        if is_version_compatible(branch, '2.14', '2.9', '2.13'):
+            updateValues(overwriteValues, os.path.join(chartPath, "values.yaml"))
+        else:
+            shutil.copyfile(specificValues, os.path.join(chartPath, "values.yaml"))
+
+
     else:
         logging.warning(f"No specific values.yaml found for chart '{chartName}'")
 
@@ -1163,7 +1198,7 @@ def main():
 
             # Template Helm Chart Directory from 'chart-templates'
             logging.info(f"Templating helm chart '{chart_name}'")
-            copyHelmChart(destinationChartPath, repo["repo_name"], chart, chartVersion)
+            copyHelmChart(destinationChartPath, repo["repo_name"], chart, chartVersion, branch)
 
             # Render the helm chart before updating the chart resources.
             if not renderChart(destinationChartPath):
