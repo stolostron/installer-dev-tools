@@ -1096,7 +1096,7 @@ def injectRequirements(helm_chart_path, chart, branch):
     if not skip_rbac_overrides:
         updateRBAC(helm_chart_path, chart_name)
 
-    if is_version_compatible(branch, '2.13', '2.8', '2.13'):
+    if is_version_compatible(branch, '2.10', '2.5', '2.10'):
         update_security_contexts(helm_chart_path, security_context_constraints)
     
     if is_version_compatible(branch, '2.13', '2.8', '2.13'):

@@ -1169,7 +1169,7 @@ def injectRequirements(helm_chart_path, operator, sizes, branch):
     fixImageReferencesForAddonTemplate(helm_chart_path, image_key_mapping)
     injectAnnotationsForAddonTemplate(helm_chart_path)
 
-    if is_version_compatible(branch, '2.13', '2.8', '2.13'):
+    if is_version_compatible(branch, '2.10', '2.5', '2.10'):
         update_security_contexts(helm_chart_path, security_context_constraints)
 
     if is_version_compatible(branch, '2.13', '2.7', '2.13'):
