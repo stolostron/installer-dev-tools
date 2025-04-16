@@ -3,10 +3,14 @@
 # Copyright Contributors to the Open Cluster Management project
 # Assumes: Python 3.6+
 
+import coloredlogs
 import logging
 import os
 import shutil
 import yaml
+
+# Configure logging with coloredlogs
+coloredlogs.install(level='DEBUG')  # Set the logging level as needed
 
 def copy_yaml(source_file_dir, source_file_name, dest_file_dir, dest_file_name):
     """Copy an existing YAML file from source to destination."""
@@ -27,16 +31,16 @@ def copy_yaml(source_file_dir, source_file_name, dest_file_dir, dest_file_name):
 def load_yaml(file_path):
     """Load an existing YAML file."""
     if not os.path.exists(file_path):
-        logging.warning(f"{file_path} does not exists")
-        return []
+        logging.debug(f"{file_path} does not exists")
+        return {}
 
     try:
         with open(file_path, 'r') as f:
-            return yaml.safe_load(f) or []
+            return yaml.safe_load(f) or {}
 
     except Exception as e:
         logging.error(f"Failed to load YAML file {file_path}: {e}")
-        return []
+        return {}
 
 def save_yaml(file_path, data):
     """Save the updated data back to the YAML file."""
