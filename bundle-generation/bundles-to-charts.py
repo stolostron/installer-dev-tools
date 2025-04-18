@@ -30,6 +30,7 @@ coloredlogs.install(level='DEBUG')  # Set the logging level as needed
 
 # Config Constants
 SCRIPT_DIR = os.path.join(os.path.dirname(os.path.realpath(__file__)))
+ROOT_DIR = os.path.abspath(os.path.join(SCRIPT_DIR, "..", ".."))
 
 def log_header(message, *args):
     """
@@ -1425,6 +1426,8 @@ def main():
 
     ## Initialize ArgParser
     parser = argparse.ArgumentParser()
+    parser.add_argument("--component", dest="component", type=str, required=False, help="If provided, only this component will be processed")
+    parser.add_argument("--config", dest="config", type=str, required=False, help="If provided, this config file will be processed")
     parser.add_argument("--destination", dest="destination", type=str, required=False, help="Destination directory of the created helm chart")
     parser.add_argument("--skipOverrides", dest="skipOverrides", type=bool, help="If true, overrides such as helm flow control will not be applied")
     parser.add_argument("--lint", dest="lint", action='store_true', help="If true, bundles will only be linted to ensure they can be transformed successfully. Default is False.")
@@ -1432,6 +1435,8 @@ def main():
     parser.set_defaults(lint=False)
 
     args = parser.parse_args()
+    component = args.component
+    config_override = args.config
     destination = args.destination
     skipOverrides = args.skipOverrides
     lint = args.lint
@@ -1442,7 +1447,16 @@ def main():
 
     # Load configuration file
     # config.yaml holds the configurations for Operator bundle locations to be used
-    config_yaml = os.path.join(SCRIPT_DIR, "config.yaml")
+    if config_override:
+        root_override_path = os.path.join(ROOT_DIR, config_override)
+        script_override_path = os.path.join(SCRIPT_DIR, config_override)
+
+        if os.path.exists(root_override_path):
+            config_yaml = root_override_path
+        else:
+            config_yaml = script_override_path
+    else:
+        config_yaml = os.path.join(SCRIPT_DIR, "config.yaml")
 
     if not os.path.exists(config_yaml):
         logging.critical("Configuration file '%s' not found. Exiting.", config_yaml)
@@ -1457,8 +1471,18 @@ def main():
         logging.critical("Unexpected error while loading configuration '%s'", config_yaml)
         sys.exit(1)
 
+    # Normalize config into a list of components
+    if isinstance(config, dict):
+        components = config.get("components", [])
+    else:
+        components = config
+
+    # Optionally filter by a specific component
+    if component:
+        components = [repo for repo in components if repo.get("repo_name") == component]
+
     # Loop through each repo in the config.yaml
-    for repo in config:
+    for repo in components:
         # We support two ways of getting bundle input:
         #
         # - Picking up already generated input from a Github repo
