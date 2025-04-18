@@ -1458,8 +1458,6 @@ def main():
     else:
         config_yaml = os.path.join(SCRIPT_DIR, "config.yaml")
 
-    logging.info(f"config_yaml {config_yaml}")
-
     if not os.path.exists(config_yaml):
         logging.critical("Configuration file '%s' not found. Exiting.", config_yaml)
         sys.exit(1)
