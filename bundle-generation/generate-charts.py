@@ -19,6 +19,10 @@ from validate_csv import *
 # Configure logging with coloredlogs
 coloredlogs.install(level='DEBUG')  # Set the logging level as needed
 
+# Config Constants
+SCRIPT_DIR = os.path.join(os.path.dirname(os.path.realpath(__file__)))
+ROOT_DIR = os.path.abspath(os.path.join(SCRIPT_DIR, "..", ".."))
+
 def log_header(message, *args):
     """
     Logs a header message with visual separators and formats the message using multiple arguments.
@@ -1229,16 +1233,21 @@ def renderChart(chart_path):
 def main():
     ## Initialize ArgParser
     parser = argparse.ArgumentParser()
+    parser.add_argument("--component", dest="component", type=str, required=False, help="If provided, only this component will be processed")
+    parser.add_argument("--config", dest="config", type=str, required=False, help="If provided, this config file will be processed")
     parser.add_argument("--destination", dest="destination", type=str, required=False, help="Destination directory of the created helm chart")
     parser.add_argument("--skipOverrides", dest="skipOverrides", type=bool, help="If true, overrides such as helm flow control will not be applied")
     parser.add_argument("--lint", dest="lint", action='store_true', help="If true, bundles will only be linted to ensure they can be transformed successfully. Default is False.")
+
     parser.set_defaults(skipOverrides=False)
     parser.set_defaults(lint=False)
 
     args = parser.parse_args()
-    skipOverrides = args.skipOverrides
+    component = args.component
+    config_override = args.config
     destination = args.destination
     lint = args.lint
+    skipOverrides = args.skipOverrides
 
     if lint == False and not destination:
         logging.critical("Destination directory is required when not linting.")
@@ -1247,18 +1256,42 @@ def main():
     logging.basicConfig(level=logging.DEBUG)
 
     # Config.yaml holds the configurations for Operator bundle locations to be used
-    configYaml = os.path.join(os.path.dirname(os.path.realpath(__file__)),"charts-config.yaml")
-    with open(configYaml, 'r') as f:
+    # Config.yaml holds the configurations for Operator bundle locations to be used
+    if config_override:
+        root_override_path = os.path.join(ROOT_DIR, config_override)
+        script_override_path = os.path.join(SCRIPT_DIR, config_override)
+
+        if os.path.exists(root_override_path):
+            config_yaml = root_override_path
+        else:
+            config_yaml = script_override_path
+    else:
+        config_yaml = os.path.join(SCRIPT_DIR, "charts-config.yaml")
+
+    with open(config_yaml, 'r') as f:
         config = yaml.safe_load(f)
 
     if not config:
         logging.critical("No charts listed in config to be moved!")
         exit(0)
 
+    # Normalize config into a list of components
+    if isinstance(config, dict):
+        components = config.get("components", [])
+    else:
+        components = config
+
+    # Optionally filter by a specific component
+    if component:
+        components = [repo for repo in components if repo.get("repo_name") == component]
+
     # Loop through each repo in the config.yaml
-    for repo in config:
-        logging.info("Cloning: %s", repo["repo_name"])
-        repo_path = os.path.join(os.path.dirname(os.path.realpath(__file__)), "tmp/" + repo["repo_name"]) # Path to clone repo to
+    for repo in components:
+        repo_name = repo.get("repo_name")
+
+        logging.info("Cloning: %s", repo_name)
+        repo_path = os.path.join(SCRIPT_DIR, "tmp", repo_name)
+
         if os.path.exists(repo_path): # If path exists, remove and re-clone
             shutil.rmtree(repo_path)
         repository = Repo.clone_from(repo["github_ref"], repo_path) # Clone repo to above path
@@ -1280,7 +1313,7 @@ def main():
 
             # Copy over all CRDs to the destination directory
             logging.info(f"Adding CRDs for chart: '{chart_name}'")
-            addCRDs(repo["repo_name"], chart, destination)
+            addCRDs(repo_name, chart, destination)
 
             logging.info(f"Creating helm chart: '{chart_name}'")
             always_or_toggle = chart['always-or-toggle']
@@ -1292,14 +1325,14 @@ def main():
 
             # Template Helm Chart Directory from 'chart-templates'
             logging.info(f"Templating helm chart '{chart_name}'")
-            copyHelmChart(destinationChartPath, repo["repo_name"], chart, chartVersion, branch)
+            copyHelmChart(destinationChartPath, repo_name, chart, chartVersion, branch)
 
             # Render the helm chart before updating the chart resources.
             if not renderChart(destinationChartPath):
                 logging.error(f"Failed to render chart {destinationChartPath}")
             
             # Update the helm chart resources with additional overrides
-            updateResources(destination, repo["repo_name"], chart)
+            updateResources(destination, repo_name, chart)
 
             if not skipOverrides:
                 logging.info("Adding Overrides (set --skipOverrides=true to skip) ...")
