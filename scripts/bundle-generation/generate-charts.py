@@ -19,6 +19,31 @@ from validate_csv import *
 # Configure logging with coloredlogs
 coloredlogs.install(level='DEBUG')  # Set the logging level as needed
 
+# Config Constants
+SCRIPT_DIR = os.path.join(os.path.dirname(os.path.realpath(__file__)))
+ROOT_DIR = os.path.abspath(os.path.join(SCRIPT_DIR, "..", ".."))
+
+def log_header(message, *args):
+    """
+    Logs a header message with visual separators and formats the message using multiple arguments.
+    Args:
+        message (str): The message to be displayed as the header.
+        *args: Additional arguments to be passed into the message string.
+    """
+    # Format the message with the provided arguments
+    formatted_message = message.format(*args)
+
+    # Create a separator line that matches the length of the formatted message
+    separator = "=" * len(formatted_message)
+
+    # Log an empty line before the separator and the header
+    logging.info("")
+
+    # Log the separator, the formatted message, and the separator again
+    logging.info(separator)
+    logging.info(formatted_message)
+    logging.info(separator)
+
 # Parse an image reference, return dict containing image reference information
 def parse_image_ref(image_ref):
    # Image ref:  [registry-and-ns/]repository-name[:tag][@digest]
@@ -114,7 +139,7 @@ def updateClusterRoleBinding(yamlContent):
         sub['namespace'] = '{{ .Values.global.namespace }}'
 
 def escapeTemplateVariables(helmChart, variables):
-    addonTemplates = findTemplatesOfType(helmChart, 'AddOnTemplate')
+    addonTemplates = find_templates_of_type(helmChart, 'AddOnTemplate')
     for addonTemplate in addonTemplates:
         for variable in variables:
             logging.info("Start to escape vriable %s", variable)
@@ -203,9 +228,38 @@ def updateResources(outputDir, repo, chart):
 
     logging.info("All resources updated successfully.")
 
+def deep_update(overwrite, original):
+    """
+    Recursively updates the original dictionary with values from the overwrite dictionary.
+    If the value is a dictionary, it will recurse into the nested dictionaries.
+    """
+    for key, value in overwrite.items():
+        if isinstance(value, dict) and key in original and isinstance(original[key], dict):
+            # If both the original and overwrite values are dictionaries, recurse into the dictionary
+            deep_update(value, original[key])
+        elif key in original:
+            # Otherwise, directly replace the value
+            original[key] = value
+
+
+def updateValues(overwrite, original):
+    # Load overwrite_values.yaml into a dictionary called overwriteValues
+    with open(overwrite, 'r') as overwrite_file:
+        overwriteValues = yaml.safe_load(overwrite_file)
+
+    # Load values.yaml into a dictionary called originalValues
+    with open(original, 'r') as values_file:
+        originalValues = yaml.safe_load(values_file)
+
+    deep_update(overwriteValues, originalValues)
+
+    # Write the updated dictionary back to values.yaml
+    with open(original, 'w') as values_file:
+        yaml.dump(originalValues, values_file, default_flow_style=False)
+
 
 # Copy chart-templates to a new helmchart directory
-def copyHelmChart(destinationChartPath, repo, chart, chartVersion):
+def copyHelmChart(destinationChartPath, repo, chart, chartVersion, branch):
     chartName = chart.get('name', '')
     logging.info(f"Starting to process chart '{chartName}' chart directory")
 
@@ -236,15 +290,21 @@ def copyHelmChart(destinationChartPath, repo, chart, chartVersion):
         with open(chartYamlPath, 'w') as f:
             yaml.dump(chartYaml, f, width=float("inf"))
 
+    overwriteValues = os.path.join(os.path.dirname(os.path.realpath(__file__)), "chart-values", chart['name'], "overwriteValues.yaml")
     specificValues = os.path.join(os.path.dirname(os.path.realpath(__file__)), "chart-values", chart['name'], "values.yaml")
-    if os.path.exists(specificValues):
+    if os.path.exists(overwriteValues) or os.path.exists(specificValues):
         logging.info(f"Using specific values.yaml for chart '{chartName}' from: {specificValues}")
-        shutil.copyfile(specificValues, os.path.join(chartPath, "values.yaml"))
+        if is_version_compatible(branch, '2.14', '2.9', '2.13'):
+            updateValues(overwriteValues, os.path.join(chartPath, "values.yaml"))
+        else:
+            shutil.copyfile(specificValues, os.path.join(chartPath, "values.yaml"))
+
+
     else:
         logging.warning(f"No specific values.yaml found for chart '{chartName}'")
 
     logging.info(f"Running 'helm template' for chart: '{chartName}'")
-    helmTemplateOutput = subprocess.getoutput(['helm template '+ chartPath])
+    helmTemplateOutput = subprocess.getoutput(['helm template '+ chartPath + ' --namespace=PLACEHOLDER_NAMESPACE'])
 
     yamlList = helmTemplateOutput.split('---')
     for outputContent in yamlList:
@@ -280,7 +340,7 @@ def copyHelmChart(destinationChartPath, repo, chart, chartVersion):
     logging.info(f"Finished processing chart: '{chartName}'\n")
 
 # Given a resource Kind, return all filepaths of that resource type in a chart directory
-def findTemplatesOfType(helmChart, kind):
+def find_templates_of_type(helmChart, kind):
     resources = []
     for filename in os.listdir(os.path.join(helmChart, "templates")):
         if filename.endswith(".yaml") or filename.endswith(".yml"):
@@ -309,7 +369,7 @@ def fixEnvVarImageReferences(helmChart, imageKeyMapping):
 
     with open(valuesYaml, 'r') as f:
         values = yaml.safe_load(f)
-    deployments = findTemplatesOfType(helmChart, 'Deployment')
+    deployments = find_templates_of_type(helmChart, 'Deployment')
 
     imageKeys = []
     for deployment in deployments:
@@ -358,35 +418,39 @@ def fixImageReferences(helmChart, imageKeyMapping):
     with open(valuesYaml, 'r') as f:
         values = yaml.safe_load(f)
     
-    deployments = findTemplatesOfType(helmChart, 'Deployment')
+    resource_kinds = ["Deployment", "Job", "StatefulSet"]
     imageKeys = []
-    temp = "" ## temporarily read image ref
-    for deployment in deployments:
-        with open(deployment, 'r') as f:
-            deploy = yaml.safe_load(f)
-        
-        containers = deploy['spec']['template']['spec']['containers']
-        for container in containers:
-            image_key = parse_image_ref(container['image'])["repository"]
-            try:
-                image_key = imageKeyMapping[image_key]
-            except KeyError:
-                logging.critical("No image key mapping provided for imageKey: %s" % image_key)
-                exit(1)
-            imageKeys.append(image_key)
-            container['image'] = "{{ .Values.global.imageOverrides." + image_key + " }}"
-            container['imagePullPolicy'] = "{{ .Values.global.pullPolicy }}"
+    for kind in resource_kinds:
+        resource_templates = find_templates_of_type(helmChart, kind)
 
-            args = container.get('args', [])
-            refreshed_args = []
-            for arg in args:
-                if "--agent-image-name" not in arg:
-                    refreshed_args.append(arg)
-                else:
-                    refreshed_args.append("--agent-image-name="+"{{ .Values.global.imageOverrides." + image_key + " }}")
-            container['args'] = refreshed_args
-        with open(deployment, 'w') as f:
-            yaml.dump(deploy, f, width=float("inf"))
+        for template_path in resource_templates:
+            with open(template_path, 'r') as f:
+                resource_data = yaml.safe_load(f)
+            
+            containers = resource_data['spec']['template']['spec']['containers']
+            for container in containers:
+                image_key = parse_image_ref(container['image'])["repository"]
+                try:
+                    image_key = imageKeyMapping[image_key]
+                except KeyError:
+                    logging.critical("No image key mapping provided for imageKey: %s" % image_key)
+                    exit(1)
+                imageKeys.append(image_key)
+                container['image'] = "{{ .Values.global.imageOverrides." + image_key + " }}"
+                container['imagePullPolicy'] = "{{ .Values.global.pullPolicy }}"
+
+                if kind == "Deployment":
+                    args = container.get('args', [])
+                    refreshed_args = []
+                    for arg in args:
+                        if "--agent-image-name" not in arg:
+                            refreshed_args.append(arg)
+                        else:
+                            refreshed_args.append("--agent-image-name="+"{{ .Values.global.imageOverrides." + image_key + " }}")
+                    container['args'] = refreshed_args
+
+            with open(template_path, 'w') as f:
+                yaml.dump(resource_data, f, width=float("inf"))
 
     if 'imageOverride' in values['global']['imageOverrides']:
         del values['global']['imageOverrides']['imageOverride']
@@ -405,35 +469,65 @@ def insertFlowControlIfAround(lines_list, first_line_index, last_line_index, if_
    lines_list[last_line_index] = "%s{{- end }}\n" % lines_list[last_line_index]
 
 def is_version_compatible(branch, min_release_version, min_backplane_version, min_ocm_version, enforce_master_check=True):
-    # Extract the version part from the branch name (e.g., '2.12-integration' -> '2.12')
-    pattern = r'(\d+\.\d+)'  # Matches versions like '2.12'
-    
-    if branch == "main" or branch == "master":
-        if enforce_master_check:
-            return True
+    """_summary_
+
+    Args:
+        branch (_type_): _description_
+        min_release_version (_type_): _description_
+        min_backplane_version (_type_): _description_
+        min_ocm_version (_type_): _description_
+        enforce_master_check (bool, optional): _description_. Defaults to True.
+
+    Returns:
+        _type_: _description_
+    """
+
+    # Retrieve the release versions from environment variables
+    acm_release_version = os.getenv('ACM_RELEASE_VERSION')
+    mce_release_version = os.getenv('MCE_RELEASE_VERSION')
+
+    if not acm_release_version and not mce_release_version:
+        logging.error("Neither ACM nor MCE release version is set in environment variables.")
+
+        # Extract the version part from the branch name (e.g., '2.12-integration' -> '2.12')
+        pattern = r'(\d+\.\d+)'  # Matches versions like '2.12'
+
+        if branch == "main" or branch == "master":
+            if enforce_master_check:
+                return True
+            else:
+                return False
+
+        match = re.search(pattern, branch)
+        if match:
+            v = match.group(1)  # Extract the version
+            branch_version = version.Version(v)  # Create a Version object
+
+            if "release-ocm" in branch:
+                min_branch_version = version.Version(min_ocm_version)  # Use the minimum release version
+
+            elif "release" in branch:
+                min_branch_version = version.Version(min_release_version)  # Use the minimum release version
+
+            elif "backplane" in branch or "mce" in branch:
+                min_branch_version = version.Version(min_backplane_version)  # Use the minimum backplane version
+
+            else:
+                logging.error("Unrecognized branch type for branch: %s", branch)
+                return False
+
+            # Check if the branch version is compatible with the specified minimum branch
+            return branch_version >= min_branch_version
+
         else:
-            return False
-    
-    match = re.search(pattern, branch)
-    if match:
-        v = match.group(1)  # Extract the version
-        branch_version = version.Version(v)  # Create a Version object
-        
-        if "release-ocm" in branch:
-            min_branch_version = version.Version(min_ocm_version)  # Use the minimum release version
-        
-        elif "release" in branch:
-            min_branch_version = version.Version(min_release_version)  # Use the minimum release version
-
-        elif "backplane" in branch or "mce" in branch:
-            min_branch_version = version.Version(min_backplane_version)  # Use the minimum backplane version
-
-        else:
-            logging.error(f"Unrecognized branch type for branch: {branch}")
+            logging.error("Version not found in branch: %s", branch)
             return False
 
-        # Check if the branch version is compatible with the specified minimum branch
-        return branch_version >= min_branch_version
+    if acm_release_version and acm_release_version >= min_release_version:
+        return True
+
+    elif mce_release_version and mce_release_version >= min_backplane_version:
+        return True
 
     else:
         return False
@@ -523,7 +617,7 @@ def updateDeployments(chartName, helmChart, exclusions, inclusions, branch):
     with open(deploySpecYaml, 'r') as f:
         deploySpec = yaml.safe_load(f)
     
-    deployments = findTemplatesOfType(helmChart, 'Deployment')
+    deployments = find_templates_of_type(helmChart, 'Deployment')
     for deployment in deployments:
         with open(deployment, 'r') as f:
             deploy = yaml.safe_load(f)
@@ -536,44 +630,10 @@ def updateDeployments(chartName, helmChart, exclusions, inclusions, branch):
         deploy['spec']['template']['spec']['hostNetwork'] = False
         deploy['spec']['template']['spec']['hostPID'] = False
         deploy['spec']['template']['spec']['hostIPC'] = False
-        if 'securityContext' not in deploy['spec']['template']['spec']:
-            deploy['spec']['template']['spec']['securityContext'] = {}
-        deploy['spec']['template']['spec']['securityContext']['runAsNonRoot'] = True
+
         deploy['spec']['template']['metadata']['labels']['ocm-antiaffinity-selector'] = deploy['metadata']['name']
         deploy['spec']['template']['spec']['nodeSelector'] = ""
         deploy['spec']['template']['spec']['imagePullSecrets'] = ''
-        pod_template_spec = deploy['spec']['template']['spec']
-        if 'securityContext' not in pod_template_spec:
-            pod_template_spec['securityContext'] = {}
-        pod_security_context = pod_template_spec['securityContext']
-        pod_security_context['runAsNonRoot'] = True
-        if 'seccompProfile' not in pod_security_context:
-            pod_security_context['seccompProfile'] = {'type': 'RuntimeDefault'}
-            # This will be made conditional on OCP version >= 4.11 by injectHelmFlowControl()
-        else:
-            if pod_security_context['seccompProfile']['type'] != 'RuntimeDefault':
-                logging.warning("Leaving non-standard pod-level seccompprofile setting.")
-
-        containers = deploy['spec']['template']['spec']['containers']
-        for container in containers:
-            if 'securityContext' not in container: 
-                container['securityContext'] = {}
-            if 'env' not in container: 
-                container['env'] = {}
-            container['securityContext']['allowPrivilegeEscalation'] = False
-            container['securityContext']['capabilities'] = {}
-            container['securityContext']['capabilities']['drop'] = ['ALL']
-            container['securityContext']['privileged'] = False
-            container['securityContext']['runAsNonRoot'] = True
-            if 'readOnlyRootFilesystem' not in exclusions:
-                container['securityContext']['readOnlyRootFilesystem'] = True
-            if 'seccompProfile' in container['securityContext']:
-                if container['securityContext']['seccompProfile']['type'] == 'RuntimeDefault':
-                    # Remove, to allow pod-level setting to have effect.
-                    del container['securityContext']['seccompProfile']
-                else:
-                    container_name = container['name']
-                    logging.warning("Leaving non-standard seccompprofile setting for container %s" % container_name)
         
         with open(deployment, 'w') as f:
             yaml.dump(deploy, f, width=float("inf"))
@@ -613,6 +673,39 @@ def ensure_clusterrole_binding_subject_namespace(resource_data, resource_name, d
     
         subject['namespace'] = subject_namespace
     logging.info(f"Subject namespace for '{resource_name}' set to: '{subject_namespace}'\n")
+
+def ensure_stateful_set_storage_class(resource_data, resource_name):
+    """
+    Ensures that a StatefulSet has a storageClassName set.
+
+    If the storageClassName is not specified in the StatefulSet spec, it assigns the default 
+    Helm value (`{{ .Values.global.storageClassName }}`). If a storageClassName is 
+    already set, it wraps it in a Helm `default` function to allow overriding.
+
+    Args:
+        resource_data (dict): The StatefulSet resource data dictionary.ß
+        resource_name (str): The name of the StatefulSet resource.
+
+    Returns:
+        None: Modifies resource_data in place.
+    """
+    statefulset_vc_templates = resource_data['spec'].get('volumeClaimTemplates', [])
+    
+    for claim in statefulset_vc_templates:
+        # Use the default Helm namespace if not specified
+        claim_storage_class_name = claim.get('spec', {}).get('storageClassName')
+
+        if claim_storage_class_name is None:
+          claim_storage_class_name = """{{ .Values.global.storageClassName }}"""
+
+        # Update Helm templating to override existing namespace
+        else:
+            claim_storage_class_name = f"{{{{ default \"{claim_storage_class_name}\" .Values.global.storageClassName }}}}"
+        
+        claim['spec']['storageClassName'] = claim_storage_class_name
+        logging.info(f"StatefulSet volumeClaimTemplate storageClassName for '{resource_name}' set to: '{claim_storage_class_name}'\n")
+
+    resource_data['spec']['volumeClaimTemplates'] = statefulset_vc_templates    
 
 def ensure_pvc_storage_class(resource_data, resource_name):
     """
@@ -686,6 +779,17 @@ def ensure_webhook_namespace(resource_data, resource_name, default_namespace):
         logging.info(f"  Namespace: {service_namespace}")
         logging.info(f"  Path: {service_path}\n")
 
+def replace_default(data, old, new):
+    if isinstance(data, dict):
+        for key, value in data.items():
+            data[key] = replace_default(value, old, new)
+    elif isinstance(data, list):
+        for i in range(len(data)):
+            data[i] = replace_default(data[i], old, new)
+    elif isinstance(data, str):
+        return data.replace(old, new)
+    return data
+
 # updateHelmResources adds standard configuration to the generic kubernetes resources
 def update_helm_resources(chartName, helmChart, skip_rbac_overrides, exclusions, inclusions, branch):
     logging.info(f"Updating resources chart: {chartName}")
@@ -693,16 +797,16 @@ def update_helm_resources(chartName, helmChart, skip_rbac_overrides, exclusions,
     resource_kinds = [
         "ClusterRole", "ClusterRoleBinding", "ConfigMap", "Deployment", "MutatingWebhookConfiguration",
         "NetworkPolicy", "PersistentVolumeClaim", "RoleBinding", "Role", "Route", "Secret", "Service", "StatefulSet",
-        "ValidatingWebhookConfiguration"
+        "ValidatingWebhookConfiguration", "Job", "ConsolePlugin"
     ]
 
     namespace_scoped_kinds = [
         "ConfigMap", "Deployment", "NetworkPolicy", "PersistentVolumeClaim", "RoleBinding", "Role", "Route",
-        "Secret", "Service", "StatefulSet"
+        "Secret", "Service", "StatefulSet", "Job"
     ]
 
     for kind in resource_kinds:
-        resource_templates = findTemplatesOfType(helmChart, kind)
+        resource_templates = find_templates_of_type(helmChart, kind)
         if not resource_templates:
             logging.info("------------------------------------------")
             logging.warning(f"No {kind} templates found in the Helm chart [Skipping]")
@@ -722,11 +826,15 @@ def update_helm_resources(chartName, helmChart, skip_rbac_overrides, exclusions,
                     resource_name = resource_data['metadata'].get('name')
                     logging.info(f"Processing resource: {resource_name} from template: {template_path}")
 
+                if chartName == 'flight-control':
+                    if kind == 'ConsolePlugin':
+                        resource_data = replace_default(resource_data, 'PLACEHOLDER_NAMESPACE', '{{ .Values.global.namespace }}')
+
                 # Ensure namespace is set for namespace-scoped resources
                 if kind in namespace_scoped_kinds:
                     resource_namespace = resource_data['metadata'].get('namespace')
 
-                    if resource_namespace is None:
+                    if resource_namespace is None or resource_namespace == "PLACEHOLDER_NAMESPACE":
                         # Use the default Helm namespace if not specified
                         resource_namespace = default_namespace
                     else:
@@ -741,12 +849,17 @@ def update_helm_resources(chartName, helmChart, skip_rbac_overrides, exclusions,
                 if kind == "MutatingWebhookConfiguration" or kind == "ValidatingWebhookConfiguration":
                     ensure_webhook_namespace(resource_data, resource_name, default_namespace)
 
+                # Ensure the StatefulSet has a storageClassName set,
+                # defaulting to Helm values if not specified.
+                if kind == 'StatefulSet':
+                    ensure_stateful_set_storage_class(resource_data, resource_name)
+
                 # Ensure the PersistentVolumeClaim has a storageClassName set,
                 # defaulting to Helm values if not specified.
                 if kind == 'PersistentVolumeClaim':
                     ensure_pvc_storage_class(resource_data, resource_name)
 
-                if chartName == 'flightctl':
+                if chartName == 'flight-control':
                     if kind == 'Route':
                         if resource_name == 'flightctl-api-route':
                             resource_data['spec']['host'] = """api.{{ .Values.global.baseDomain  }}"""
@@ -755,10 +868,19 @@ def update_helm_resources(chartName, helmChart, skip_rbac_overrides, exclusions,
 
                     if kind == 'ConfigMap':
                         resource_data['metadata']['namespace'] = '{{ .Values.global.namespace  }}'
-                        if 'config.yaml' in resource_data['data']:
-                            resource_data['data']['config.yaml'] = resource_data['data']['config.yaml'].replace('open-cluster-management', '{{ .Values.global.namespace  }}')
-                            resource_data['data']['config.yaml'] = resource_data['data']['config.yaml'].replace('placeholder-url', '{{ .Values.global.aPIUrl  }}')
-                            resource_data['data']['config.yaml'] = resource_data['data']['config.yaml'].replace('placeholder-basedomain', '{{ .Values.global.baseDomain  }}')
+                        config_data = resource_data.get('data')
+                        for key, value in config_data.items():
+                            if key.endswith(".yaml") or key.endswith(".yml"):
+                                key_data = yaml.safe_load(value)
+                                logging.warning(f"key_data={key_data.get('database').get('hostname')}")
+                                hostname = key_data.get('database').get('hostname')
+                                key_data = replace_default(key_data, 'PLACEHOLDER_NAMESPACE', '{{ .Values.global.namespace }}')
+                                key_data = replace_default(key_data, 'placeholder_apiurl', '{{ .Values.global.apiUrl }}')
+                                key_data = replace_default(key_data, 'placeholder_basedomain', '{{ .Values.global.baseDomain }}')
+                                updated_yaml = yaml.dump(key_data, default_flow_style=False, allow_unicode=True, width=float("inf"))
+                                config_data[key] = updated_yaml
+                                resource_data['data'] = config_data
+                        resource_data['data'] = replace_default(resource_data['data'], 'PLACEHOLDER_NAMESPACE', '{{ .Values.global.namespace }}')
                 
                     if kind == "ClusterRoleBinding":
                         resource_data['metadata']['name'] = 'flightctl-api-{{ .Values.global.namespace }}'
@@ -767,8 +889,10 @@ def update_helm_resources(chartName, helmChart, skip_rbac_overrides, exclusions,
                         resource_data['metadata']['name'] = 'flightctl-api-{{ .Values.global.namespace }}'
 
                     if kind == "NetworkPolicy":
-                        new_values = ["{{ .Values.global.namespace }}", "openshift-console"]
-                        resource_data['spec']['ingress'][0]['from'][0]['namespaceSelector']['matchExpressions'][0]['values'] = new_values
+                        resource_data['metadata']['namespace'] = '{{ .Values.global.namespace }}'
+                        resource_data = replace_default(resource_data, 'PLACEHOLDER_NAMESPACE', '{{ .Values.global.namespace }}')
+                    if kind == "Job":
+                        resource_data = replace_default(resource_data, 'PLACEHOLDER_NAMESPACE', '{{ .Values.global.namespace }}')
 
                 if chartName != "managed-serviceaccount":
                     if kind == "ClusterRoleBinding" or kind == "RoleBinding":
@@ -786,7 +910,7 @@ def update_helm_resources(chartName, helmChart, skip_rbac_overrides, exclusions,
                             logging.info(f"Subject namespace for {resource_name} set to: {target_namespace} (Helm default used).\n")
 
                 with open(template_path, 'w') as f:
-                    yaml.dump(resource_data, f, width=float("inf"))
+                    yaml.dump(resource_data, f, width=float("inf"), default_flow_style=False, allow_unicode=True)
                     logging.info(f"Succesfully updated resource: {resource_name}\n")
 
             except Exception as e:
@@ -799,7 +923,7 @@ def update_helm_resources(chartName, helmChart, skip_rbac_overrides, exclusions,
 def injectAnnotationsForAddonTemplate(helmChart):
     logging.info("Injecting Annotations for deployments in the AddonTemplate ...")
 
-    addonTemplates = findTemplatesOfType(helmChart, 'AddOnTemplate')
+    addonTemplates = find_templates_of_type(helmChart, 'AddOnTemplate')
     for addonTemplate in addonTemplates:
         injected = False
         with open(addonTemplate, 'r') as f:
@@ -832,7 +956,7 @@ def injectAnnotationsForAddonTemplate(helmChart):
 def fixImageReferencesForAddonTemplate(helmChart, imageKeyMapping):
     logging.info("Fixing image references in addon templates and values.yaml ...")
 
-    addonTemplates = findTemplatesOfType(helmChart, 'AddOnTemplate')
+    addonTemplates = find_templates_of_type(helmChart, 'AddOnTemplate')
     imageKeys = []
     temp = "" ## temporarily read image ref
     for addonTemplate in addonTemplates:
@@ -880,10 +1004,10 @@ def fixImageReferencesForAddonTemplate(helmChart, imageKeyMapping):
 # updateRBAC adds standard configuration to the RBAC resources (clusterroles, roles, clusterrolebindings, and rolebindings)
 def updateRBAC(helmChart, chartName):
     logging.info("Updating clusterroles, roles, clusterrolebindings, and rolebindings ...")
-    clusterroles = findTemplatesOfType(helmChart, 'ClusterRole')
-    roles = findTemplatesOfType(helmChart, 'Role')
-    clusterrolebindings = findTemplatesOfType(helmChart, 'ClusterRoleBinding')
-    rolebindings = findTemplatesOfType(helmChart, 'RoleBinding')
+    clusterroles = find_templates_of_type(helmChart, 'ClusterRole')
+    roles = find_templates_of_type(helmChart, 'Role')
+    clusterrolebindings = find_templates_of_type(helmChart, 'ClusterRoleBinding')
+    rolebindings = find_templates_of_type(helmChart, 'RoleBinding')
 
     for rbacFile in clusterroles + roles + clusterrolebindings + rolebindings:
         with open(rbacFile, 'r') as f:
@@ -895,23 +1019,126 @@ def updateRBAC(helmChart, chartName):
             yaml.dump(rbac, f, width=float("inf"))
     logging.info("Clusterroles, roles, clusterrolebindings, and rolebindings updated. \n")
 
+def inject_security_context_constraints(resource, constraints_override):
+    pod_template_spec = resource.setdefault("spec", {}).setdefault("template", {}).setdefault("spec", {})
+    pod_security_context = pod_template_spec.setdefault("securityContext", {})
 
-def injectRequirements(helmChart, chartName, imageKeyMapping, skipRBACOverrides, exclusions, inclusions, branch):
-    logging.info("Updating Helm chart '%s' with onboarding requirements ...", helmChart)
-    fixImageReferences(helmChart, imageKeyMapping)
-    fixEnvVarImageReferences(helmChart, imageKeyMapping)
-    fixImageReferencesForAddonTemplate(helmChart, imageKeyMapping)
-    injectAnnotationsForAddonTemplate(helmChart)
+    # --- Pod-level security context ---
+    pod_security_context['runAsNonRoot'] = constraints_override.get('runAsNonRoot', True)
+    pod_security_context['runAsUser'] = constraints_override.get('runAsUser')
+    pod_security_context['runAsGroup'] = constraints_override.get('runAsGroup')
+    pod_security_context['fsGroup'] = constraints_override.get('fsGroup')
+    pod_security_context['fsGroupChangePolicy'] = constraints_override.get('fsGroupChangePolicy')
+    pod_security_context['SELinux'] = constraints_override.get('SELinux')
+    pod_security_context['supplementalGroups'] = constraints_override.get('supplementalGroups')
+    pod_security_context['supplementalGroupsPolicy'] = constraints_override.get('supplementalGroupsPolicy')
 
-    if not skipRBACOverrides:
-        updateRBAC(helmChart, chartName)
+    pod_security_context.setdefault('seccompProfile', constraints_override.get('seccompProfile', {'type': 'RuntimeDefault'}))
+    if pod_security_context.get('seccompProfile').get('type') != 'RuntimeDefault':
+        logging.warning("Leaving non-standard pod-level seccompprofile setting.")
+
+    # Remove keys with value None. We will only add those overrides, if there are custom values for us to pick up.
+    for key in list(pod_security_context):
+        if pod_security_context[key] is None:
+            pod_security_context.pop(key)
+
+    logging.info(f"Pod security context: {pod_security_context}")
+
+    # --- Container-level security context ---
+    container_constraints_override = constraints_override.get('containers', [])
+    container_template_spec = pod_template_spec.get('containers', [])
+
+    for container in container_template_spec:
+        container_name = container.get('name')
+        container_security_context = container.setdefault('securityContext', {})
+
+        # Set container env to empty map, if it doesn't exist.
+        container.setdefault('env', {})
+
+        # Find matching constraint by container name
+        matching_constraint = next((c for c in container_constraints_override if c.get('name') == container_name), {})
+
+        container_security_context['allowPrivilegeEscalation'] = matching_constraint.get('allowPrivilegeEscalation', False)
+        container_security_context['capabilities'] = matching_constraint.get('capabilities', {'drop': ['ALL']})
+        container_security_context['privileged'] = matching_constraint.get('privileged', False)
+        container_security_context['runAsNonRoot'] = matching_constraint.get('runAsNonRoot', True)
+        container_security_context['readOnlyRootFilesystem'] = matching_constraint.get('readOnlyRootFilesystem', True)
+        
+        if 'seccompProfile'  in container_security_context:
+            if container_security_context.get('seccompProfile').get('type') == 'RuntimeDefault':
+                # Remove, to allow pod-level setting to have effect.
+                del container_security_context['seccompProfile']
+            else:
+                logging.warning("Leaving non-standard pod-level seccompprofile setting.")
+
+        logging.info(f"Container '{container_name}' security context: {container_security_context}\n")
+        
+
+def update_security_contexts(template_chart_path, constraints_override):
+    """_summary_
+
+    Args:
+        template_chart_path (_type_): _description_
+        constraints (list, optional): _description_. Defaults to [].
+    """
+    log_header("Injecting security context constraints...")
+
+    for kind in ["Deployment", "Job", "StatefulSet"]:
+        resource_templates = find_templates_of_type(template_chart_path, kind)
+        if not resource_templates:
+            continue
+    
+        for template in resource_templates:
+            try:
+                with open(template, 'r', encoding="utf-8") as f:
+                    resource = yaml.safe_load(f)
+
+                name = resource.get("metadata", {}).get("name")
+                constraints = next(
+                    (c for c in constraints_override if c.get("kind") == kind and c.get("name") == name), {}
+                )
+
+                if constraints:
+                    logging.info("Injecting *custom* security context into '%s/%s'", kind, name)
+                else:
+                    logging.info("Injecting *default* security context into '%s/%s'", kind, name)
+
+                inject_security_context_constraints(resource, constraints)
+                with open(template, 'w', encoding="utf-8") as f:
+                    yaml.dump(resource, f, width=float("inf"))
+
+            except Exception as e:
+                logging.error(f"Error injecting security context for {template}: {e}")
+
+    logging.info("Updated security context for '%s'\n", template_chart_path)
+
+def injectRequirements(helm_chart_path, chart, branch):
+    logging.info("Updating Helm chart '%s' with onboarding requirements ...", helm_chart_path)
+
+    chart_name = chart.get("name")
+    image_mappings = chart.get("imageMappings", {})
+    exclusions = chart.get("exclusions", [])
+    inclusions = chart.get("inclusions", [])
+    security_context_constraints = chart.get("security-context-constraints", [])
+    skip_rbac_overrides = chart.get("skipRBACOverrides", False)
+
+    fixImageReferences(helm_chart_path, image_mappings)
+    fixEnvVarImageReferences(helm_chart_path, image_mappings)
+    fixImageReferencesForAddonTemplate(helm_chart_path, image_mappings)
+    injectAnnotationsForAddonTemplate(helm_chart_path)
+
+    if not skip_rbac_overrides:
+        updateRBAC(helm_chart_path, chart_name)
+
+    if is_version_compatible(branch, '2.10', '2.5', '2.10'):
+        update_security_contexts(helm_chart_path, security_context_constraints)
     
     if is_version_compatible(branch, '2.13', '2.8', '2.13'):
-        update_helm_resources(chartName, helmChart, skipRBACOverrides, exclusions, inclusions, branch)
+        update_helm_resources(chart_name, helm_chart_path, skip_rbac_overrides, exclusions, inclusions, branch)
 
-    updateDeployments(chartName, helmChart, exclusions, inclusions, branch)
+    updateDeployments(chart_name, helm_chart_path, exclusions, inclusions, branch)
 
-    logging.info("Updated Chart '%s' successfully", helmChart)
+    logging.info("Updated Chart '%s' successfully", helm_chart_path)
 
 def split_at(the_str, the_delim, favor_right=True):
 
@@ -1036,16 +1263,21 @@ def renderChart(chart_path):
 def main():
     ## Initialize ArgParser
     parser = argparse.ArgumentParser()
+    parser.add_argument("--component", dest="component", type=str, required=False, help="If provided, only this component will be processed")
+    parser.add_argument("--config", dest="config", type=str, required=False, help="If provided, this config file will be processed")
     parser.add_argument("--destination", dest="destination", type=str, required=False, help="Destination directory of the created helm chart")
     parser.add_argument("--skipOverrides", dest="skipOverrides", type=bool, help="If true, overrides such as helm flow control will not be applied")
     parser.add_argument("--lint", dest="lint", action='store_true', help="If true, bundles will only be linted to ensure they can be transformed successfully. Default is False.")
+
     parser.set_defaults(skipOverrides=False)
     parser.set_defaults(lint=False)
 
     args = parser.parse_args()
-    skipOverrides = args.skipOverrides
+    component = args.component
+    config_override = args.config
     destination = args.destination
     lint = args.lint
+    skipOverrides = args.skipOverrides
 
     if lint == False and not destination:
         logging.critical("Destination directory is required when not linting.")
@@ -1054,18 +1286,45 @@ def main():
     logging.basicConfig(level=logging.DEBUG)
 
     # Config.yaml holds the configurations for Operator bundle locations to be used
-    configYaml = os.path.join(os.path.dirname(os.path.realpath(__file__)),"charts-config.yaml")
-    with open(configYaml, 'r') as f:
+    # Config.yaml holds the configurations for Operator bundle locations to be used
+    if config_override:
+        root_override_path = os.path.join(ROOT_DIR, config_override)
+        script_override_path = os.path.join(SCRIPT_DIR, config_override)
+
+        if os.path.exists(root_override_path):
+            config_yaml = root_override_path
+        else:
+            config_yaml = script_override_path
+    else:
+        config_yaml = os.path.join(SCRIPT_DIR, "charts-config.yaml")
+
+    with open(config_yaml, 'r') as f:
         config = yaml.safe_load(f)
 
     if not config:
         logging.critical("No charts listed in config to be moved!")
         exit(0)
 
+    # Normalize config into a list of components
+    if isinstance(config, dict):
+        os.environ['ACM_RELEASE_VERSION'] = config.get('acm-release-version', '')
+        os.environ['MCE_RELEASE_VERSION'] = config.get('mce-release-version', '')
+        components = config.get("components", [])
+
+    else:
+        components = config
+
+    # Optionally filter by a specific component
+    if component:
+        components = [repo for repo in components if repo.get("repo_name") == component]
+
     # Loop through each repo in the config.yaml
-    for repo in config:
-        logging.info("Cloning: %s", repo["repo_name"])
-        repo_path = os.path.join(os.path.dirname(os.path.realpath(__file__)), "tmp/" + repo["repo_name"]) # Path to clone repo to
+    for repo in components:
+        repo_name = repo.get("repo_name")
+
+        logging.info("Cloning: %s", repo_name)
+        repo_path = os.path.join(SCRIPT_DIR, "tmp", repo_name)
+
         if os.path.exists(repo_path): # If path exists, remove and re-clone
             shutil.rmtree(repo_path)
         repository = Repo.clone_from(repo["github_ref"], repo_path) # Clone repo to above path
@@ -1087,7 +1346,7 @@ def main():
 
             # Copy over all CRDs to the destination directory
             logging.info(f"Adding CRDs for chart: '{chart_name}'")
-            addCRDs(repo["repo_name"], chart, destination)
+            addCRDs(repo_name, chart, destination)
 
             logging.info(f"Creating helm chart: '{chart_name}'")
             always_or_toggle = chart['always-or-toggle']
@@ -1099,24 +1358,19 @@ def main():
 
             # Template Helm Chart Directory from 'chart-templates'
             logging.info(f"Templating helm chart '{chart_name}'")
-            copyHelmChart(destinationChartPath, repo["repo_name"], chart, chartVersion)
+            copyHelmChart(destinationChartPath, repo_name, chart, chartVersion, branch)
 
             # Render the helm chart before updating the chart resources.
             if not renderChart(destinationChartPath):
                 logging.error(f"Failed to render chart {destinationChartPath}")
             
             # Update the helm chart resources with additional overrides
-            updateResources(destination, repo["repo_name"], chart)
+            updateResources(destination, repo_name, chart)
 
             if not skipOverrides:
                 logging.info("Adding Overrides (set --skipOverrides=true to skip) ...")
-                image_mappings = chart.get("imageMappings", {})
-                exclusions = chart.get("exclusions", [])
-                inclusions = chart.get("inclusions", [])
-                skip_rbac_overrides = chart.get("skipRBACOverrides", False)
 
-                injectRequirements(destinationChartPath, chart_name, image_mappings, skip_rbac_overrides, exclusions,
-                                   inclusions, branch)
+                injectRequirements(destinationChartPath, chart, branch)
                 logging.info("Overrides added.\n")
 
     logging.info("All repositories and operators processed successfully.")
