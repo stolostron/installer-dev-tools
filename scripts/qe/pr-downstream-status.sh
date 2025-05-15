@@ -1,6 +1,8 @@
 #!/bin/bash
 
 declare -A repo_commits
+down_sha=$1
+shift
 
 function print_pr_testability {
   local pr_url=$1
@@ -19,7 +21,7 @@ function print_pr_testability {
   # echo ${repo_commits["$org/$repo"]}
   local pr_sha=$(echo "${repo_commits["$org/$repo"]}" | jq -r '.[]| select(.commit.message | contains("(#'$number')")) | .sha')
 
-  local published_sha=$(curl -ks https://gitlab.cee.redhat.com/acm-cicd/acm-bb2/-/raw/acm-2.14/snapshots/2025-05-14-04-36-53/down-sha.log | grep stolostron/multiclusterhub-operator | awk '{print $1}')
+  local published_sha=$(curl -ks $down_sha | grep stolostron/multiclusterhub-operator | awk '{print $1}')
 
   # echo $pr_sha $published_sha
 
@@ -41,6 +43,5 @@ function print_pr_testability {
 
 for pr;
 do
-  # echo "PR: $pr"
   print_pr_testability $pr
 done
