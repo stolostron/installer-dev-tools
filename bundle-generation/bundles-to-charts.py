@@ -1101,8 +1101,8 @@ def inject_security_context_constraints(resource, constraints_override):
         container_name = container.get('name')
         container_security_context = container.setdefault('securityContext', {})
 
-        # Set container env to empty map, if it doesn't exist.
-        container.setdefault('env', {})
+        # Set container env to empty array, if it doesn't exist.
+        container.setdefault('env', [])
 
         # Find matching constraint by container name
         matching_constraint = next((c for c in container_constraints_override if c.get('name') == container_name), {})
