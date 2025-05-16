@@ -564,7 +564,7 @@ def injectHelmFlowControl(deployment, branch):
 """
 
 
-        if line.strip() == "env:" or line.strip() == "env: {}":
+        if line.strip() == "env:" or line.strip() == "env: {}" or line.strip() == "env: []":
             lines[i] = """        env:
 {{- if .Values.hubconfig.proxyConfigs }}
         - name: HTTP_PROXY
