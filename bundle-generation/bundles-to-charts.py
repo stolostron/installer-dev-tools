@@ -823,38 +823,55 @@ def is_version_compatible(branch, min_release_version, min_backplane_version, mi
     Returns:
         _type_: _description_
     """
-    # Extract the version part from the branch name (e.g., '2.12-integration' -> '2.12')
-    pattern = r'(\d+\.\d+)'  # Matches versions like '2.12'
 
-    if branch == "main" or branch == "master":
-        if enforce_master_check:
-            return True
+    # Retrieve the release versions from environment variables
+    acm_release_version = os.getenv('ACM_RELEASE_VERSION')
+    mce_release_version = os.getenv('MCE_RELEASE_VERSION')
+
+    if not acm_release_version and not mce_release_version:
+        # logging.error("Neither ACM nor MCE release version is set in environment variables.")
+
+        # Extract the version part from the branch name (e.g., '2.12-integration' -> '2.12')
+        pattern = r'(\d+\.\d+)'  # Matches versions like '2.12'
+
+        if branch == "main" or branch == "master":
+            if enforce_master_check:
+                return True
+            else:
+                return False
+
+        match = re.search(pattern, branch)
+        if match:
+            v = match.group(1)  # Extract the version
+            branch_version = version.Version(v)  # Create a Version object
+
+            if "release-ocm" in branch:
+                min_branch_version = version.Version(min_ocm_version)  # Use the minimum release version
+
+            elif "release" in branch:
+                min_branch_version = version.Version(min_release_version)  # Use the minimum release version
+
+            elif "backplane" in branch or "mce" in branch:
+                min_branch_version = version.Version(min_backplane_version)  # Use the minimum backplane version
+
+            else:
+                logging.error("Unrecognized branch type for branch: %s", branch)
+                return False
+
+            # Check if the branch version is compatible with the specified minimum branch
+            return branch_version >= min_branch_version
+
         else:
+            logging.error("Version not found in branch: %s", branch)
             return False
+        
+    if acm_release_version and acm_release_version >= min_release_version:
+        return True
 
-    match = re.search(pattern, branch)
-    if match:
-        v = match.group(1)  # Extract the version
-        branch_version = version.Version(v)  # Create a Version object
-
-        if "release-ocm" in branch:
-            min_branch_version = version.Version(min_ocm_version)  # Use the minimum release version
-
-        elif "release" in branch:
-            min_branch_version = version.Version(min_release_version)  # Use the minimum release version
-
-        elif "backplane" in branch or "mce" in branch:
-            min_branch_version = version.Version(min_backplane_version)  # Use the minimum backplane version
-
-        else:
-            logging.error("Unrecognized branch type for branch: %s", branch)
-            return False
-
-        # Check if the branch version is compatible with the specified minimum branch
-        return branch_version >= min_branch_version
+    elif mce_release_version and mce_release_version >= min_backplane_version:
+        return True
 
     else:
-        logging.error("Version not found in branch: %s", branch)
         return False
 
 # injectHelmFlowControl injects advanced helm flow control which would typically make a .yaml file more difficult to parse. This should be called last.
@@ -1084,8 +1101,8 @@ def inject_security_context_constraints(resource, constraints_override):
         container_name = container.get('name')
         container_security_context = container.setdefault('securityContext', {})
 
-        # Set container env to empty map, if it doesn't exist.
-        container.setdefault('env', {})
+        # Set container env to empty array, if it doesn't exist.
+        container.setdefault('env', [])
 
         # Find matching constraint by container name
         matching_constraint = next((c for c in container_constraints_override if c.get('name') == container_name), {})
@@ -1473,7 +1490,11 @@ def main():
 
     # Normalize config into a list of components
     if isinstance(config, dict):
+        # Set global environment variables
+        os.environ['ACM_RELEASE_VERSION'] = config.get('acm-release-version', '')
+        os.environ['MCE_RELEASE_VERSION'] = config.get('mce-release-version', '')
         components = config.get("components", [])
+
     else:
         components = config
 
