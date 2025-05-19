@@ -1,8 +1,25 @@
 #!/bin/bash
 
 declare -A repo_commits
-down_sha=$1
-shift
+
+acm_bb2_id=115756
+mce_bb2_id=115757
+latest_acm_snapshot=$(curl -ks "https://gitlab.cee.redhat.com/api/v4/projects/$acm_bb2_id/repository/tree?ref=acm-2.14&path=snapshots&per_page=100" | jq -r '.[-2] | .name')
+latest_mce_snapshot=$(curl -ks "https://gitlab.cee.redhat.com/api/v4/projects/$mce_bb2_id/repository/tree?ref=mce-2.9&path=snapshots&per_page=100" | jq -r '.[-2] | .name')
+latest_acm_downsha=$(curl -ks "https://gitlab.cee.redhat.com/acm-cicd/acm-bb2/-/raw/acm-2.14/snapshots/$latest_acm_snapshot/down-sha.log")
+latest_mce_downsha=$(curl -ks "https://gitlab.cee.redhat.com/acm-cicd/mce-bb2/-/raw/mce-2.9/snapshots/$latest_mce_snapshot/down-sha.log")
+
+
+shas="$latest_acm_downsha\n$latest_mce_downsha"
+# echo "$shas"
+# echo "$latest_acm_snapshot"
+# echo "$latest_acm_downsha"
+
+authorization=""
+if [ -f "authorization.txt" ]; then
+  authorization="Authorization: Bearer $(cat "authorization.txt")"
+  # echo "Authorization found: $authorization"
+fi
 
 function print_pr_testability {
   local pr_url=$1
@@ -13,19 +30,24 @@ function print_pr_testability {
   local commits="https://api.github.com/repos/$org/$repo/commits"
   # echo $org $repo $number
 
-  if [[ ! -v repo_commits["$org/$repo"] ]]; then
-    repo_commits["$org/$repo"]=$(curl -LsH "Accept: application/vnd.github+json" -H "X-GitHub-Api-Verion: 2022-11-28" $commits)
+  if [[ ! -v repo_commits["$repo"] ]]; then
+    # echo "adding commits for $repo"
+    repo_commits["$repo"]=$(curl -LsH "Accept: application/vnd.github+json" -H "X-GitHub-Api-Verion: 2022-11-28" -H "$authorization" $commits)
   fi
 
-  # echo "attempting to pull sha"
+  # echo -e "commits: ${repo_commits["$repo"]}"
+
+  # echo "attempting to pull sha for $repo"
   # echo ${repo_commits["$org/$repo"]}
-  local pr_sha=$(echo "${repo_commits["$org/$repo"]}" | jq -r '.[]| select(.commit.message | contains("(#'$number')")) | .sha')
+  local pr_sha=$(echo "${repo_commits["$repo"]}" | jq -r '.[]| select(.commit.message | contains("(#'$number')")) | .sha')
 
-  local published_sha=$(curl -ks $down_sha | grep stolostron/multiclusterhub-operator | awk '{print $1}')
+  # echo $pr_sha
+  local published_sha=$(echo "$shas" | grep $org/$repo | awk '{print $1}')
 
-  # echo $pr_sha $published_sha
+  # echo -e "pr: $pr_sha\npublished: $published_sha"
 
-  local status=$(curl -LsH "Accept: application/vnd.github+json" -H"X-GitHub-Api-Version: 2022-11-28" "https://api.github.com/repos/stolostron/multiclusterhub-operator/compare/$pr_sha...$published_sha" | jq -r '.status')
+  # echo "comparing $org/$repo/pull/$number"
+  local status=$(curl -LsH "Accept: application/vnd.github+json" -H"X-GitHub-Api-Version: 2022-11-28" -H "$authorization" "https://api.github.com/repos/$org/$repo/compare/$pr_sha...$published_sha" | jq -r '.status')
 
   # echo $status
 
@@ -34,10 +56,12 @@ function print_pr_testability {
   # ahead
   # we only actually care if it's behind or not
 
-  if [ $status == "behind" ]; then
+  if [ $status == "ahead" ] || [ $status == "identical" ]; then
+    echo "✅ $repo pull $number is in the downstream build"
+  elif [ $status == "behind" ]; then
     echo "❌ $repo pull $number is not in the downstream build"
   else
-    echo "✅ $repo pull $number is in the downstream build"
+    echo "Unknown repo status: $status"
   fi 
 }
 
