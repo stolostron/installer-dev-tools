@@ -38,11 +38,11 @@ function print_pr_testability {
   # echo -e "commits: ${repo_commits["$repo"]}"
 
   # echo "attempting to pull sha for $repo"
-  # echo ${repo_commits["$org/$repo"]}
-  local pr_sha=$(echo "${repo_commits["$repo"]}" | jq -r '.[]| select(.commit.message | contains("(#'$number')")) | .sha')
+  # echo ${repo_commits["$repo"]}
+  local pr_sha=$(echo "${repo_commits["$repo"]}" | jq -r '.[]| select(.commit.message | contains("#'$number'")) | .sha')
 
   # echo $pr_sha
-  local published_sha=$(echo "$shas" | grep $org/$repo | awk '{print $1}')
+  local published_sha=$(echo "$shas" | grep -m 1 $org/$repo | awk '{print $1}')
 
   # echo -e "pr: $pr_sha\npublished: $published_sha"
 
@@ -57,9 +57,11 @@ function print_pr_testability {
   # we only actually care if it's behind or not
 
   if [ $status == "ahead" ] || [ $status == "identical" ]; then
-    echo "✅ $repo pull $number is in the downstream build"
+    echo "🟩 $org/$repo pull $number is in the downstream build"
   elif [ $status == "behind" ]; then
-    echo "❌ $repo pull $number is not in the downstream build"
+    echo "🟥 $org/$repo pull $number is not in the downstream build"
+  elif [ $status == "diverged" ]; then
+    echo "🟪 $org/$repo pull $number has diverged from the downstream build"
   else
     echo "Unknown repo status: $status"
   fi 
