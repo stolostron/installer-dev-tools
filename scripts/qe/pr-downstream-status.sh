@@ -1,5 +1,9 @@
 #!/bin/bash
 
+# To prevent rate limiting, consider creating a file called `authorization.txt` and placing a github Personal Access Token inside it
+# ghp_<token>
+
+
 declare -A repo_commits
 
 acm_bb2_id=115756
