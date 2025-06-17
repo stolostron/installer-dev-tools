@@ -15,8 +15,8 @@ The first time you run this, you will get an output stating that a new build has
 ![alt text](assets/expected-output.png)
 ![alt text](assets/expected-output-2.png)
 
-## Script Output (artifacts)
-When the script finishes, you should see `./diff-acm.txt` and `./diff-mce.txt`. These contain the changes that occurred between the two catalog builds (the build tags are stated at the top of the file for convenience)
+## Script output and artifacts
+When the script finishes, you should see diff sections. These should be included when posting to the forums. There are also files `./diff-acm.txt` and `./diff-mce.txt` which contain the same contents.
 
 When posting the updates, please include the contents of these files.
 

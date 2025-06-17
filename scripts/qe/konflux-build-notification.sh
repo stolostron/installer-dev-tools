@@ -62,9 +62,9 @@ diff ./tmp/acm-dev-catalog-$previous_acm-summary.txt ./tmp/acm-dev-catalog-$curr
 diff ./tmp/mce-dev-catalog-$previous_mce-summary.txt ./tmp/mce-dev-catalog-$current_mce-summary.txt --unchanged-line-format= --old-line-format= --new-line-format='%L' | column -t -s' ' >> diff-mce.txt
 
 echo ""
-echo "--- ACM DIFF ---"
+echo "----- quay.io/acm-d/acm-dev-catalog:$current_acm -----"
 cat diff-acm.txt
 
 echo ""
-echo "--- MCE DIFF ---"
+echo "----- quay.io/acm-d/mce-dev-catalog:$current_mce -----"
 cat diff-mce.txt
