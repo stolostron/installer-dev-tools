@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 import yaml
 import requests
 from urllib3.exceptions import InsecureRequestWarning
@@ -18,10 +19,17 @@ class StatusPrinter:
     def printPRStatus():
         pass
 
-class Konflux(ImageFetcher):
-    def fetchImageShas():
-        pass
+class Konflux(ImageFetcher, StatusPrinter):
+    def fetchImageShas(github_headers):
+        # r = requests.get("https://api.github.com/repos/stolostron/multiclusterhub-operator/contents/README.md", headers=github_headers)
+        print(github_headers)
+        r = requests.get("https://raw.githubusercontent.com/stolostron/acm-operator-bundle/refs/heads/release-2.14/config/acm-manifest-gen-config.json", headers=github_headers)
+        print(r.status_code)
+        print(r.text)
 
+
+    def printPRStatus():
+        pass
 class CPaaS(ImageFetcher, StatusPrinter):
     def fetchImageShas():
         acm_bb2_id = 115756
@@ -39,8 +47,7 @@ class CPaaS(ImageFetcher, StatusPrinter):
         sha_list = ""
         print("Fetching shas for ACM and MCE snapshots")
         acm_shalist_url = f"https://gitlab.cee.redhat.com/acm-cicd/acm-bb2/-/raw/acm-2.14/snapshots/{latest_acm_snapshot}/down-sha.log"
-        print(acm_shalist_url)
-        
+
         r = requests.get(acm_shalist_url, verify=False)
         if r.status_code == 404:
             print("ACM down-sha.log has not been generated. Hopefully it will be there soon")
@@ -48,7 +55,6 @@ class CPaaS(ImageFetcher, StatusPrinter):
             sha_list += r.text
 
         mce_shalist_url = f"https://gitlab.cee.redhat.com/acm-cicd/mce-bb2/-/raw/mce-2.9/snapshots/{latest_mce_snapshot}/down-sha.log"
-        print(mce_shalist_url)
         r = requests.get(mce_shalist_url, verify=False)
         if r.status_code == 404:
             print("MCE down-sha.log has not been generated. Hopefully it will be there soon")
@@ -62,7 +68,7 @@ class CPaaS(ImageFetcher, StatusPrinter):
             output[splits[2]] = splits[0]
         return output
 
-    def printPRStatus(shas, commits, pr_url, headers):
+    def printPRStatus(shas, commits, pr_url, github_headers):
         url_splits = pr_url.split("/")
         pr_number = url_splits[-1]
         # print(pr_number)
@@ -72,7 +78,7 @@ class CPaaS(ImageFetcher, StatusPrinter):
         commits_url = f"https://api.github.com/repos/{pr_repo}/commits"
 
         if pr_repo not in commits:
-            r = requests.get(commits_url, headers=headers)
+            r = requests.get(commits_url, headers=github_headers)
             commits[pr_repo] = r.json()
 
         pr_sha = ""
@@ -84,7 +90,7 @@ class CPaaS(ImageFetcher, StatusPrinter):
 
         # print(f"Comparing PR sha: {pr_sha} with published sha: {published_sha}")
         compare_url = f"https://api.github.com/repos/{pr_repo}/compare/{pr_sha}...{published_sha}"
-        r = requests.get(compare_url)
+        r = requests.get(compare_url, headers=github_headers)
         status = r.json()["status"]
 
         # print(status)
@@ -106,13 +112,13 @@ parser.add_argument('-k', '--konflux', nargs="+", help="list of PRs to check the
 args = parser.parse_args()
 
 commits = {}
-headers = {"Accept": "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28"}
+github_headers = {"Accept": "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28"}
 if os.path.exists("authorization.txt"):
     print("Authorization found. Applying to github API requests")
     with open("authorization.txt", 'r') as file:
-        headers["Authorization"] = f"Bearer {file.read().strip()}"
+        github_headers["Authorization"] = f"Bearer {file.read().strip()}"
 if args.cpaas is not None:
     cpaas = CPaaS
     shas = cpaas.fetchImageShas()
     for pr_url in args.cpaas:
-        cpaas.printPRStatus(shas, commits, pr_url, headers)
+        cpaas.printPRStatus(shas, commits, pr_url, github_headers)
