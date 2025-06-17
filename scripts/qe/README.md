@@ -13,6 +13,7 @@ podman login -u='<user>' -p='<quay token>' quay.io
 The first time you run this, you will get an output stating that a new build has been released. This is because `latest-acm.txt` and `latest-mce.txt` haven't been created yet. Subsequent runs will only produce this output if there's actually a new build.
 
 ![alt text](assets/expected-output.png)
+![alt text](assets/expected-output-2.png)
 
 ## Script Output (artifacts)
 When the script finishes, you should see `./diff-acm.txt` and `./diff-mce.txt`. These contain the changes that occurred between the two catalog builds (the build tags are stated at the top of the file for convenience)
