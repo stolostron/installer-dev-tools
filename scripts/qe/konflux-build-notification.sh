@@ -11,8 +11,8 @@ previous_mce=$(echo "$mce_tags" | head -1)
 current_acm=$(echo "$acm_tags" | tail -1)
 current_mce=$(echo "$mce_tags" | tail -1)
 
-recorded_acm=$(cat latest-acm.txt)
-recorded_mce=$(cat latest-mce.txt)
+recorded_acm=$(cat latest-acm.txt 2>/dev/null)
+recorded_mce=$(cat latest-mce.txt 2>/dev/null)
 
 # script output details
 echo "-----"
@@ -25,19 +25,34 @@ echo "Current MCE: $current_mce"
 echo "-----"
 echo "Previous recorded ACM: $recorded_acm"
 echo "Previous recorded MCE: $recorded_mce"
-if [[ "$recorded_acm" != "$current_acm" ]]; then echo "🟩 NEW ACM BUILD: $current_acm"; fi
-if [[ "$recorded_mce" != "$current_mce" ]]; then echo "🟩 NEW MCE BUILD: $current_mce"; fi
 
-echo "$current_acm" > latest-acm.txt
-echo "$current_mce" > latest-mce.txt
+if [[ "$recorded_acm" != "$current_acm" ]]; then
+    echo "🟩 NEW ACM BUILD: $current_acm"
+    echo "$current_acm" > latest-acm.txt
+fi
+
+if [[ "$recorded_mce" != "$current_mce" ]]; then
+    echo "🟩 NEW MCE BUILD: $current_mce"
+    echo "$current_mce" > latest-mce.txt
+fi
+
+if [[ "$recorded_acm" == "$current_acm" && "$recorded_mce" == "$current_mce" ]]; then
+    echo "🟪 No new builds. Exiting."
+    exit 0
+fi
 
 echo "-----"
 # pull the bundles and scrape for information
+echo "Pulling $previous_acm"
 ./konflux-build-status.sh acm-dev-catalog $previous_acm
+
+echo "Pulling $previous_mce"
 ./konflux-build-status.sh mce-dev-catalog $previous_mce
 
-
+echo "Pulling $current_acm"
 ./konflux-build-status.sh acm-dev-catalog $current_acm
+
+echo "Pulling $current_mce"
 ./konflux-build-status.sh mce-dev-catalog $current_mce
 
 # gather the diffs of the summaries

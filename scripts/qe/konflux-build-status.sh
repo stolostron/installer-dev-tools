@@ -12,8 +12,8 @@ acm_header="quay.io/acm-d"
 
 # get catalog image from quay.io
 mkdir -p ./tmp/$img/$tag
-podman pull "$acm_header/$img:$tag"
-podman save $acm_header/$img:$tag -o tmp/$img/$tag.tar
+podman pull -q "$acm_header/$img:$tag"
+podman save -q $acm_header/$img:$tag -o tmp/$img/$tag.tar 2>/dev/null
 tar -xf tmp/$img/$tag.tar -C tmp/$img/$tag
 
 # try to extract the bundles.yaml file. I just run it twice since the bundle will only actually have one of them
