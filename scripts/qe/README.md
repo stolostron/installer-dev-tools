@@ -16,4 +16,4 @@ The first time you run this, you will get an output stating that a new build has
 
 
 ## Roadmap
-This script should be converted to Python, but then it will be fairly straightforward to make this check PRs in the way that the previous CPaaS checker worked (which is now broken due to CPaaS no longer being built)
+This script should be converted to Python, but then it will be fairly straightforward to make this check PR build statuses in the way that the previous CPaaS checker worked (which is now broken due to CPaaS no longer being built)
