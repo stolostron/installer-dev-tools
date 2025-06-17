@@ -58,5 +58,13 @@ echo "Pulling $current_mce"
 # gather the diffs of the summaries
 echo "$previous_acm > $current_acm" > diff-acm.txt
 echo "$previous_mce > $current_mce" > diff-mce.txt
-diff ./tmp/acm-dev-catalog-$previous_acm-summary.txt ./tmp/acm-dev-catalog-$current_acm-summary.txt --unchanged-line-format= --old-line-format= --new-line-format='%L' >> diff-acm.txt
-diff ./tmp/mce-dev-catalog-$previous_mce-summary.txt ./tmp/mce-dev-catalog-$current_mce-summary.txt --unchanged-line-format= --old-line-format= --new-line-format='%L' >> diff-mce.txt
+diff ./tmp/acm-dev-catalog-$previous_acm-summary.txt ./tmp/acm-dev-catalog-$current_acm-summary.txt --unchanged-line-format= --old-line-format= --new-line-format='%L' | column -t -s' ' >> diff-acm.txt
+diff ./tmp/mce-dev-catalog-$previous_mce-summary.txt ./tmp/mce-dev-catalog-$current_mce-summary.txt --unchanged-line-format= --old-line-format= --new-line-format='%L' | column -t -s' ' >> diff-mce.txt
+
+echo ""
+echo "--- ACM DIFF ---"
+cat diff-acm.txt
+
+echo ""
+echo "--- MCE DIFF ---"
+cat diff-mce.txt
