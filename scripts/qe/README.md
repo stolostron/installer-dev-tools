@@ -1,5 +1,11 @@
 # Konflux Build Notification Script
 
+# (Recommended, but technically optional)
+Install skopeo
+```bash
+brew install skopeo
+```
+
 # Log into quay.io
 ```bash
 podman login -u='<user>' -p='<quay token>' quay.io

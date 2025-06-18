@@ -1,8 +1,20 @@
 #!/bin/bash
 
+skopeo_args=""
+if [[ "$(uname -s)" == "Darwin" && "$(uname -m)" == "arm64" ]]; then
+    echo "Detected MacOS ARM64. Adding skopeo platform override."
+    skopeo_args="--override-arch amd64 --override-os linux"
+fi
+
+if command -v skopeo &> /dev/null; then
+    acm_tags=$(skopeo $skopeo_args inspect docker://quay.io/acm-d/acm-dev-catalog:latest-2.14 | yq '.RepoTags | .[] | select(. == "2.14.*-DOWNSTREAM*")' | tail -2)
+    mce_tags=$(skopeo $skopeo_args inspect docker://quay.io/acm-d/mce-dev-catalog:latest-2.9 | yq '.RepoTags | .[] | select(. == "2.9.*-DOWNSTREAM*")' | tail -2)
+else
+    echo "WARNING: using podman search is unreliable. Please install skopeo for a more reliable tag search"
+    acm_tags=$(podman search quay.io/acm-d/acm-dev-catalog --list-tags --limit=100 --format="{{.Tag}}" | grep -F 2.14 | tail -2)
+    mce_tags=$(podman search quay.io/acm-d/mce-dev-catalog --list-tags --limit=100 --format="{{.Tag}}" | grep -F 2.9 | tail -2)
+fi
 # get the most recent two tags
-acm_tags=$(podman search quay.io/acm-d/acm-dev-catalog --list-tags --limit=100 --format="{{.Tag}}" | grep -F 2.14 | tail -2)
-mce_tags=$(podman search quay.io/acm-d/mce-dev-catalog --list-tags --limit=100 --format="{{.Tag}}" | grep -F 2.9 | tail -2)
 
 # split the tags to get recent and second recent
 previous_acm=$(echo "$acm_tags" | head -1)
