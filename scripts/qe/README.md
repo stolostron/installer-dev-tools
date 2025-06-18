@@ -16,7 +16,7 @@ The first time you run this, you will get an output stating that a new build has
 ![alt text](assets/expected-output-2.png)
 
 # Script output and artifacts
-When the script finishes, you should see diff sections. These should be included when posting to the forums. There are also files `./diff-acm.txt` and `./diff-mce.txt` which contain the same contents.
+When the script finishes, you should see the images contained in both bundles as well as the diff sections. These should be included when posting to the forums. There are also files `./diff-acm.txt` and `./diff-mce.txt` which contain the same contents.
 
 When posting the updates, please include the contents of these files.
 

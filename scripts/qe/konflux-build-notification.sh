@@ -63,8 +63,16 @@ diff ./tmp/mce-dev-catalog-$previous_mce-summary.txt ./tmp/mce-dev-catalog-$curr
 
 echo ""
 echo "----- quay.io/acm-d/acm-dev-catalog:$current_acm -----"
-cat diff-acm.txt
+cat ./tmp/acm-dev-catalog-$current_acm-summary.txt | column -t -s' '
 
 echo ""
 echo "----- quay.io/acm-d/mce-dev-catalog:$current_mce -----"
+cat ./tmp/mce-dev-catalog-$current_mce-summary.txt | column -t -s' '
+
+echo ""
+echo "----- ACM diff -----"
+cat diff-acm.txt
+
+echo ""
+echo "----- MCE diff -----"
 cat diff-mce.txt
