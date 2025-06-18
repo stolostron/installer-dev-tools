@@ -7,8 +7,17 @@ declare -A repo_commits
 
 acm_bb2_id=115756
 mce_bb2_id=115757
+
+echo "Grabbing latest ACM snapshot"
 latest_acm_snapshot=$(curl -ks "https://gitlab.cee.redhat.com/api/v4/projects/$acm_bb2_id/repository/tree?ref=acm-2.14&path=snapshots&per_page=100" | jq -r '.[-2] | .name')
+
+echo "Grabbing latest MCE Snapshot"
 latest_mce_snapshot=$(curl -ks "https://gitlab.cee.redhat.com/api/v4/projects/$mce_bb2_id/repository/tree?ref=mce-2.9&path=snapshots&per_page=100" | jq -r '.[-2] | .name')
+
+echo "Latest ACM snapshot: $latest_acm_snapshot"
+echo "Latest MCE snapshot: $latest_mce_snapshot"
+
+echo "Fetching shas for ACM and MCE snapshots"
 latest_acm_downsha=$(curl -ks "https://gitlab.cee.redhat.com/acm-cicd/acm-bb2/-/raw/acm-2.14/snapshots/$latest_acm_snapshot/down-sha.log")
 latest_mce_downsha=$(curl -ks "https://gitlab.cee.redhat.com/acm-cicd/mce-bb2/-/raw/mce-2.9/snapshots/$latest_mce_snapshot/down-sha.log")
 
@@ -17,10 +26,11 @@ shas="$latest_acm_downsha\n$latest_mce_downsha"
 # echo "$latest_acm_snapshot"
 # echo "$latest_acm_downsha"
 
+echo "Checking for Github auth token"
 authorization=""
 if [ -f "authorization.txt" ]; then
 	authorization="Authorization: Bearer $(cat "authorization.txt")"
-	# echo "Authorization found: $authorization"
+	echo "Authorization found. Applying to github API requests"
 fi
 
 function print_pr_testability {
