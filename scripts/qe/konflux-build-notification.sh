@@ -74,17 +74,34 @@ diff ./tmp/acm-dev-catalog-$previous_acm-summary.txt ./tmp/acm-dev-catalog-$curr
 diff ./tmp/mce-dev-catalog-$previous_mce-summary.txt ./tmp/mce-dev-catalog-$current_mce-summary.txt --unchanged-line-format= --old-line-format= --new-line-format='%L' | column -t -s' ' >> diff-mce.txt
 
 echo ""
-echo "----- quay.io/acm-d/acm-dev-catalog:$current_acm -----"
+echo "---------------------------"
+echo " Latest ACM Konflux Builds "
+echo "---------------------------"
+echo "quay.io/acm-d/acm-dev-catalog:$current_acm"
+echo "quay.io/acm-d/mce-dev-catalog:$current_mce"
+
+echo ""
+echo "------------"
+echo " ACM Images "
+echo "------------"
 cat ./tmp/acm-dev-catalog-$current_acm-summary.txt | column -t -s' '
 
 echo ""
-echo "----- quay.io/acm-d/mce-dev-catalog:$current_mce -----"
+echo "------------"
+echo " MCE Images "
+echo "------------"
 cat ./tmp/mce-dev-catalog-$current_mce-summary.txt | column -t -s' '
 
 echo ""
-echo "----- ACM diff -----"
+echo "----------"
+echo " ACM diff "
+echo "----------"
 cat diff-acm.txt
+if [ $(cat diff-acm.txt | wc -l) -eq 1 ]; then echo "(No differences)"; fi
 
 echo ""
-echo "----- MCE diff -----"
+echo "----------"
+echo " MCE Diff "
+echo "----------"
 cat diff-mce.txt
+if [ $(cat diff-mce.txt | wc -l) -eq 1 ]; then echo "(No differences)"; fi
