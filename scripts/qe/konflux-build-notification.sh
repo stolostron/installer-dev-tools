@@ -7,8 +7,8 @@ if [[ "$(uname -s)" == "Darwin" && "$(uname -m)" == "arm64" ]]; then
 fi
 
 if command -v skopeo &> /dev/null; then
-    acm_tags=$(skopeo $skopeo_args inspect docker://quay.io/acm-d/acm-dev-catalog:latest-2.14 | yq '.RepoTags | .[] | select(. == "2.14.*-DOWNSTREAM*")' | tail -2)
-    mce_tags=$(skopeo $skopeo_args inspect docker://quay.io/acm-d/mce-dev-catalog:latest-2.9 | yq '.RepoTags | .[] | select(. == "2.9.*-DOWNSTREAM*")' | tail -2)
+    acm_tags=$(skopeo $skopeo_args inspect docker://quay.io/acm-d/acm-dev-catalog:latest-2.14 | yq -r '.RepoTags | .[] | match("2.14.*-DOWNSTREAM.*") | .string' | tail -2)
+    mce_tags=$(skopeo $skopeo_args inspect docker://quay.io/acm-d/mce-dev-catalog:latest-2.9 | yq -r '.RepoTags | .[] | match("2.9.*-DOWNSTREAM.*") | .string' | tail -2)
 else
     echo "WARNING: using podman search is unreliable. Please install skopeo for a more reliable tag search"
     acm_tags=$(podman search quay.io/acm-d/acm-dev-catalog --list-tags --limit=100 --format="{{.Tag}}" | grep -F 2.14 | tail -2)
