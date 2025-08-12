@@ -138,6 +138,14 @@ def updateClusterRoleBinding(yamlContent):
     for sub in subjectsList:
         sub['namespace'] = '{{ .Values.global.namespace }}'
 
+def ensure_placement_namespace(resource_data, resource_name, default_namespace):
+    placement_namespace = resource_data['metadata'].get('namespace')
+    
+    if placement_namespace == 'open-cluster-management':
+        placement_namespace = f"{{{{ default \"{placement_namespace}\" .Values.global.namespace }}}}"
+        resource_data['metadata']['namespace'] = placement_namespace
+        logging.info(f"Placement namespace for '{resource_name}' set to: '{placement_namespace}'")
+
 def escapeTemplateVariables(helmChart, variables):
     addonTemplates = find_templates_of_type(helmChart, 'AddOnTemplate')
     for addonTemplate in addonTemplates:
@@ -734,7 +742,35 @@ def ensure_pvc_storage_class(resource_data, resource_name):
 
     resource_data['spec']['storageClassName'] = storage_class_name
     logging.info(f"PersistentVolumeClaim storageClassName for '{resource_name}' set to: '{storage_class_name}'.\n")
+
+def ensure_managedclustersetbinding_namespace(resource_data, resource_name, default_namespace):
+    if 'metadata' not in resource_data:
+        # this would cause a lot of problems
+        return
     
+    mcsb_metadata = resource_data['metadata']
+    mcsb_namespace = mcsb_metadata.get('namespace', default_namespace)
+
+    mcsb_namespace = f"{{{{ default \"{mcsb_namespace}\" .Values.global.namespace }}}}"
+    mcsb_metadata['namespace'] = mcsb_namespace
+
+    logging.info(f"Namespace for ManagedClusterSetBinding {resource_name} set to {mcsb_namespace}")
+
+def ensure_clustermanagementaddon_namespace(resource_data, resource_name, default_namespace):
+    if 'spec' not in resource_data:
+        return
+    
+    cma_spec = resource_data.get('spec')  
+    cma_install_strategy = cma_spec.get('installStrategy')
+    cma_placements = cma_install_strategy.get('placements')
+
+    for placement in cma_placements:
+        placement_namespace = placement.get('namespace', default_namespace)
+        placement_namespace = f"{{{{ default \"{placement_namespace}\" .Values.global.namespace }}}}"
+        placement['namespace'] = placement_namespace
+        logging.info(f"Namespace for Placement {placement['name']} for {resource_name} set to {placement_namespace}")
+    
+
 def ensure_webhook_namespace(resource_data, resource_name, default_namespace):
     """
     Ensures that the namespace for webhooks in a MutatingWebhookConfiguration or 
@@ -795,13 +831,13 @@ def update_helm_resources(chartName, helmChart, skip_rbac_overrides, exclusions,
     logging.info(f"Updating resources chart: {chartName}")
 
     resource_kinds = [
-        "ClusterRole", "ClusterRoleBinding", "ConfigMap", "Deployment", "MutatingWebhookConfiguration",
-        "NetworkPolicy", "PersistentVolumeClaim", "RoleBinding", "Role", "Route", "Secret", "Service", "StatefulSet",
+        "ClusterManagementAddOn", "ClusterRole", "ClusterRoleBinding", "ConfigMap", "Deployment", "ManagedClusterSetBinding", "MutatingWebhookConfiguration",
+        "NetworkPolicy", "PersistentVolumeClaim", "Placement", "RoleBinding", "Role", "Route", "Secret", "Service", "StatefulSet",
         "ValidatingWebhookConfiguration", "Job", "ConsolePlugin"
     ]
 
     namespace_scoped_kinds = [
-        "ConfigMap", "Deployment", "NetworkPolicy", "PersistentVolumeClaim", "RoleBinding", "Role", "Route",
+        "ConfigMap", "Deployment", "ManagedClusterSetBinding", "NetworkPolicy", "PersistentVolumeClaim", "Placement", "RoleBinding", "Role", "Route",
         "Secret", "Service", "StatefulSet", "Job"
     ]
 
@@ -849,6 +885,26 @@ def update_helm_resources(chartName, helmChart, skip_rbac_overrides, exclusions,
                 if kind == "MutatingWebhookConfiguration" or kind == "ValidatingWebhookConfiguration":
                     ensure_webhook_namespace(resource_data, resource_name, default_namespace)
 
+                # Ensure ManagedClusterSetBinding has namespace set,
+                # defaulting to Helm values if not specified.
+                if kind == 'ManagedClusterSetBinding':
+                    ensure_managedclustersetbinding_namespace(resource_data, resource_name, default_namespace)
+                
+                # Ensure Placement has namespace set for open-cluster-management references,
+                # defaulting to Helm values if not specified.
+                if kind == 'Placement':
+                    ensure_placement_namespace(resource_data, resource_name, default_namespace)
+                
+                # Ensure AddOnTemplate has namespace set for deployments,
+                # defaulting to Helm values if not specified.
+                if kind == 'AddOnTemplate':
+                    todo() # TODO
+
+                # Ensure ClusterManagementAddOn has namespace set,
+                # defaulting to Helm values if not specified.
+                if kind == 'ClusterManagementAddOn':
+                    ensure_clustermanagementaddon_namespace(resource_data, resource_name, default_namespace)
+                
                 # Ensure the StatefulSet has a storageClassName set,
                 # defaulting to Helm values if not specified.
                 if kind == 'StatefulSet':
