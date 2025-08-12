@@ -773,10 +773,11 @@ def ensure_managedclustersetbinding_namespace(resource_data, resource_name, defa
     mcsb_metadata = resource_data['metadata']
     mcsb_namespace = mcsb_metadata.get('namespace', default_namespace)
 
-    mcsb_namespace = f"{{{{ default \"{mcsb_namespace}\" .Values.global.namespace }}}}"
-    mcsb_metadata['namespace'] = mcsb_namespace
-
-    logging.info(f"Namespace for ManagedClusterSetBinding {resource_name} set to {mcsb_namespace}")
+    # Only transform if it's exactly "open-cluster-management", not if it's already a template
+    if mcsb_namespace == 'open-cluster-management':
+        mcsb_namespace = f"{{{{ default \"{mcsb_namespace}\" .Values.global.namespace }}}}"
+        mcsb_metadata['namespace'] = mcsb_namespace
+        logging.info(f"Namespace for ManagedClusterSetBinding {resource_name} set to {mcsb_namespace}")
 
 def ensure_clustermanagementaddon_namespace(resource_data, resource_name, default_namespace):
     if 'spec' not in resource_data:
