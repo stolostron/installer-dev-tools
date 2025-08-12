@@ -146,6 +146,28 @@ def ensure_placement_namespace(resource_data, resource_name, default_namespace):
         resource_data['metadata']['namespace'] = placement_namespace
         logging.info(f"Placement namespace for '{resource_name}' set to: '{placement_namespace}'")
 
+def ensure_addontemplate_namespace(resource_data, resource_name, default_namespace):
+    if 'spec' not in resource_data:
+        return
+    
+    agentSpec = resource_data['spec'].get('agentSpec')
+    if not agentSpec:
+        return
+        
+    workload = agentSpec.get('workload')
+    if not workload:
+        return
+        
+    manifests = workload.get('manifests', [])
+    
+    for manifest in manifests:
+        if 'metadata' in manifest and 'namespace' in manifest['metadata']:
+            manifest_namespace = manifest['metadata']['namespace']
+            if manifest_namespace == 'open-cluster-management':
+                manifest_namespace = f"{{{{ default \"{manifest_namespace}\" .Values.global.namespace }}}}"
+                manifest['metadata']['namespace'] = manifest_namespace
+                logging.info(f"AddOnTemplate manifest {manifest.get('kind', 'Unknown')} namespace for '{resource_name}' set to: '{manifest_namespace}'")
+
 def escapeTemplateVariables(helmChart, variables):
     addonTemplates = find_templates_of_type(helmChart, 'AddOnTemplate')
     for addonTemplate in addonTemplates:
@@ -831,7 +853,7 @@ def update_helm_resources(chartName, helmChart, skip_rbac_overrides, exclusions,
     logging.info(f"Updating resources chart: {chartName}")
 
     resource_kinds = [
-        "ClusterManagementAddOn", "ClusterRole", "ClusterRoleBinding", "ConfigMap", "Deployment", "ManagedClusterSetBinding", "MutatingWebhookConfiguration",
+        "AddOnTemplate", "ClusterManagementAddOn", "ClusterRole", "ClusterRoleBinding", "ConfigMap", "Deployment", "ManagedClusterSetBinding", "MutatingWebhookConfiguration",
         "NetworkPolicy", "PersistentVolumeClaim", "Placement", "RoleBinding", "Role", "Route", "Secret", "Service", "StatefulSet",
         "ValidatingWebhookConfiguration", "Job", "ConsolePlugin"
     ]
@@ -895,10 +917,10 @@ def update_helm_resources(chartName, helmChart, skip_rbac_overrides, exclusions,
                 if kind == 'Placement':
                     ensure_placement_namespace(resource_data, resource_name, default_namespace)
                 
-                # Ensure AddOnTemplate has namespace set for deployments,
+                # Ensure AddOnTemplate has namespace set for nested manifests,
                 # defaulting to Helm values if not specified.
                 if kind == 'AddOnTemplate':
-                    todo() # TODO
+                    ensure_addontemplate_namespace(resource_data, resource_name, default_namespace)
 
                 # Ensure ClusterManagementAddOn has namespace set,
                 # defaulting to Helm values if not specified.
