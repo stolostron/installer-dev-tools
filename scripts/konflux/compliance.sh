@@ -30,8 +30,8 @@ for line in $(oc get components | grep $application | awk '{print $1}'); do
     org="stolostron"
     repo=$(basename $url)
 
-    push="https://raw.githubusercontent.com/$org/$repo/refs/heads/$branch/.tekton/$(echo $repo | sed 's/_/-/')-$application-push.yaml"
-    pull="https://raw.githubusercontent.com/$org/$repo/refs/heads/$branch/.tekton/$(echo $repo | sed 's/_/-/')-$application-pull-request.yaml"
+    push="https://raw.githubusercontent.com/$org/$repo/refs/heads/$branch/.tekton/$line-push.yaml"
+    pull="https://raw.githubusercontent.com/$org/$repo/refs/heads/$branch/.tekton/$line-pull-request.yaml"
 
     # echo "$repo"
     # echo "Push"
@@ -44,13 +44,13 @@ for line in $(oc get components | grep $application | awk '{print $1}'); do
 
     buildsourceimage=$(echo "$yaml" | yq '.spec.params | .[] | select(.name=="build-source-image") | .value')
     pull_bsi=$(echo "$pull_yaml" | yq '.spec.params | .[] | select(.name=="build-source-image") | .value')
-    if [[ $buildsourceimage != true || $pull_bsi != true ]]; then
+    if [[ !($buildsourceimage == true || $buildsourceimage == "true") || !($pull_bsi == true || $pull_bse == "true") ]]; then
         hermeticbuilds=false
     fi
 
     hermetic=$(echo "$yaml" | yq '.spec.params | .[] | select(.name=="hermetic") | .value')
     pull_hermetic=$(echo "$pull_yaml" | yq '.spec.params | .[] | select(.name=="hermetic") | .value')
-    if [[ $hermetic != true  || $pull_hermetic != true ]]; then
+    if [[ $hermetic != true || $hermetic != "true" || $pull_hermetic != true || $pull_hermetic != "true" ]]; then
         hermeticbuilds=false
     fi
 
@@ -69,8 +69,8 @@ for line in $(oc get components | grep $application | awk '{print $1}'); do
     fi
 
     # enterprise contract
-    ec=$(curl -LsH "$authorization" https://api.github.com/repos/$org/$repo/commits/$branch/check-runs | yq -p=json '.check_runs[] | select(.app.name == "Red Hat Konflux") | select(.name == "*enterprise-contract*") | .conclusion ')
-    
+    ec=$(curl -LsH "$authorization" https://api.github.com/repos/$org/$repo/commits/$branch/check-runs | yq -p=json ".check_runs[] | select(.app.name == \"Red Hat Konflux\") | select(.name == \"*enterprise-contract-$application / $line*\") | .conclusion ")
+
     if [[ "$ec" == "success" ]]; then
         echo "🟩 $repo Enterprise Contract: SUCCESS"
         data=$(echo "$data,Compliant")
