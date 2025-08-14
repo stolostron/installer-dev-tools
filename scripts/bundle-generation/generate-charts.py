@@ -789,9 +789,10 @@ def ensure_clustermanagementaddon_namespace(resource_data, resource_name, defaul
 
     for placement in cma_placements:
         placement_namespace = placement.get('namespace', default_namespace)
-        placement_namespace = f"{{{{ default \"{placement_namespace}\" .Values.global.namespace }}}}"
-        placement['namespace'] = placement_namespace
-        logging.info(f"Namespace for Placement {placement['name']} for {resource_name} set to {placement_namespace}")
+        if placement_namespace == 'open-cluster-management':
+            placement_namespace = f"{{{{ default \"{placement_namespace}\" .Values.global.namespace }}}}"
+            placement['namespace'] = placement_namespace
+            logging.info(f"Namespace for Placement {placement['name']} for {resource_name} set to {placement_namespace}")
     
 
 def ensure_webhook_namespace(resource_data, resource_name, default_namespace):
