@@ -22,6 +22,9 @@ fi
 
 # Define the output log file
 LOG_FILE="components_log_$(date "+%Y-%m-%d_%H-%M-%S").txt"
+PROMOTION_FILE="promotions_$(date "+%Y-%m-%d_%H-%M-%S").txt"
+STATUS_FILE="status_$(date "+%Y-%m-%d_%H-%M-%S").txt"
+
 echo "[INFO] Logging to $LOG_FILE"
 
 # Start the logging process (this will log to both the console and the file)
@@ -36,6 +39,8 @@ for comp in $(oc get components | grep "$RELEASE" | awk '{print $1}'); do
     if [ "$PROMOTED" == "null" ] || [ -z "$PROMOTED" ]; then
         echo "    ↳ Last Promoted Image: N/A" | tee -a "$LOG_FILE"
         echo "    ↳ Status             : No build promoted" | tee -a "$LOG_FILE"
+        echo "$comp Failed" >> $PROMOTION_FILE
+        echo "$comp UNKNOWN" >> $STATUS_FILE
     elif [[ "$PROMOTED" =~ sha256:[a-f0-9]{64}$ ]]; then
         echo "    ↳ Last Promoted Image: $PROMOTED" | tee -a "$LOG_FILE"
         SKOPEO=$(skopeo inspect -n $SKOPEO_EXTRA_ARGS "docker://$PROMOTED" 2>&1)
@@ -44,6 +49,8 @@ for comp in $(oc get components | grep "$RELEASE" | awk '{print $1}'); do
         else
             buildtime=$(echo "$SKOPEO" | jq -r .Labels.\"build-date\")
             echo "    ↳ Build Date         : ${buildtime:-Unknown}" | tee -a "$LOG_FILE"
+            echo "$comp Successful" >> $PROMOTION_FILE
+            echo "$comp ${buildtime:-Unknown}" >> $STATUS_FILE
         fi
     else
         echo "    ↳ Last Promoted Image: $PROMOTED" | tee -a "$LOG_FILE"
