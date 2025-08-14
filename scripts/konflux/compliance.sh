@@ -30,8 +30,8 @@ for line in $(oc get components | grep $application | awk '{print $1}'); do
     org="stolostron"
     repo=$(basename $url)
 
-    push="https://raw.githubusercontent.com/$org/$repo/refs/heads/$branch/.tekton/$repo-$application-push.yaml"
-    pull="https://raw.githubusercontent.com/$org/$repo/refs/heads/$branch/.tekton/$repo-$application-pull-request.yaml"
+    push="https://raw.githubusercontent.com/$org/$repo/refs/heads/$branch/.tekton/$(echo $repo | sed 's/_/-/')-$application-push.yaml"
+    pull="https://raw.githubusercontent.com/$org/$repo/refs/heads/$branch/.tekton/$(echo $repo | sed 's/_/-/')-$application-pull-request.yaml"
 
     # echo "$repo"
     # echo "Push"
