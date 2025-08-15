@@ -5,9 +5,7 @@
 
 set -e
 
-
 application=$1
-branch=$2
 
 > compliant.csv
 
@@ -25,9 +23,31 @@ for line in $(oc get components | grep $application | awk '{print $1}'); do
     fi
 
     data=""
+
+    promoted=$(oc get component $line -oyaml | yq .status.lastPromotedImage)
+    if [[ "$promoted" == "null" || -z "$promoted" ]]; then
+        # failed to get image
+        # echo "failed to get image"
+        buildtime="IMAGE_PULL_FAILURE,Failed"
+    elif [[ "$promoted" =~ sha256:[a-f0-9]{64}$ ]]; then
+        # found image
+        skopeo=$(skopeo inspect "docker://$promoted" 2>/dev/null)
+        if [ $? -ne 0 ]; then
+            # inspection failed
+            buildtime="INSPECTION_FAILURE,Failed"
+        else
+            buildtime="$(echo "$skopeo" | yq -p=json '.Labels.build-date'),Successful"
+        fi
+    else
+        # invalid or incomplete digest
+        buildtime="DIGEST_FAILURE,Failed"
+    fi
+
+    data=$buildtime
     
     url=$(oc get component "$line" -oyaml | yq '.spec.source.git.url')
-    org="stolostron"
+    branch=$(oc get component "$line" -oyaml | yq '.spec.source.git.revision')
+    org=$(basename $(dirname $url))
     repo=$(basename $url)
 
     push="https://raw.githubusercontent.com/$org/$repo/refs/heads/$branch/.tekton/$line-push.yaml"
@@ -35,7 +55,7 @@ for line in $(oc get components | grep $application | awk '{print $1}'); do
 
     # echo "$repo"
     # echo "Push"
-    echo "--- $line $repo : $branch ---"
+    echo "--- $line : $org/$repo : $branch ---"
     yaml=$(curl -Ls $push)
     pull_yaml=$(curl -Ls $push)
 
@@ -62,10 +82,10 @@ for line in $(oc get components | grep $application | awk '{print $1}'); do
 
     if [[ $hermeticbuilds == true ]]; then
         echo "🟩 $repo hermetic builds: TRUE"
-        data="Enabled"
+        data=$(echo "$data,Enabled")
     else
         echo "🟥 $repo hermetic builds: FALSE"
-        data="Not Enabled"
+        data=$(echo "$data,Not Enabled")
     fi
 
     # enterprise contract
