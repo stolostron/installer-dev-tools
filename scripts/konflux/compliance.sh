@@ -87,7 +87,7 @@ for line in $(oc get components | grep $application | awk '{print $1}'); do
     prefetch=$(echo "$yaml" | yq '.spec.params | .[] | select(.name=="prefetch-input") | .value')
     pull_prefetch=$(echo "$pull_yaml" | yq '.spec.params | .[] | select(.name=="prefetch-input") | .value')
     # echo "$prefetch $pull_prefetch"
-    echo -e "Prefetch: $prefetch\nPullPrefetch: $pull_prefetch\nVendor: $vendor"
+    # echo -e "Prefetch: $prefetch\nPullPrefetch: $pull_prefetch\nVendor: $vendor"
     if [[ ($prefetch == "" || $pull_prefetch == "") && $vendor != "200" ]]; then
         # echo "prefetch failure"
         hermeticbuilds=false
