@@ -20,6 +20,7 @@ if [[ "$OS" == "Darwin" && "$ARCH" == "arm64" ]]; then
 fi
 
 for line in $(oc get components | grep $application | awk '{print $1}'); do
+# for line in "managed-serviceaccount-mce-28"; do
     # Skip empty lines
     if [[ -z "$line" ]]; then
         continue
@@ -80,12 +81,15 @@ for line in $(oc get components | grep $application | awk '{print $1}'); do
         fi
     fi
 
-    vendor=$(curl -LsH $authorization -w "%{http_code}" "https://api.github.com/repos/$org/$repo/contents/vendor")
+    # echo "Finding vendor. Running curl -LsH $authorization -w \"%{http_code}\" \"https://api.github.com/repos/$org/$repo/contents/vendor\""
+    vendor=$(curl -LsH "$authorization" -w "%{http_code}" "https://api.github.com/repos/$org/$repo/contents/vendor")
     vendor="${vendor: -3}"
     prefetch=$(echo "$yaml" | yq '.spec.params | .[] | select(.name=="prefetch-input") | .value')
     pull_prefetch=$(echo "$pull_yaml" | yq '.spec.params | .[] | select(.name=="prefetch-input") | .value')
     # echo "$prefetch $pull_prefetch"
+    # echo -e "Prefetch: $prefetch\nPullPrefetch: $pull_prefetch\nVendor: $vendor"
     if [[ ($prefetch == "" || $pull_prefetch == "") && $vendor != "200" ]]; then
+        # echo "prefetch failure"
         hermeticbuilds=false
     fi
 
