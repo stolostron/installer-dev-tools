@@ -19,8 +19,7 @@ if [[ "$OS" == "Darwin" && "$ARCH" == "arm64" ]]; then
     skopeo_mac_args="--override-arch amd64 --override-os linux"
 fi
 
-# for line in $(oc get components | grep $application | awk '{print $1}'); do
-for line in "managed-serviceaccount-mce-28"; do
+for line in $(oc get components | grep $application | awk '{print $1}'); do
     # Skip empty lines
     if [[ -z "$line" ]]; then
         continue
@@ -28,26 +27,26 @@ for line in "managed-serviceaccount-mce-28"; do
 
     data=""
 
-    # promoted=$(oc get component $line -oyaml | yq .status.lastPromotedImage)
-    # if [[ "$promoted" == "null" || -z "$promoted" ]]; then
-    #     # failed to get image
-    #     # echo "failed to get image"
-    #     buildtime="IMAGE_PULL_FAILURE,Failed"
-    # elif [[ "$promoted" =~ sha256:[a-f0-9]{64}$ ]]; then
-    #     # found image
-    #     skopeo=$(skopeo $skopeo_mac_args inspect "docker://$promoted" 2>/dev/null)
-    #     if [ $? -ne 0 ]; then
-    #         # inspection failed
-    #         buildtime="INSPECTION_FAILURE,Failed"
-    #     else
-    #         buildtime="$(echo "$skopeo" | yq -p=json '.Labels.build-date'),Successful"
-    #     fi
-    # else
-    #     # invalid or incomplete digest
-    #     buildtime="DIGEST_FAILURE,Failed"
-    # fi
+    promoted=$(oc get component $line -oyaml | yq .status.lastPromotedImage)
+    if [[ "$promoted" == "null" || -z "$promoted" ]]; then
+        # failed to get image
+        # echo "failed to get image"
+        buildtime="IMAGE_PULL_FAILURE,Failed"
+    elif [[ "$promoted" =~ sha256:[a-f0-9]{64}$ ]]; then
+        # found image
+        skopeo=$(skopeo $skopeo_mac_args inspect "docker://$promoted" 2>/dev/null)
+        if [ $? -ne 0 ]; then
+            # inspection failed
+            buildtime="INSPECTION_FAILURE,Failed"
+        else
+            buildtime="$(echo "$skopeo" | yq -p=json '.Labels.build-date'),Successful"
+        fi
+    else
+        # invalid or incomplete digest
+        buildtime="DIGEST_FAILURE,Failed"
+    fi
 
-    # data=$buildtime
+    data=$buildtime
     
     url=$(oc get component "$line" -oyaml | yq '.spec.source.git.url')
     branch=$(oc get component "$line" -oyaml | yq '.spec.source.git.revision')
