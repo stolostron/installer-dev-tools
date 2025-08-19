@@ -105,17 +105,17 @@ for line in $(oc get components | grep $application | awk '{print $1}'); do
 
     if [[ -n "$suite_id" ]]; then
         # Use suite method for Konflux
-        ec=$(curl -LsH "$authorization" "https://api.github.com/repos/$org/$repo/check-suites/$suite_id/check-runs" | yq -p=json ".check_runs[] | select(.name | contains(\"enterprise-contract\")) | .conclusion")
+        ec=$(curl -LsH "$authorization" "https://api.github.com/repos/$org/$repo/check-suites/$suite_id/check-runs" | yq -p=json ".check_runs[] | select(.name==\"*enterprise-contract*$line\") | .conclusion")
     else
         # Fallback to original method
-        ec=$(curl -LsH "$authorization" "https://api.github.com/repos/$org/$repo/commits/$branch/check-runs" | yq -p=json ".check_runs[] | select(.app.name == \"Red Hat Konflux\") | select(.name | contains(\"enterprise-contract\")) | .conclusion")
+        ec=$(curl -LsH "$authorization" "https://api.github.com/repos/$org/$repo/commits/$branch/check-runs" | yq -p=json ".check_runs[] | select(.app.name == \"Red Hat Konflux\") | select(.name==\"*enterprise-contract*$line\") | .conclusion")
     fi
 
-    if [[ "$ec" == "success" ]]; then
+    if [[ -n "$ec" ]] && ! echo "$ec" | grep -v "^success$" > /dev/null; then
         echo "🟩 $repo $ecname: SUCCESS"
         data=$(echo "$data,Compliant")
     else
-        echo "🟥 $repo $ecname: FAILURE"
+        echo "🟥 $repo $ecname: FAILURE (ec was: \"$ec\")"
         data=$(echo "$data,Not Compliant")
     fi
 
