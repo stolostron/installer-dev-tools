@@ -111,11 +111,12 @@ for line in $(oc get components | grep $application | awk '{print $1}'); do
         ec=$(curl -LsH "$authorization" "https://api.github.com/repos/$org/$repo/commits/$branch/check-runs" | yq -p=json ".check_runs[] | select(.app.name == \"Red Hat Konflux\") | select(.name | contains(\"enterprise-contract\")) | .conclusion")
     fi
 
-    if [[ "$ec" == "success" ]]; then
+    # Check if ALL results are success (handle multiple enterprise-contract checks)
+    if [[ -n "$ec" ]] && ! echo "$ec" | grep -v "^success$" > /dev/null; then
         echo "🟩 $repo $ecname: SUCCESS"
         data=$(echo "$data,Compliant")
     else
-        echo "🟥 $repo $ecname: FAILURE"
+        echo "🟥 $repo $ecname: FAILURE (ec was: '$ec')"
         data=$(echo "$data,Not Compliant")
     fi
 
