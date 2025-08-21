@@ -2,19 +2,63 @@
 
 exec 3>&1
 
-application=$1
+show_help() {
+    cat << EOF
+Usage: compliance.sh [OPTIONS] <application>
 
-# check for debug flag for testing
-for arg in "$@"; do
-    case $arg in
+Check compliance status for Konflux components
+
+ARGUMENTS:
+    <application>    The application name to check (e.g., acm-215)
+
+OPTIONS:
+    --debug=<component>   Run against a specific Konflux component only
+    --debug               Enable debug logging output
+    -h, --help            Show this help message
+
+EXAMPLES:
+    compliance.sh acm-215
+    compliance.sh --debug=my-component acm-215
+    compliance.sh --debug acm-215
+EOF
+}
+
+# Parse arguments
+while [[ $# -gt 0 ]]; do
+    case $1 in
         --debug=*)
-          debug="${arg#*=}"
-          ;;
+            debug="${1#*=}"
+            shift
+            ;;
         --debug)
-          debug=true
-          ;;
+            debug=true
+            shift
+            ;;
+        -h|--help)
+            show_help=true
+            shift
+            ;;
+        -*)
+            echo "Unknown option $1"
+            exit 1
+            ;;
+        *)
+            if [[ -z "$application" ]]; then
+                application=$1
+            else
+                echo "Multiple applications specified: $application and $1"
+                exit 1
+            fi
+            shift
+            ;;
     esac
 done
+
+# Check for help flag or no arguments
+if [[ "$show_help" == "true" ]] || [[ -z "$application" ]]; then
+    show_help
+    exit 0
+fi
 
 compliancefile="data/$application-compliance.csv"
 > $compliancefile
