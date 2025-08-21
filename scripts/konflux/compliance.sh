@@ -1,11 +1,21 @@
 #!/usr/bin/env bash
 
-# Script to process each component
-# and run 'oc get component <line> -oyaml | yq' on each
-
 application=$1
 
-> compliant.csv
+# check for debug flag for testing
+for arg in "$@"; do
+    case $arg in
+        --debug=*)
+          debug="${arg#*=}"
+          ;;
+        --debug)
+          debug=true
+          ;;
+    esac
+done
+
+compliancefile="data/$application-compliance.csv"
+> $compliancefile
 
 echo "Checking for Github auth token"
 authorization=""
@@ -19,8 +29,13 @@ if [[ "$OS" == "Darwin" && "$ARCH" == "arm64" ]]; then
     skopeo_mac_args="--override-arch amd64 --override-os linux"
 fi
 
-for line in $(oc get components | grep $application | awk '{print $1}'); do
-# for line in "managed-serviceaccount-mce-28"; do
+if [[ -n "$debug" ]]; then
+    components=$debug
+else
+    components=$(oc get components | grep $application | awk '{print $1}')
+fi
+
+for line in "$components"; do
     # Skip empty lines
     if [[ -z "$line" ]]; then
         continue
@@ -57,8 +72,8 @@ for line in $(oc get components | grep $application | awk '{print $1}'); do
     push="https://raw.githubusercontent.com/$org/$repo/refs/heads/$branch/.tekton/$line-push.yaml"
     pull="https://raw.githubusercontent.com/$org/$repo/refs/heads/$branch/.tekton/$line-pull-request.yaml"
 
-    # echo "$repo"
-    # echo "Push"
+    [[ -n "$debug" ]] && echo -e "[debug] Push: $push\n[debug] Pull: $pull" # debug
+
     echo "--- $line : $org/$repo : $branch ---"
     yaml=$(curl -Ls $push)
     pull_yaml=$(curl -Ls $push)
@@ -135,5 +150,5 @@ for line in $(oc get components | grep $application | awk '{print $1}'); do
 
     echo ""
 
-    echo "$data" >> compliant.csv
+    echo "$data" >> $compliancefile
 done
