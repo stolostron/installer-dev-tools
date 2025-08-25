@@ -278,8 +278,15 @@ for line in $components; do
     [[ -n "$debug" ]] && echo -e "[debug] Push: $push\n[debug] Pull: $pull" # debug
 
     echo "--- $line : $org/$repo : $branch ---"
-    yaml=$(curl -Ls $push)
-    pull_yaml=$(curl -Ls $push)
+    yaml=$(curl -Ls -w "%{http_code}" $push)
+    http_code_push="${yaml: -3}"
+    yaml="${yaml%???}"
+    [[ -n "$debug" && "$http_code_push" == "404" ]] && echo -e "[debug] \033[31m404 error\033[0m fetching push YAML from $push" >&3
+    
+    pull_yaml=$(curl -Ls -w "%{http_code}" $pull)
+    http_code_pull="${pull_yaml: -3}"
+    pull_yaml="${pull_yaml%???}"
+    [[ -n "$debug" && "$http_code_pull" == "404" ]] && echo -e "[debug] \033[31m404 error\033[0m fetching pull YAML from $pull" >&3
 
     data="$data,$(check_hermetic_builds "$yaml" "$pull_yaml" "$authorization" "$org" "$repo")"
 
