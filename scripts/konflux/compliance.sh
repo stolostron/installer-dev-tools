@@ -60,6 +60,7 @@ if [[ "$show_help" == "true" ]] || [[ -z "$application" ]]; then
     exit 0
 fi
 
+mkdir -p data
 compliancefile="data/$application-compliance.csv"
 > $compliancefile
 
@@ -228,7 +229,41 @@ check_enterprise_contract() {
         echo "Compliant"
     else
         echo "🟥 $repo $ecname: FAILURE (ec was: \"$ec\")" >&3
-        echo "Not Compliant"
+        if [[ -z "$ec" ]]; then
+            echo "EC_BLANK"
+        else
+            echo "Not Compliant"
+        fi
+    fi
+}
+
+# Function to check component on-push task run
+check_component_on_push() {
+    local line="$1"
+    local authorization="$2"
+    local org="$3"
+    local repo="$4"
+    local branch="$5"
+    
+    pushname="Red Hat Konflux / $line-on-push"
+    
+    # Try check-suites first (more reliable for Konflux)
+    suite_id=$(curl -LsH "$authorization" "https://api.github.com/repos/$org/$repo/commits/$branch/check-suites" | yq -p=json ".check_suites[] | select(.app.name == \"Red Hat Konflux\") | .id" | head -1)
+
+    if [[ -n "$suite_id" ]]; then
+        # Use suite method for Konflux
+        push_status=$(curl -LsH "$authorization" "https://api.github.com/repos/$org/$repo/check-suites/$suite_id/check-runs" | yq -p=json ".check_runs[] | select(.name==\"Red Hat Konflux / $line-on-push\") | .conclusion")
+    else
+        # Fallback to original method
+        push_status=$(curl -LsH "$authorization" "https://api.github.com/repos/$org/$repo/commits/$branch/check-runs" | yq -p=json ".check_runs[] | select(.app.name == \"Red Hat Konflux\") | select(.name==\"Red Hat Konflux / $line-on-push\") | .conclusion")
+    fi
+
+    if [[ -n "$push_status" ]] && ! echo "$push_status" | grep -v "^success$" > /dev/null; then
+        echo "🟩 $repo $pushname: SUCCESS" >&3
+        echo "Successful"
+    else
+        echo "🟥 $repo $pushname: FAILURE (status was: \"$push_status\")" >&3
+        echo "Failed"
     fi
 }
 
@@ -278,12 +313,32 @@ for line in $components; do
     [[ -n "$debug" ]] && echo -e "[debug] Push: $push\n[debug] Pull: $pull" # debug
 
     echo "--- $line : $org/$repo : $branch ---"
-    yaml=$(curl -Ls $push)
-    pull_yaml=$(curl -Ls $push)
+    yaml=$(curl -Ls -w "%{http_code}" $push)
+    http_code_push="${yaml: -3}"
+    yaml="${yaml%???}"
+    [[ -n "$debug" && "$http_code_push" == "404" ]] && echo -e "[debug] \033[31m404 error\033[0m fetching push YAML from $push" >&3
+    
+    pull_yaml=$(curl -Ls -w "%{http_code}" $pull)
+    http_code_pull="${pull_yaml: -3}"
+    pull_yaml="${pull_yaml%???}"
+    [[ -n "$debug" && "$http_code_pull" == "404" ]] && echo -e "[debug] \033[31m404 error\033[0m fetching pull YAML from $pull" >&3
 
     data="$data,$(check_hermetic_builds "$yaml" "$pull_yaml" "$authorization" "$org" "$repo")"
 
-    data="$data,$(check_enterprise_contract "$application" "$line" "$authorization" "$org" "$repo" "$branch")"
+    # Check enterprise contract
+    ec_result=$(check_enterprise_contract "$application" "$line" "$authorization" "$org" "$repo" "$branch")
+    
+    # If EC was blank, check on-push and determine final result
+    if [[ "$ec_result" == "EC_BLANK" ]]; then
+        push_result=$(check_component_on_push "$line" "$authorization" "$org" "$repo" "$branch")
+        if [[ "$push_result" == "Successful" ]]; then
+            ec_result="Not Compliant"
+        else
+            ec_result="Push Failure"
+        fi
+    fi
+    
+    data="$data,$ec_result"
 
     data="$data,$(check_multiarch_support "$yaml" "$repo")"
 
