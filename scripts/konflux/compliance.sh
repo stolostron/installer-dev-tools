@@ -60,6 +60,7 @@ if [[ "$show_help" == "true" ]] || [[ -z "$application" ]]; then
     exit 0
 fi
 
+mkdir -p data
 compliancefile="data/$application-compliance.csv"
 > $compliancefile
 
