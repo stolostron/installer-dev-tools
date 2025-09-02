@@ -41,7 +41,7 @@ metadata:
   name: periodic-trigger-pipelines
   namespace: crt-redhat-acm-tenant
 spec:
-  schedule: '0 2 * * *'
+  schedule: '30 23 * * *'
   jobTemplate:
     spec:
       template:
