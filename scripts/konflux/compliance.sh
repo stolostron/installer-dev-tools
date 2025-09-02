@@ -231,6 +231,8 @@ check_enterprise_contract() {
         echo "🟥 $repo $ecname: FAILURE (ec was: \"$ec\")" >&3
         if [[ -z "$ec" ]]; then
             echo "EC_BLANK"
+        elif [[ "$ec" == "cancelled" ]]; then
+            echo "EC_CANCELED"
         else
             echo "Not Compliant"
         fi
@@ -328,8 +330,8 @@ for line in $components; do
     # Check enterprise contract
     ec_result=$(check_enterprise_contract "$application" "$line" "$authorization" "$org" "$repo" "$branch")
     
-    # If EC was blank, check on-push and determine final result
-    if [[ "$ec_result" == "EC_BLANK" ]]; then
+    # If EC was blank or canceled, check on-push and determine final result
+    if [[ "$ec_result" == "EC_BLANK" || "$ec_result" == "EC_CANCELED" ]]; then
         push_result=$(check_component_on_push "$line" "$authorization" "$org" "$repo" "$branch")
         if [[ "$push_result" == "Successful" ]]; then
             ec_result="Not Compliant"
