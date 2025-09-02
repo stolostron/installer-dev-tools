@@ -77,28 +77,20 @@ spec:
                   # Switch to control component whitelist (set to "true" to use component whitelist)
                   USE_COMPONENT_WHITELIST="${USE_COMPONENT_WHITELIST:-true}"
                   
-                  # Whitelist of components for testing
-                  COMPONENT_WHITELIST=(
-                    "managed-serviceaccount-mce-26"
-                    "managed-serviceaccount-mce-27"
-                    "managed-serviceaccount-mce-28"
-                    "managed-serviceaccount-mce-29"
-                    "managed-serviceaccount-mce-210"
-                    "addon-manager-mce-26"
-                    "addon-manager-mce-27"
-                    "addon-manager-mce-28"
-                    "addon-manager-mce-29"
-                    "addon-manager-mce-210"
-                    managedcluster-import-controller-addon-mce-26
-                    managedcluster-import-controller-addon-mce-27
-                    managedcluster-import-controller-addon-mce-28
-                    managedcluster-import-controller-addon-mce-29
-                    managedcluster-import-controller-addon-mce-210
-                    klusterlet-addon-controller-acm-211
-                    klusterlet-addon-controller-acm-212
-                    klusterlet-addon-controller-acm-213
-                    klusterlet-addon-controller-acm-214
-                    klusterlet-addon-controller-acm-215
+                  # Whitelist of component patterns for testing (supports wildcards and exact names)
+                  COMPONENT_PATTERNS=(
+                    "managed-serviceaccount-*"
+                    "addon-manager-*"
+                    "managedcluster-import-controller-addon-*"
+                    "klusterlet-addon-controller-*"
+                    "cluster-proxy-addon-mce-210"
+                    "cluster-proxy-mce-210"
+                    "clusterlifecycle-state-metrics-mce-210"
+                    "multicloud-manager-mce-210"
+                    "placement-mce-210"
+                    "registration-mce-210"
+                    "registration-operator-mce-210"
+                    "work-mce-210"
                   )
                   
                   # Threshold for stale promotions (12 days ago)
@@ -115,9 +107,9 @@ spec:
                       return 0  # Check all components
                     fi
                     
-                    for whitelist_comp in "${COMPONENT_WHITELIST[@]}"; do
-                      if [ "$comp_name" = "$whitelist_comp" ]; then
-                        return 0  # Component should be checked
+                    for pattern in "${COMPONENT_PATTERNS[@]}"; do
+                      if [[ "$comp_name" == $pattern ]]; then
+                        return 0  # Component matches pattern
                       fi
                     done
                     return 1  # Component should be skipped
