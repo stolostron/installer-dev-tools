@@ -1,0 +1,239 @@
+---
+kind: Role
+apiVersion: rbac.authorization.k8s.io/v1
+metadata:
+  name: periodic-jobs-role
+  namespace: crt-redhat-acm-tenant
+rules:
+  - verbs:
+      - get
+      - list
+      - patch
+    apiGroups:
+      - appstudio.redhat.com
+    resources:
+      - components
+---
+kind: RoleBinding
+apiVersion: rbac.authorization.k8s.io/v1
+metadata:
+  name: periodic-jobs-rolebinding
+  namespace: crt-redhat-acm-tenant
+subjects:
+  - kind: ServiceAccount
+    name: periodic-trigger-pipelines
+roleRef:
+  kind: Role
+  name: periodic-jobs-role
+  apiGroup: rbac.authorization.k8s.io
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: periodic-trigger-pipelines
+  namespace: crt-redhat-acm-tenant 
+
+---
+
+kind: CronJob
+apiVersion: batch/v1
+metadata:
+  name: periodic-trigger-pipelines
+  namespace: crt-redhat-acm-tenant
+spec:
+  schedule: '0 2 * * *'
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          containers:
+            - name: trigger-components-build
+              image: 'quay.io/konflux-ci/appstudio-utils:latest'
+              imagePullPolicy: Always
+              command:
+                - /bin/bash
+                - '-c'
+              args:
+                - |
+                  #!/bin/bash
+                  set -euo pipefail
+
+                  export KONFLUX_TENANT_NAME="crt-redhat-acm-tenant"
+                  
+                  # Whitelist of applications to check (always enabled)
+                  APPLICATION_WHITELIST=(
+                    "release-mce-26"
+                    "release-mce-27"
+                    "release-mce-28"
+                    "release-mce-29"
+                    "release-mce-210"
+                    "release-acm-211"
+                    "release-acm-212"
+                    "release-acm-213"
+                    "release-acm-214"
+                    "release-acm-215"
+                  )
+                  
+                  # Switch to control component whitelist (set to "true" to use component whitelist)
+                  USE_COMPONENT_WHITELIST="${USE_COMPONENT_WHITELIST:-true}"
+                  
+                  # Whitelist of components for testing
+                  COMPONENT_WHITELIST=(
+                    "managed-serviceaccount-mce-26"
+                    "managed-serviceaccount-mce-27"
+                    "managed-serviceaccount-mce-28"
+                    "managed-serviceaccount-mce-29"
+                    "managed-serviceaccount-mce-210"
+                    "addon-manager-mce-26"
+                    "addon-manager-mce-27"
+                    "addon-manager-mce-28"
+                    "addon-manager-mce-29"
+                    "addon-manager-mce-210"
+                    managedcluster-import-controller-addon-mce-26
+                    managedcluster-import-controller-addon-mce-27
+                    managedcluster-import-controller-addon-mce-28
+                    managedcluster-import-controller-addon-mce-29
+                    managedcluster-import-controller-addon-mce-210
+                    klusterlet-addon-controller-acm-211
+                    klusterlet-addon-controller-acm-212
+                    klusterlet-addon-controller-acm-213
+                    klusterlet-addon-controller-acm-214
+                    klusterlet-addon-controller-acm-215
+                  )
+                  
+                  # Threshold for stale promotions (12 days ago)
+                  THRESHOLD_DATE=$(date -d '12 days ago' '+%Y-%m-%dT%H:%M:%S')
+
+                  echo "[INFO] Checking components for builds older than $THRESHOLD_DATE"
+                  echo "[INFO] Using component whitelist: $USE_COMPONENT_WHITELIST"
+                  
+                  # Function to check if component should be processed
+                  should_check_component() {
+                    local comp_name="$1"
+                    
+                    if [ "$USE_COMPONENT_WHITELIST" = "false" ]; then
+                      return 0  # Check all components
+                    fi
+                    
+                    for whitelist_comp in "${COMPONENT_WHITELIST[@]}"; do
+                      if [ "$comp_name" = "$whitelist_comp" ]; then
+                        return 0  # Component should be checked
+                      fi
+                    done
+                    return 1  # Component should be skipped
+                  }
+                  
+                  # Function to get and format build date from image
+                  get_build_date() {
+                    local promoted_image="$1"
+                    
+                    if [ "$promoted_image" == "null" ] || [ -z "$promoted_image" ]; then
+                      echo "NO_IMAGE"
+                      return
+                    fi
+                    
+                    if [[ ! "$promoted_image" =~ sha256:[a-f0-9]{64}$ ]]; then
+                      echo "INVALID_FORMAT"
+                      return
+                    fi
+                    
+                    local skopeo_output
+                    skopeo_output=$(skopeo inspect -n "docker://$promoted_image" 2>&1)
+                    if [ $? -ne 0 ]; then
+                      echo "INSPECT_FAILED"
+                      return
+                    fi
+                    
+                    local buildtime
+                    buildtime=$(echo "$skopeo_output" | jq -r .Labels.\"build-date\")
+                    if [ "$buildtime" = "null" ] || [ -z "$buildtime" ]; then
+                      echo "NO_BUILD_DATE"
+                      return
+                    fi
+                    
+                    echo "$buildtime"
+                  }
+                  
+                  # Function to check if build is stale
+                  is_build_stale() {
+                    local buildtime="$1"
+                    local build_date
+                    
+                    build_date=$(date -d "$buildtime" '+%Y-%m-%dT%H:%M:%S' 2>/dev/null || echo "")
+                    if [ -n "$build_date" ] && [[ "$build_date" < "$THRESHOLD_DATE" ]]; then
+                      return 0  # Build is stale
+                    fi
+                    return 1  # Build is recent
+                  }
+                  
+                  # Function to trigger component build
+                  trigger_component_build() {
+                    local comp="$1"
+                    echo "[INFO] Triggering build for ${comp}"
+                    kubectl annotate components/${comp} build.appstudio.openshift.io/request=trigger-pac-build
+                    echo "[INFO] ${comp} build successfully triggered!"
+                  }
+                  
+                  COMPONENTS_TO_BUILD=()
+                  
+                  # Get components once per application - balanced approach
+                  for app in "${APPLICATION_WHITELIST[@]}"; do
+                    echo "[INFO] Processing application: $app"
+                    
+                    # Get all components and filter for this application
+                    echo "[INFO] Fetching components for application: $app"
+                    APP_COMPONENTS_DATA=$(oc get components -o json | jq -c --arg app "$app" '.items[] | select(.spec.application == $app)')
+                    
+                    # Process each component in this application
+                    while IFS='|' read -r comp promoted; do
+                      
+                      # Apply component whitelist filter
+                      if ! should_check_component "$comp"; then
+                        continue
+                      fi
+                      
+                      echo "[INFO] Checking component: $comp (app: $app)"
+                      
+                      # Get build date from promoted image
+                      buildtime=$(get_build_date "$promoted")
+                      
+                      case "$buildtime" in
+                        "NO_IMAGE")
+                          echo "[INFO] $comp has no promoted image - adding to build list"
+                          COMPONENTS_TO_BUILD+=("$comp")
+                          ;;
+                        "INVALID_FORMAT")
+                          echo "[INFO] $comp has invalid digest format - adding to build list"
+                          COMPONENTS_TO_BUILD+=("$comp")
+                          ;;
+                        "INSPECT_FAILED")
+                          echo "[INFO] $comp image inspection failed - adding to build list"
+                          COMPONENTS_TO_BUILD+=("$comp")
+                          ;;
+                        "NO_BUILD_DATE")
+                          echo "[INFO] $comp has no build date - adding to build list"
+                          COMPONENTS_TO_BUILD+=("$comp")
+                          ;;
+                        *)
+                          if is_build_stale "$buildtime"; then
+                            echo "[INFO] $comp build date ($buildtime) is older than threshold - adding to build list"
+                            COMPONENTS_TO_BUILD+=("$comp")
+                          else
+                            echo "[INFO] $comp build date ($buildtime) is recent - skipping"
+                          fi
+                          ;;
+                      esac
+                    done < <(echo "$APP_COMPONENTS_DATA" | jq -r '"\(.metadata.name)|\(.status.lastPromotedImage // "")"')
+                  done
+                  
+                  if [ ${#COMPONENTS_TO_BUILD[@]} -eq 0 ]; then
+                    echo "[INFO] No components need rebuilding"
+                  else
+                    echo "[INFO] Triggering builds for ${#COMPONENTS_TO_BUILD[@]} components"
+                    for component in "${COMPONENTS_TO_BUILD[@]}"; do
+                      trigger_component_build "$component"
+                    done
+                  fi 
+
+          restartPolicy: Never
+          serviceAccountName: periodic-trigger-pipelines
