@@ -93,7 +93,7 @@ check_promoted() {
             # inspection failed
             buildtime="INSPECTION_FAILURE,Failed"
         else
-            buildtime="$(echo "$skopeo" | yq -p=json ".Labels.build-date"),Successful"
+            buildtime="$(echo "$skopeo" | yq -p=json ".Labels.build-date" | sed 's/Z$//'),Successful"
         fi
     else
         # invalid or incomplete digest
