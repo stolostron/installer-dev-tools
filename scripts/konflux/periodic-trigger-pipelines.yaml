@@ -80,17 +80,17 @@ spec:
                   # Whitelist of component patterns for testing (supports wildcards and exact names)
                   COMPONENT_PATTERNS=(
                     "managed-serviceaccount-*"
-                    "addon-manager-*"
                     "managedcluster-import-controller-addon-*"
                     "klusterlet-addon-controller-*"
-                    "cluster-proxy-addon-mce-210"
-                    "cluster-proxy-mce-210"
-                    "clusterlifecycle-state-metrics-mce-210"
-                    "multicloud-manager-mce-210"
-                    "placement-mce-210"
-                    "registration-mce-210"
-                    "registration-operator-mce-210"
-                    "work-mce-210"
+                    "cluster-proxy-addon-*"
+                    "cluster-proxy-*"
+                    "clusterlifecycle-state-metrics-*"
+                    "multicloud-manager-*"
+                    "addon-manager-*"
+                    "placement-*"
+                    "registration-*"
+                    "registration-operator-*"
+                    "work-*"
                   )
                   
                   # Threshold for stale promotions (12 days ago)
