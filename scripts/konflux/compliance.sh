@@ -93,7 +93,7 @@ check_promoted() {
             # inspection failed
             buildtime="INSPECTION_FAILURE,Failed"
         else
-            buildtime="$(echo "$skopeo" | yq -p=json ".Labels.build-date"),Successful"
+            buildtime="$(echo "$skopeo" | yq -p=json ".Labels.build-date" | sed 's/Z$//'),Successful"
         fi
     else
         # invalid or incomplete digest
@@ -290,6 +290,21 @@ check_multiarch_support() {
     fi
 }
 
+# Function to check if component is a bundle operator
+check_bundle_operator() {
+    local component="$1"
+    
+    # Check if component starts with "mce-operator-bundle" or "acm-operator-bundle"
+    if [[ "$component" == mce-operator-bundle* || "$component" == acm-operator-bundle* ]]; then
+        echo "🟡 $component Bundle Operator: TRUE" >&3
+        echo "🟡 $component Hermetic: Not Applicable" >&3
+        echo "🟡 $component Multiarch: Not Applicable" >&3
+        echo "BUNDLE_OPERATOR"
+    else
+        echo "REGULAR_COMPONENT"
+    fi
+}
+
 if [[ -n "$debug" && "$debug" != "true" ]]; then
     components=$debug
 else
@@ -325,7 +340,15 @@ for line in $components; do
     pull_yaml="${pull_yaml%???}"
     [[ -n "$debug" && "$http_code_pull" == "404" ]] && echo -e "[debug] \033[31m404 error\033[0m fetching pull YAML from $pull" >&3
 
-    data="$data,$(check_hermetic_builds "$yaml" "$pull_yaml" "$authorization" "$org" "$repo")"
+    # Check if component is a bundle operator
+    bundle_result=$(check_bundle_operator "$line")
+    
+    # Check hermetic builds (skip for bundle operators)
+    if [[ "$bundle_result" == "BUNDLE_OPERATOR" ]]; then
+        data="$data,Not Applicable"
+    else
+        data="$data,$(check_hermetic_builds "$yaml" "$pull_yaml" "$authorization" "$org" "$repo")"
+    fi
 
     # Check enterprise contract
     ec_result=$(check_enterprise_contract "$application" "$line" "$authorization" "$org" "$repo" "$branch")
@@ -342,7 +365,12 @@ for line in $components; do
     
     data="$data,$ec_result"
 
-    data="$data,$(check_multiarch_support "$yaml" "$repo")"
+    # Check multiarch support (skip for bundle operators)
+    if [[ "$bundle_result" == "BUNDLE_OPERATOR" ]]; then
+        data="$data,Not Applicable"
+    else
+        data="$data,$(check_multiarch_support "$yaml" "$repo")"
+    fi
 
     echo ""
 
