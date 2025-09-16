@@ -429,7 +429,7 @@ def fixImageReferences(helmChart, imageKeyMapping):
             
             containers = resource_data['spec']['template']['spec']['containers']
             for container in containers:
-                logging.critical("Container: %s" % container['name'])
+                logging.info("Container: %s" % container['name'])
                 image_key = parse_image_ref(container['image'])["repository"]
                 try:
                     image_key = imageKeyMapping[image_key]
@@ -451,7 +451,7 @@ def fixImageReferences(helmChart, imageKeyMapping):
                     container['args'] = refreshed_args
             initcontainers = resource_data['spec']['template']['spec']['initContainers']
             for container in initcontainers:
-                logging.critical("Container: %s" % container['name'])
+                logging.info("Container: %s" % container['name'])
                 image_key = parse_image_ref(container['image'])["repository"]
                 try:
                     image_key = imageKeyMapping[image_key]
