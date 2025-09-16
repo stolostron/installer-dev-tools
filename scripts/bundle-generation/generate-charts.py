@@ -469,7 +469,7 @@ def fixImageReferences(helmChart, imageKeyMapping):
                 container['image'] = "{{ .Values.global.imageOverrides." + image_key + " }}"
                 container['imagePullPolicy'] = "{{ .Values.global.pullPolicy }}"
             
-            if 'initContainers' in containers = resource_data['spec']['template']['spec']:
+            if 'initContainers' in resource_data['spec']['template']['spec']:
 
                 containers = resource_data['spec']['template']['spec']['initContainers']
                 for container in containers:
