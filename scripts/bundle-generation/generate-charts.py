@@ -970,8 +970,8 @@ def update_helm_resources(chartName, helmChart, skip_rbac_overrides, exclusions,
                         for key, value in config_data.items():
                             if key.endswith(".yaml") or key.endswith(".yml"):
                                 key_data = yaml.safe_load(value)
-                                logging.warning(f"key_data={key_data.get('database').get('hostname')}")
-                                hostname = key_data.get('database').get('hostname')
+                                # logging.warning(f"key_data={key_data.get('database').get('hostname')}")
+                                # hostname = key_data.get('database').get('hostname')
                                 key_data = replace_default(key_data, 'PLACEHOLDER_NAMESPACE', '{{ .Values.global.namespace }}')
                                 key_data = replace_default(key_data, 'placeholder_apiurl', '{{ .Values.global.apiUrl }}')
                                 key_data = replace_default(key_data, 'placeholder_basedomain', '{{ .Values.global.baseDomain }}')
