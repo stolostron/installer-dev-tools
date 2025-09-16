@@ -429,6 +429,29 @@ def fixImageReferences(helmChart, imageKeyMapping):
             
             containers = resource_data['spec']['template']['spec']['containers']
             for container in containers:
+                logging.info("Container: %s" % container['name'])
+                image_key = parse_image_ref(container['image'])["repository"]
+                try:
+                    image_key = imageKeyMapping[image_key]
+                except KeyError:
+                    logging.critical("No image key mapping provided for imageKey: %s" % image_key)
+                    exit(1)
+                imageKeys.append(image_key)
+                container['image'] = "{{ .Values.global.imageOverrides." + image_key + " }}"
+                container['imagePullPolicy'] = "{{ .Values.global.pullPolicy }}"
+
+                if kind == "Deployment":
+                    args = container.get('args', [])
+                    refreshed_args = []
+                    for arg in args:
+                        if "--agent-image-name" not in arg:
+                            refreshed_args.append(arg)
+                        else:
+                            refreshed_args.append("--agent-image-name="+"{{ .Values.global.imageOverrides." + image_key + " }}")
+                    container['args'] = refreshed_args
+            initcontainers = resource_data['spec']['template']['spec']['initContainers']
+            for container in initcontainers:
+                logging.info("Container: %s" % container['name'])
                 image_key = parse_image_ref(container['image'])["repository"]
                 try:
                     image_key = imageKeyMapping[image_key]
@@ -828,6 +851,10 @@ def update_helm_resources(chartName, helmChart, skip_rbac_overrides, exclusions,
 
                 if chartName == 'flight-control':
                     if kind == 'ConsolePlugin':
+                        resource_data = replace_default(resource_data, 'PLACEHOLDER_NAMESPACE', '{{ .Values.global.namespace }}')
+                    if kind == 'ConfigMap':
+                        resource_data = replace_default(resource_data, 'PLACEHOLDER_NAMESPACE', '{{ .Values.global.namespace }}')
+                    if kind == 'Deployment':
                         resource_data = replace_default(resource_data, 'PLACEHOLDER_NAMESPACE', '{{ .Values.global.namespace }}')
 
                 # Ensure namespace is set for namespace-scoped resources
