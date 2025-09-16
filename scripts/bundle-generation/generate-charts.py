@@ -468,18 +468,20 @@ def fixImageReferences(helmChart, imageKeyMapping):
                 imageKeys.append(image_key)
                 container['image'] = "{{ .Values.global.imageOverrides." + image_key + " }}"
                 container['imagePullPolicy'] = "{{ .Values.global.pullPolicy }}"
+            
+            if 'initContainers' in containers = resource_data['spec']['template']['spec']:
 
-            containers = resource_data['spec']['template']['spec']['initContainers']
-            for container in containers:
-                image_key = parse_image_ref(container['image'])["repository"]
-                try:
-                    image_key = imageKeyMapping[image_key]
-                except KeyError:
-                    logging.critical("No image key mapping provided for imageKey: %s" % image_key)
-                    exit(1)
-                imageKeys.append(image_key)
-                container['image'] = "{{ .Values.global.imageOverrides." + image_key + " }}"
-                container['imagePullPolicy'] = "{{ .Values.global.pullPolicy }}"
+                containers = resource_data['spec']['template']['spec']['initContainers']
+                for container in containers:
+                    image_key = parse_image_ref(container['image'])["repository"]
+                    try:
+                        image_key = imageKeyMapping[image_key]
+                    except KeyError:
+                        logging.critical("No image key mapping provided for imageKey: %s" % image_key)
+                        exit(1)
+                    imageKeys.append(image_key)
+                    container['image'] = "{{ .Values.global.imageOverrides." + image_key + " }}"
+                    container['imagePullPolicy'] = "{{ .Values.global.pullPolicy }}"
 
                 if kind == "Deployment":
                     args = container.get('args', [])
