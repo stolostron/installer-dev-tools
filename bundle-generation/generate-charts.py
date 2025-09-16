@@ -448,6 +448,27 @@ def fixImageReferences(helmChart, imageKeyMapping):
                         else:
                             refreshed_args.append("--agent-image-name="+"{{ .Values.global.imageOverrides." + image_key + " }}")
                     container['args'] = refreshed_args
+            containers = resource_data['spec']['template']['spec']['initContainers']
+            for container in containers:
+                image_key = parse_image_ref(container['image'])["repository"]
+                try:
+                    image_key = imageKeyMapping[image_key]
+                except KeyError:
+                    logging.critical("No image key mapping provided for imageKey: %s" % image_key)
+                    exit(1)
+                imageKeys.append(image_key)
+                container['image'] = "{{ .Values.global.imageOverrides." + image_key + " }}"
+                container['imagePullPolicy'] = "{{ .Values.global.pullPolicy }}"
+
+                if kind == "Deployment":
+                    args = container.get('args', [])
+                    refreshed_args = []
+                    for arg in args:
+                        if "--agent-image-name" not in arg:
+                            refreshed_args.append(arg)
+                        else:
+                            refreshed_args.append("--agent-image-name="+"{{ .Values.global.imageOverrides." + image_key + " }}")
+                    container['args'] = refreshed_args
 
             with open(template_path, 'w') as f:
                 yaml.dump(resource_data, f, width=float("inf"))
