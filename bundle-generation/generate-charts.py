@@ -429,6 +429,7 @@ def fixImageReferences(helmChart, imageKeyMapping):
             
             containers = resource_data['spec']['template']['spec']['containers']
             for container in containers:
+                logging.critical("Container: %s" % container['name'])
                 image_key = parse_image_ref(container['image'])["repository"]
                 try:
                     image_key = imageKeyMapping[image_key]
@@ -448,8 +449,9 @@ def fixImageReferences(helmChart, imageKeyMapping):
                         else:
                             refreshed_args.append("--agent-image-name="+"{{ .Values.global.imageOverrides." + image_key + " }}")
                     container['args'] = refreshed_args
-            containers = resource_data['spec']['template']['spec']['initContainers']
-            for container in containers:
+            initcontainers = resource_data['spec']['template']['spec']['initContainers']
+            for container in initcontainers:
+                logging.critical("Container: %s" % container['name'])
                 image_key = parse_image_ref(container['image'])["repository"]
                 try:
                     image_key = imageKeyMapping[image_key]
