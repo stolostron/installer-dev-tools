@@ -781,17 +781,6 @@ def fixImageReferences(helmChart, imageKeyMapping):
             imageKeys.append(image_key)
             # temp = container['image']
             container['image'] = "{{ .Values.global.imageOverrides." + image_key + " }}"
-        containers = deploy['spec']['template']['spec']['initContainers']
-        for container in containers:
-            image_key = parse_image_ref(container['image'])["repository"]
-            try:
-                image_key = imageKeyMapping[image_key]
-            except KeyError:
-                logging.critical("No image key mapping provided for imageKey: %s", image_key)
-                sys.exit(1)
-            imageKeys.append(image_key)
-            # temp = container['image']
-            container['image'] = "{{ .Values.global.imageOverrides." + image_key + " }}"
             container['imagePullPolicy'] = "{{ .Values.global.pullPolicy }}"
         with open(deployment, 'w', encoding='utf-8') as f:
             yaml.dump(deploy, f)
