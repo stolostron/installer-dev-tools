@@ -147,6 +147,13 @@ function get_revision_for_pr {
   local revision_by_repo=$(curl -Ls "$latest_snapshot_url" | yq ".spec.components[] | select(.source.git.url == \"$repo\") | .source.git.revision")
   debug_echo "Revision by Repo: $revision_by_repo"
 
+  # Compare revisions
+  if [ "$revision_by_sha" != "$revision_by_repo" ]; then
+    echo "🟪 Revision mismatch for $repo: SHA revision ($revision_by_sha) != Repo revision ($revision_by_repo)" >&3
+    echo "REVISION_MISMATCH"
+    return
+  fi
+
   # Return the revision
   echo "$revision_by_repo"
 }
@@ -211,5 +218,7 @@ for pr_url in "${pr_urls[@]}"; do
   debug_echo "Processing PR: $pr_url"
 
   revision=$(get_revision_for_pr "$pr_url")
-  print_pr_testability "$pr_url" "$revision"
+  if [ "$revision" != "REVISION_MISMATCH" ]; then
+    print_pr_testability "$pr_url" "$revision"
+  fi
 done
