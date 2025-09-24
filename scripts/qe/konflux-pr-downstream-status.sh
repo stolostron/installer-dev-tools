@@ -15,13 +15,15 @@ debug_echo() {
 # Help function
 show_help() {
   cat << EOF
-Usage: $0 -a|--application <application> -t|--tag <tag> [--debug] [PR_URL1] [PR_URL2] ...
+Usage: $0 -a|--application <application> -t|--tag <tag> [-b|--branch <branch>] [--skip-opm-render] [--debug] [PR_URL1] [PR_URL2] ...
 
 This script checks if PRs have made it into the latest downstream build image.
 
 Options:
   -a, --application <app>    Application name (e.g., acm-215, acm-214)
   -t, --tag <tag>           Tag name (e.g., latest-2.15)
+  -b, --branch <branch>     Branch name (optional, auto-determined from application if not provided)
+  --skip-opm-render         Skip running opm render command
   --debug                   Enable debug output
   -h, --help                Show this help message
 
@@ -30,13 +32,14 @@ Arguments:
 
 Example:
   $0 -a acm-215 -t latest-2.15 https://github.com/stolostron/multiclusterhub-operator/pull/2668
-  $0 --application acm-214 --tag latest-2.14 --debug https://github.com/org/repo/pull/123
+  $0 --application acm-214 --tag latest-2.14 --branch release-2.14 --debug https://github.com/org/repo/pull/123
 EOF
 }
 
 # Parse command line arguments
 pr_urls=()
 debug=false
+skip_opm_render=false
 while [[ $# -gt 0 ]]; do
   case $1 in
     -a|--application)
@@ -46,6 +49,14 @@ while [[ $# -gt 0 ]]; do
     -t|--tag)
       tag="$2"
       shift 2
+      ;;
+    -b|--branch)
+      branch="$2"
+      shift 2
+      ;;
+    --skip-opm-render)
+      skip_opm_render=true
+      shift
       ;;
     --debug)
       debug=true
@@ -91,12 +102,20 @@ version_number=$(echo "$application" | cut -d'-' -f2)
 major_version=$(echo "$version_number" | cut -c1)
 minor_version=$(echo "$version_number" | cut -c2-)
 
-# Handle different application types
+# Determine branch if not provided
+if [ -z "$branch" ]; then
+  # Handle different application types
+  if [ "$application_part" = "mce" ]; then
+    branch="backplane-$major_version.$minor_version"
+  else
+    branch="release-$major_version.$minor_version"
+  fi
+fi
+
+# Set channel based on application type
 if [ "$application_part" = "mce" ]; then
-  branch="backplane-$major_version.$minor_version"
   channel="stable-$major_version.$minor_version"
 else
-  branch="release-$major_version.$minor_version"
   channel="$branch"
 fi
 
@@ -112,7 +131,9 @@ fi
 
 catalog="quay.io/acm-d/$application_part-dev-catalog:$tag"
 
-# opm render $catalog -oyaml > $tag.cs.yaml
+if [ "$skip_opm_render" = false ]; then
+  opm render $catalog -oyaml > $tag.cs.yaml
+fi
 
 function get_revision_for_pr {
   local pr_url="$1"
