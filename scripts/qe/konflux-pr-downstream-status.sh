@@ -102,14 +102,16 @@ version_number=$(echo "$application" | cut -d'-' -f2)
 major_version=$(echo "$version_number" | cut -c1)
 minor_version=$(echo "$version_number" | cut -c2-)
 
+# Handle different application types
+if [ "$application_part" = "mce" ]; then
+  snapshot_branch="backplane-$major_version.$minor_version"
+else
+  snapshot_branch="release-$major_version.$minor_version"
+fi
+
 # Determine branch if not provided
 if [ -z "$branch" ]; then
-  # Handle different application types
-  if [ "$application_part" = "mce" ]; then
-    branch="backplane-$major_version.$minor_version"
-  else
-    branch="release-$major_version.$minor_version"
-  fi
+  branch=$snapshot_branch
 fi
 
 # Set channel based on application type
@@ -119,8 +121,8 @@ else
   channel="$branch"
 fi
 
-latest_snapshot_url="https://raw.githubusercontent.com/stolostron/$application_part-operator-bundle/refs/heads/$branch/latest-snapshot.yaml"
-gen_config_url="https://raw.githubusercontent.com/stolostron/$application_part-operator-bundle/refs/heads/$branch/config/$application_part-manifest-gen-config.json"
+latest_snapshot_url="https://raw.githubusercontent.com/stolostron/$application_part-operator-bundle/refs/heads/$snapshot_branch/latest-snapshot.yaml"
+gen_config_url="https://raw.githubusercontent.com/stolostron/$application_part-operator-bundle/refs/heads/$snapshot_branch/config/$application_part-manifest-gen-config.json"
 
 debug_echo "Checking for Github auth token"
 authorization=""
