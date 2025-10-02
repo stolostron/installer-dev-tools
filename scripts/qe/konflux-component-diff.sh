@@ -12,11 +12,39 @@ debug_echo() {
 
 mkdir -p ./diffs
 
+# Cache for gen_config to avoid repeated fetches
+declare -g gen_config_cache=""
+
+function get_gen_config() {
+  local application_part="$1"
+  local snapshot_branch="$2"
+
+  if [[ -z "$gen_config_cache" ]]; then
+    gen_config_cache=$(curl -Ls "https://raw.githubusercontent.com/stolostron/$application_part-operator-bundle/refs/heads/$snapshot_branch/config/$application_part-manifest-gen-config.json")
+  fi
+  echo "$gen_config_cache"
+}
+
+function get_konflux_component_name() {
+  local publish_name="$1"
+  get_gen_config "$application_part" "$snapshot_branch" | yq -p=json ".product-images.image-list[] | select(.publish-name == \"$publish_name\") | .konflux-component-name"
+}
+
+function github_api_call() {
+  local url="$1"
+  local accept_header="${2:-application/vnd.github+json}"
+
+  curl -LsH "Accept: $accept_header" \
+    -H "X-GitHub-Api-Version: 2022-11-28" \
+    -H "$authorization" \
+    "$url"
+}
+
 function calculate_konflux_image() {
   local image=$(basename $1 | cut -d'@' -f1)
   local sha=$(basename $1 | cut -d'@' -f2)
 
-  local konflux_name=$(curl -Ls "$gen_config_url" | yq -p=json ".product-images.image-list[] | select(.publish-name == \"$image\") | .konflux-component-name")
+  local konflux_name=$(get_konflux_component_name "$image")
 
   if [[ -z $konflux_name ]]; then return; fi
   debug_echo "Image: $image"
@@ -39,7 +67,7 @@ function get_revision_for_image {
 
   # Get commit history for latest-snapshot.yaml
   local commits_url="https://api.github.com/repos/$repo_owner/$repo_name/commits?path=latest-snapshot.yaml&sha=$branch"
-  local commits=$(curl -LsH "Accept: application/vnd.github+json" -H "X-GitHub-Api-Version: 2022-11-28" -H "$authorization" "$commits_url")
+  local commits=$(github_api_call "$commits_url")
 
   # Check each commit until we find the image
   echo "$commits" | jq -r '.[].sha' | while read commit_sha; do
@@ -47,7 +75,7 @@ function get_revision_for_image {
 
     # Get file content at this commit
     local file_url="https://api.github.com/repos/$repo_owner/$repo_name/contents/latest-snapshot.yaml?ref=$commit_sha"
-    local file_content=$(curl -LsH "Accept: application/vnd.github+json" -H "X-GitHub-Api-Version: 2022-11-28" -H "$authorization" "$file_url" | jq -r '.content' | base64 -d)
+    local file_content=$(github_api_call "$file_url" | jq -r '.content' | base64 -d)
 
     # Check if image exists in this version
     local found_revision=$(echo "$file_content" | yq ".spec.components[] | select(.containerImage | contains(\"$image\")) | .source.git.revision")
@@ -63,8 +91,12 @@ debug=false
 skip_opm_render=false
 while [[ $# -gt 0 ]]; do
   case $1 in
-    -s|--semantic-version)
+    -v|--semantic-version)
       version="$2"
+      shift 2
+      ;;
+    -s|--snapshot)
+      snapshots+=("$2")
       shift 2
       ;;
     --skip-opm-render)
@@ -96,6 +128,29 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
+if (( ( ${#tags[@]} + ${#snapshots[@]} ) != 2 )); then
+  echo "Error: Incorrect number of snapshots and tags"
+  exit 1
+fi
+
+# determine comparison mode
+declare -r COMPARE_MODE_TAGS="TAGS"
+declare -r COMPARE_MODE_SNAPSHOTS="SNAPSHOTS"
+declare -r COMPARE_MODE_MIXED="MIXED"
+
+case ${#tags[@]} in
+  0)
+  compare_mode=$COMPARE_MODE_SNAPSHOTS
+  ;;
+  1)
+  compare_mode=$COMPARE_MODE_MIXED
+  ;;
+  *)
+  compare_mode=$COMPARE_MODE_TAGS
+esac
+
+echo "Compare Mode: $compare_mode"
+
 sorted_tags=($(printf "%s\n" "${tags[@]}" | sort -t '-' -k3))
 
 older_tag=${sorted_tags[0]}
@@ -126,7 +181,6 @@ if [ -z "$branch" ]; then
 fi
 
 latest_snapshot_url="https://raw.githubusercontent.com/stolostron/$application_part-operator-bundle/refs/heads/$snapshot_branch/latest-snapshot.yaml"
-gen_config_url="https://raw.githubusercontent.com/stolostron/$application_part-operator-bundle/refs/heads/$snapshot_branch/config/$application_part-manifest-gen-config.json"
 
 debug_echo "Application Part: $application_part"
 debug_echo "Version Number: $version_number"
@@ -182,7 +236,8 @@ while IFS= read -r line; do
   debug_echo "Revision A: $revision_a"
   debug_echo "Revision B: $revision_b"
 
-  konflux_name=$(curl -Ls "$gen_config_url" | yq -p=json ".product-images.image-list[] | select(.publish-name == \"$(basename ${parts[0]} | cut -d'@' -f1)\") | .konflux-component-name")
+  image_name=$(basename ${parts[0]} | cut -d'@' -f1)
+  konflux_name=$(get_konflux_component_name "$image_name")
   debug_echo "Konflux Name: $konflux_name"
 
   git_url=$(curl -Ls "$latest_snapshot_url" | yq ".spec.components[] | select(.source.git.url | contains(\"$konflux_name\")) | .source.git.url")
@@ -194,11 +249,7 @@ while IFS= read -r line; do
   debug_echo "Org: $org"
   debug_echo "Repo: $repo"
 
-  curl -sL \
-  -H "Accept: application/vnd.github.v3.diff" \
-  -H "$authorization" \
-  -H "X-GitHub-Api-Version: 2022-11-28" \
-  "https://api.github.com/repos/$org/$repo/compare/$revision_a...$revision_b" > "./diffs/$konflux_name-$application.diff"
+  github_api_call "https://api.github.com/repos/$org/$repo/compare/$revision_a...$revision_b" "application/vnd.github.v3.diff" > "./diffs/$konflux_name-$application.diff"
 
   echo "🛈 Diff for $konflux_name-$application written to ./diffs/$konflux_name-$application.diff"
 
