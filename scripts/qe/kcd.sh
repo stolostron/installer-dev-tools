@@ -4,11 +4,19 @@ exec 3>&1
 # Cache for gen_config to avoid repeated fetches
 declare -g gen_config_cache=""
 
+# Debug output function
+debug_echo() {
+  if [ "$debug" = true ]; then
+    echo "$@" >&3
+  fi
+}
+
 # Initialize arrays and variables
 tags=()
 snapshots=()
 version=""
 debug=false
+force_opm_render=false
 
 # Parse command line arguments
 while [[ $# -gt 0 ]]; do
@@ -27,6 +35,10 @@ while [[ $# -gt 0 ]]; do
             ;;
         --debug)
             debug=true
+            shift
+            ;;
+        --force-opm-render)
+            force_opm_render=true
             shift
             ;;
         *)
@@ -54,7 +66,6 @@ if [ ${#tags[@]} -eq 2 ] && [ ${#snapshots[@]} -eq 0 ]; then
     # Two tags
     tag_a="${tags[0]}"
     tag_b="${tags[1]}"
-    # snapshot=""
 elif [ ${#tags[@]} -eq 0 ] && [ ${#snapshots[@]} -eq 2 ]; then
     # Two snapshots
     snapshot_a="${snapshots[0]}"
@@ -68,15 +79,11 @@ else
     exit 1
 fi
 
-tag="2.14.1-DOWNSTREAM-2025-09-29-02-19-47"
-
-# echo "Snapshot: $snapshot"
-echo "Tag A: $tag_a"
-echo "Tag B: $tag_b"
-echo "Tag: $tag"
-echo "Version: $version"
-
-# acm-2.14.1
+debug_echo "Tag A: $tag_a"
+debug_echo "Tag B: $tag_b"
+debug_echo "Snapshot A: $snapshot_a"
+debug_echo "Snapshot B: $snapshot_b"
+debug_echo "Version: $version"
 application_part=$(echo "$version" | cut -d'-' -f1)
 version_number=$(echo "$version" | cut -d'-' -f2)
 major_version=$(echo "$version_number" | cut -d'.' -f1)
@@ -93,11 +100,11 @@ fi
 
 latest_snapshot_url="https://raw.githubusercontent.com/stolostron/$application_part-operator-bundle/refs/heads/$snapshot_branch/latest-snapshot.yaml"
 
-echo "Application Part: $application_part"
-echo "Version Number: $version_number"
-echo "Major Version: $major_version"
-echo "Minor Version: $minor_version"
-echo "Patch Version: $patch_version"
+debug_echo "Application Part: $application_part"
+debug_echo "Version Number: $version_number"
+debug_echo "Major Version: $major_version"
+debug_echo "Minor Version: $minor_version"
+debug_echo "Patch Version: $patch_version"
 
 if [ "$application_part" = "acm" ]; then
   csv_name="advanced-cluster-management.v$version_number*"
@@ -105,21 +112,35 @@ else
   csv_name="multicluster-engine.v$version_number*"
 fi
 
-echo "CSV Name: $csv_name"
+debug_echo "CSV Name: $csv_name"
 
 authorization=""
 if [ -f "authorization.txt" ]; then
 	authorization="Authorization: Bearer $(cat "authorization.txt")"
-	echo "Authorization found. Applying to github API requests"
+	echo "🛈 Authorization found. Applying to github API requests"
 fi
 
 # Load images based on input type
 if [ -n "$tag_a" ]; then
-    tag_a_images=$(cat older.cs.yaml | yq "select(.name==\"$csv_name\") | .relatedImages[].image")
+    tag_a_file="${tag_a}.cs.yaml"
+    if [ "$force_opm_render" = true ] || [ ! -f "$tag_a_file" ]; then
+        echo "🛈 Rendering $application_part-dev-catalog:$tag_a"
+        opm render quay.io/acm-d/$application_part-dev-catalog:$tag_a --migrate -oyaml > "$tag_a_file"
+    else
+        echo "🛈 Using cached $tag_a_file"
+    fi
+    tag_a_images=$(cat "$tag_a_file" | yq "select(.name==\"$csv_name\") | .relatedImages[].image")
 fi
 
 if [ -n "$tag_b" ]; then
-    tag_b_images=$(cat newer.cs.yaml | yq "select(.name==\"$csv_name\") | .relatedImages[].image")
+    tag_b_file="${tag_b}.cs.yaml"
+    if [ "$force_opm_render" = true ] || [ ! -f "$tag_b_file" ]; then
+        echo "🛈 Rendering $application_part-dev-catalog:$tag_b"
+        opm render quay.io/acm-d/$application_part-dev-catalog:$tag_b --migrate -oyaml > "$tag_b_file"
+    else
+        echo "🛈 Using cached $tag_b_file"
+    fi
+    tag_b_images=$(cat "$tag_b_file" | yq "select(.name==\"$csv_name\") | .relatedImages[].image")
 fi
 
 if [ -n "$snapshot_a" ]; then
@@ -132,18 +153,7 @@ if [ -n "$snapshot_b" ]; then
     snapshot_b_images=$(echo "$snapshot_b_cache" | yq '.spec.components[].containerImage')
 fi
 
-tag_images=$(cat older.cs.yaml | yq "select(.name==\"$csv_name\") | .relatedImages[].image")
-# snapshot_cache=$(oc get snapshot release-acm-214-czrhh -oyaml)
-# snapshot_images=$(echo "$snapshot_cache" | yq '.spec.components[].containerImage')
 latest_snapshot_cache=$(curl -Ls "$latest_snapshot_url")
-
-
-# Debug output function
-debug_echo() {
-  if [ "$debug" = true ]; then
-    echo "$@" >&3
-  fi
-}
 
 function github_api_call() {
   local url="$1"
