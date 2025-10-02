@@ -4,11 +4,57 @@ exec 3>&1
 # Cache for gen_config to avoid repeated fetches
 declare -g gen_config_cache=""
 
+# Get script directory
+SCRIPT_DIR="$(cd "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+mkdir -p -- "$SCRIPT_DIR/diffs"
+mkdir -p -- "$SCRIPT_DIR/cache"
+
 # Debug output function
 debug_echo() {
   if [ "$debug" = true ]; then
     echo "$@" >&3
   fi
+}
+
+# Help function
+show_help() {
+  local script_name=$(basename "$0")
+  cat << EOF
+Usage: $script_name -v|--semantic-version VERSION [OPTIONS] INPUTS
+
+Compare Konflux component diffs between two tags or snapshots.
+
+Required Arguments:
+  -v, --semantic-version VERSION    Semantic version (e.g., acm-2.14.1)
+
+Input Arguments (exactly 2 required):
+  -t, --tag TAG                     Tag name (e.g., 2.14.1-DOWNSTREAM-2025-09-29-02-19-47)
+  -s, --snapshot SNAPSHOT           Snapshot name (e.g., release-acm-214-czrhh)
+
+  Valid combinations:
+    - Two tags:              -t TAG1 -t TAG2
+    - Two snapshots:         -s SNAPSHOT1 -s SNAPSHOT2
+    - One tag + snapshot:    -t TAG -s SNAPSHOT
+
+Optional Arguments:
+  --force-opm-render                Force re-rendering of catalog YAML files (default: use cached)
+  --debug                           Enable debug output
+  -h, --help                        Show this help message
+
+Examples:
+  # Compare two tags
+  $script_name -v acm-2.14.1 -t 2.14.1-DOWNSTREAM-2025-09-29-02-19-47 -t 2.14.1-DOWNSTREAM-2025-10-01-02-19-43
+
+  # Compare two snapshots
+  $script_name -v acm-2.14.1 -s release-acm-214-n7bvs -s release-acm-214-9q65c
+
+  # Compare tag with snapshot
+  $script_name -v acm-2.14.1 -t 2.14.1-DOWNSTREAM-2025-09-29-02-19-47 -s release-acm-214-n7bvs
+
+  # Force re-render cached files
+  $script_name -v acm-2.14.1 -t TAG1 -t TAG2 --force-opm-render
+
+EOF
 }
 
 # Initialize arrays and variables
@@ -41,8 +87,14 @@ while [[ $# -gt 0 ]]; do
             force_opm_render=true
             shift
             ;;
+        -h|--help)
+            show_help
+            exit 0
+            ;;
         *)
-            echo "Unknown option: $1"
+            echo "Error: Unknown option: $1"
+            echo ""
+            show_help
             exit 1
             ;;
     esac
@@ -51,6 +103,8 @@ done
 # Validate inputs
 if [ -z "$version" ]; then
     echo "Error: --semantic-version is required"
+    echo ""
+    show_help
     exit 1
 fi
 
@@ -58,6 +112,8 @@ fi
 total_inputs=$((${#tags[@]} + ${#snapshots[@]}))
 if [ $total_inputs -ne 2 ]; then
     echo "Error: Exactly 2 inputs required (tags and/or snapshots combined)"
+    echo ""
+    show_help
     exit 1
 fi
 
@@ -76,6 +132,8 @@ elif [ ${#tags[@]} -eq 1 ] && [ ${#snapshots[@]} -eq 1 ]; then
     snapshot_b="${snapshots[0]}"
 else
     echo "Error: Invalid combination. Must be either: 2 tags, 2 snapshots, or 1 tag + 1 snapshot"
+    echo ""
+    show_help
     exit 1
 fi
 
@@ -115,14 +173,14 @@ fi
 debug_echo "CSV Name: $csv_name"
 
 authorization=""
-if [ -f "authorization.txt" ]; then
-	authorization="Authorization: Bearer $(cat "authorization.txt")"
+if [ -f "$SCRIPT_DIR/authorization.txt" ]; then
+	authorization="Authorization: Bearer $(cat "$SCRIPT_DIR/authorization.txt")"
 	echo "🛈 Authorization found. Applying to github API requests"
 fi
 
 # Load images based on input type
 if [ -n "$tag_a" ]; then
-    tag_a_file="${tag_a}.cs.yaml"
+    tag_a_file="$SCRIPT_DIR/cache/${tag_a}.cs.yaml"
     if [ "$force_opm_render" = true ] || [ ! -f "$tag_a_file" ]; then
         echo "🛈 Rendering $application_part-dev-catalog:$tag_a"
         opm render quay.io/acm-d/$application_part-dev-catalog:$tag_a --migrate -oyaml > "$tag_a_file"
@@ -133,7 +191,7 @@ if [ -n "$tag_a" ]; then
 fi
 
 if [ -n "$tag_b" ]; then
-    tag_b_file="${tag_b}.cs.yaml"
+    tag_b_file="$SCRIPT_DIR/cache/${tag_b}.cs.yaml"
     if [ "$force_opm_render" = true ] || [ ! -f "$tag_b_file" ]; then
         echo "🛈 Rendering $application_part-dev-catalog:$tag_b"
         opm render quay.io/acm-d/$application_part-dev-catalog:$tag_b --migrate -oyaml > "$tag_b_file"
@@ -364,6 +422,6 @@ while read -r url revision_a revision_b; do
         continue
     fi
 
-    github_api_call "https://api.github.com/repos/$org/$repo/compare/$base...$head" "application/vnd.github.v3.diff" > "./diffs/$repo-$application.diff"
-    echo "🛈 Diff for $repo-$application written to ./diffs/$repo-$application.diff"
+    github_api_call "https://api.github.com/repos/$org/$repo/compare/$base...$head" "application/vnd.github.v3.diff" > "$SCRIPT_DIR/diffs/$repo-$application.diff"
+    echo "🛈 Diff for $repo-$application written to $SCRIPT_DIR/diffs/$repo-$application.diff"
 done <<< "$revision_diffs"
