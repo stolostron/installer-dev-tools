@@ -150,13 +150,20 @@ fi
 
 debug_echo "Collecting catalog contents"
 if [ "$skip_opm_render" = false ]; then
+    echo "🛈 Rendering $application_part-dev-catalog:$older_tag"
     opm render quay.io/acm-d/$application_part-dev-catalog:$older_tag --migrate -oyaml > older.cs.yaml
+
+    echo "🛈 Rendering $application_part-dev-catalog:$newer_tag"
     opm render quay.io/acm-d/$application_part-dev-catalog:$newer_tag --migrate -oyaml > newer.cs.yaml
 fi
 
 image_diffs=$(paste <(bat older.cs.yaml | yq "select(.name==\"$csv_name\") | .relatedImages[].image") <(bat newer.cs.yaml | yq "select(.name==\"$csv_name\") | .relatedImages[].image") | awk '$1 != $2')
 
-debug_echo "$image_diffs"
+if [[ -n $image_diffs ]]; then
+  echo "🛈 Component images changed between provided tags:"
+  echo "$image_diffs" | awk '$1 !~ /operator-bundle/ {print $1}' | cut -d'/' -f3 | cut -d'@' -f1 | awk '{print "-", $1}'
+  echo ""
+fi
 
 while IFS= read -r line; do
   parts=($line)
