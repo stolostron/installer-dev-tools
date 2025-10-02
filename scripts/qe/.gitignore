@@ -6,3 +6,5 @@ latest-acm.txt
 latest-mce.txt
 diff-acm.txt
 diff-mce.txt
+cache/
+diffs/
