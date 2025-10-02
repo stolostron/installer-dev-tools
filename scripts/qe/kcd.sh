@@ -4,11 +4,75 @@ exec 3>&1
 # Cache for gen_config to avoid repeated fetches
 declare -g gen_config_cache=""
 
-snapshot="release-acm-214-czrhh"
-tag="2.14.1-DOWNSTREAM-2025-09-29-02-19-47"
-version="acm-2.14.1"
+# Initialize arrays and variables
+tags=()
+snapshots=()
+version=""
+debug=false
 
-echo "Snapshot: $snapshot"
+# Parse command line arguments
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        -v|--semantic-version)
+            version="$2"
+            shift 2
+            ;;
+        -t|--tag)
+            tags+=("$2")
+            shift 2
+            ;;
+        -s|--snapshot)
+            snapshots+=("$2")
+            shift 2
+            ;;
+        --debug)
+            debug=true
+            shift
+            ;;
+        *)
+            echo "Unknown option: $1"
+            exit 1
+            ;;
+    esac
+done
+
+# Validate inputs
+if [ -z "$version" ]; then
+    echo "Error: --semantic-version is required"
+    exit 1
+fi
+
+# Validate tag/snapshot combinations
+total_inputs=$((${#tags[@]} + ${#snapshots[@]}))
+if [ $total_inputs -ne 2 ]; then
+    echo "Error: Exactly 2 inputs required (tags and/or snapshots combined)"
+    exit 1
+fi
+
+# Valid combinations: 2 tags, 2 snapshots, or 1 tag + 1 snapshot
+if [ ${#tags[@]} -eq 2 ] && [ ${#snapshots[@]} -eq 0 ]; then
+    # Two tags
+    tag_a="${tags[0]}"
+    tag_b="${tags[1]}"
+    # snapshot=""
+elif [ ${#tags[@]} -eq 0 ] && [ ${#snapshots[@]} -eq 2 ]; then
+    # Two snapshots
+    snapshot_a="${snapshots[0]}"
+    snapshot_b="${snapshots[1]}"
+elif [ ${#tags[@]} -eq 1 ] && [ ${#snapshots[@]} -eq 1 ]; then
+    # One tag and one snapshot
+    tag_a="${tags[0]}"
+    snapshot_b="${snapshots[0]}"
+else
+    echo "Error: Invalid combination. Must be either: 2 tags, 2 snapshots, or 1 tag + 1 snapshot"
+    exit 1
+fi
+
+tag="2.14.1-DOWNSTREAM-2025-09-29-02-19-47"
+
+# echo "Snapshot: $snapshot"
+echo "Tag A: $tag_a"
+echo "Tag B: $tag_b"
 echo "Tag: $tag"
 echo "Version: $version"
 
@@ -49,12 +113,14 @@ if [ -f "authorization.txt" ]; then
 	echo "Authorization found. Applying to github API requests"
 fi
 
+tag_a_images=$(cat older.cs.yaml | yq "select(.name==\"$csv_name\") | .relatedImages[].image")
+tag_b_images=$(cat newer.cs.yaml | yq "select(.name==\"$csv_name\") | .relatedImages[].image")
 tag_images=$(cat older.cs.yaml | yq "select(.name==\"$csv_name\") | .relatedImages[].image")
-snapshot_cache=$(oc get snapshot release-acm-214-czrhh -oyaml)
-snapshot_images=$(echo "$snapshot_cache" | yq '.spec.components[].containerImage')
+# snapshot_cache=$(oc get snapshot release-acm-214-czrhh -oyaml)
+# snapshot_images=$(echo "$snapshot_cache" | yq '.spec.components[].containerImage')
+latest_snapshot_cache=$(curl -Ls "$latest_snapshot_url")
 
 
-debug=false
 # Debug output function
 debug_echo() {
   if [ "$debug" = true ]; then
@@ -136,47 +202,90 @@ function calculate_konflux_image() {
 }
 
 # grab all the tag images (from the csv), and calculate what the konflux image would be
+konflux_images_from_tag_a=$(echo "$tag_a_images" | while read img; do
+    result=$(calculate_konflux_image "$img")
+    echo "${result:-__EMPTY__}"
+done | awk '$1 != "__EMPTY__"')
+
+konflux_images_from_tag_b=$(echo "$tag_b_images" | while read img; do
+    result=$(calculate_konflux_image "$img")
+    echo "${result:-__EMPTY__}"
+done | awk '$1 != "__EMPTY__"')
+
 konflux_images_from_csv=$(echo "$tag_images" | while read img; do
     result=$(calculate_konflux_image "$img")
     echo "${result:-__EMPTY__}"
 done | awk '$1 != "__EMPTY__"')
 
 
+# image_diffs has the tag_a images on the left and the tag_b images on the right
+image_diffs=$(paste <(echo "$konflux_images_from_tag_a" | sort) <(echo "$konflux_images_from_tag_b" | sort) | awk '$1 != $2')
 # image_diffs has the tag images on the left and the images pulled from the actual snapshot yaml on the right
-image_diffs=$(paste <(echo "$konflux_images_from_csv" | sort) <(echo "$snapshot_images" | cut -d'/' -f4 | sort) | awk '$1 != $2')
+# image_diffs=$(paste <(echo "$konflux_images_from_csv" | sort) <(echo "$snapshot_images" | cut -d'/' -f4 | sort) | awk '$1 != $2')
 
 debug_echo "--- Image Diffs ---"
 debug_echo "$image_diffs"
 debug_echo ""
 
-# Get revisions from the CSV images
-debug_echo "--- Revisions From CSV ---"
-revisions_from_csv=$(echo "$image_diffs" | awk '{print $1}' | while read img; do
+# Get revisions from tag_a images
+debug_echo "--- Revisions From Tag A ---"
+revisions_from_tag_a=$(echo "$image_diffs" | awk '{print $1}' | while read img; do
     result=$(get_revision_for_image "$img")
     echo "${result:-__NOT_FOUND__}"
 done)
 
-# Get revisions from the Snapshot images
-revisions_from_snapshot=$(echo "$image_diffs" | awk '{print $2}' | while read img; do
-    result=$(echo "$snapshot_cache" | yq ".spec.components[] | select(.containerImage | contains(\"$img\")).source.git.revision")
+# Get revisions from tag_b images
+debug_echo "--- Revisions From Tag B ---"
+revisions_from_tag_b=$(echo "$image_diffs" | awk '{print $2}' | while read img; do
+    result=$(get_revision_for_image "$img")
+    echo "${result:-__NOT_FOUND__}"
+done)
+
+# Get the git URL from the latest snapshot
+url_from_tag_b=$(echo "$image_diffs" | awk '{print $2}' | while read img; do
+    img_name=$(echo "$img" | cut -d'@' -f1)
+    result=$(echo "$latest_snapshot_cache" | yq ".spec.components[] | select(.containerImage | contains(\"$img_name\")).source.git.url")
     echo "$result"
 done)
+
+# Get revisions from the CSV images
+# debug_echo "--- Revisions From CSV ---"
+# revisions_from_csv=$(echo "$image_diffs" | awk '{print $1}' | while read img; do
+#     result=$(get_revision_for_image "$img")
+#     echo "${result:-__NOT_FOUND__}"
+# done)
+
+# Get revisions from the Snapshot images
+# revisions_from_snapshot=$(echo "$image_diffs" | awk '{print $2}' | while read img; do
+#     result=$(echo "$snapshot_cache" | yq ".spec.components[] | select(.containerImage | contains(\"$img\")).source.git.revision")
+#     echo "$result"
+# done)
 
 # get the URL from the snapshot
-url_from_snapshot=$(echo "$image_diffs" | awk '{print $2}' | while read img; do
-    result=$(echo "$snapshot_cache" | yq ".spec.components[] | select(.containerImage | contains(\"$img\")).source.git.url")
-    echo "$result"
-done)
+# url_from_snapshot=$(echo "$image_diffs" | awk '{print $2}' | while read img; do
+#     result=$(echo "$snapshot_cache" | yq ".spec.components[] | select(.containerImage | contains(\"$img\")).source.git.url")
+#     echo "$result"
+# done)
 
-debug_echo "--- Revisions from CSV ---"
-debug_echo "$revisions_from_csv"
+debug_echo "--- Revisions from Tag A ---"
+debug_echo "$revisions_from_tag_a"
 debug_echo ""
 
-debug_echo "--- Revisions from Snapshot ---"
-debug_echo "$revisions_from_snapshot"
+debug_echo "--- Revisions from Tag B ---"
+debug_echo "$revisions_from_tag_b"
 debug_echo ""
 
-revision_diffs=$(paste <(echo "$url_from_snapshot") <(echo "$revisions_from_csv") <(echo "$revisions_from_snapshot"))
+revision_diffs=$(paste <(echo "$url_from_tag_b") <(echo "$revisions_from_tag_a") <(echo "$revisions_from_tag_b"))
+
+# debug_echo "--- Revisions from CSV ---"
+# debug_echo "$revisions_from_csv"
+# debug_echo ""
+
+# debug_echo "--- Revisions from Snapshot ---"
+# debug_echo "$revisions_from_snapshot"
+# debug_echo ""
+
+# revision_diffs=$(paste <(echo "$url_from_snapshot") <(echo "$revisions_from_csv") <(echo "$revisions_from_snapshot"))
 
 debug_echo "--- Revision Diffs ---"
 debug_echo "$revision_diffs"
