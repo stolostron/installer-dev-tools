@@ -111,6 +111,15 @@ if [[ ! "$oc_project_output" == *"Using project \"crt-redhat-acm-tenant\""* ]]; 
 fi
 echo "Verified: In correct OpenShift project (crt-redhat-acm-tenant)"
 
+# Check that we're logged into quay.io
+echo "Checking quay.io login..."
+if ! podman login --get-login quay.io &>/dev/null; then
+    echo "Error: Not logged into quay.io"
+    echo "Please run: podman login quay.io"
+    exit 1
+fi
+echo "Verified: Logged into quay.io"
+
 # Validate inputs
 if [ -z "$version" ]; then
     echo "Error: --semantic-version is required"
