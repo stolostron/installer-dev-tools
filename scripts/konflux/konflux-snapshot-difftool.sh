@@ -406,6 +406,7 @@ while read -r url revision_a revision_b; do
 
     # Check which revision is ahead
     compare_json=$(github_api_call "https://api.github.com/repos/$org/$repo/compare/$revision_a...$revision_b")
+    
     status=$(echo "$compare_json" | jq -r '.status')
 
     if [[ "$status" == "ahead" ]]; then
@@ -422,6 +423,12 @@ while read -r url revision_a revision_b; do
         continue
     fi
 
-    github_api_call "https://api.github.com/repos/$org/$repo/compare/$base...$head" "application/vnd.github.v3.diff" > "$SCRIPT_DIR/diffs/$repo-$application.diff"
+    echo "Repo: $url" > "$SCRIPT_DIR/diffs/$repo-$application.diff"
+    echo "Base Commit: $base" >> "$SCRIPT_DIR/diffs/$repo-$application.diff"
+    echo "New Commits:" >> "$SCRIPT_DIR/diffs/$repo-$application.diff"
+    echo "$compare_json" | yq -p=json '.commits[] | .sha' | awk '{print "+", $1}' >> "$SCRIPT_DIR/diffs/$repo-$application.diff"
+    echo "" >> "$SCRIPT_DIR/diffs/$repo-$application.diff"
+
+    github_api_call "https://api.github.com/repos/$org/$repo/compare/$base...$head" "application/vnd.github.v3.diff" >> "$SCRIPT_DIR/diffs/$repo-$application.diff"
     echo "🛈 Diff for $repo-$application written to $SCRIPT_DIR/diffs/$repo-$application.diff"
 done <<< "$revision_diffs"

@@ -1,3 +1,5 @@
 authorization.txt
 data/
 logs/
+diffs/
+cache/
