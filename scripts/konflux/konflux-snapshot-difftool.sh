@@ -100,6 +100,17 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
+# Check that we're in the correct OpenShift project
+echo "Checking OpenShift project..."
+oc_project_output=$(oc project 2>&1)
+if [[ ! "$oc_project_output" == *"Using project \"crt-redhat-acm-tenant\""* ]]; then
+    echo "Error: Not in the correct OpenShift project."
+    echo "Expected: Using project \"crt-redhat-acm-tenant\""
+    echo "Got: $oc_project_output"
+    exit 1
+fi
+echo "Verified: In correct OpenShift project (crt-redhat-acm-tenant)"
+
 # Validate inputs
 if [ -z "$version" ]; then
     echo "Error: --semantic-version is required"
