@@ -185,9 +185,9 @@ debug_echo "Minor Version: $minor_version"
 debug_echo "Patch Version: $patch_version"
 
 if [ "$application_part" = "acm" ]; then
-  csv_name="advanced-cluster-management.v$version_number*"
+  csv_name="advanced-cluster-management.v$version_number"
 else
-  csv_name="multicluster-engine.v$version_number*"
+  csv_name="multicluster-engine.v$version_number"
 fi
 
 debug_echo "CSV Name: $csv_name"
@@ -207,7 +207,7 @@ if [ -n "$tag_a" ]; then
     else
         echo "🛈 Using cached $tag_a_file"
     fi
-    tag_a_images=$(cat "$tag_a_file" | yq "select(.name==\"$csv_name\") | .relatedImages[].image")
+    tag_a_images=$(cat "$tag_a_file" | yq "select(.name | contains(\"$csv_name\")) | .relatedImages[].image")
 fi
 
 if [ -n "$tag_b" ]; then
@@ -218,7 +218,7 @@ if [ -n "$tag_b" ]; then
     else
         echo "🛈 Using cached $tag_b_file"
     fi
-    tag_b_images=$(cat "$tag_b_file" | yq "select(.name==\"$csv_name\") | .relatedImages[].image")
+    tag_b_images=$(cat "$tag_b_file" | yq "select(.name | contains(\"$csv_name\")) | .relatedImages[].image")
 fi
 
 if [ -n "$snapshot_a" ]; then
@@ -255,7 +255,7 @@ function get_gen_config() {
 
 function get_konflux_component_name() {
   local publish_name="$1"
-  get_gen_config "$application_part" "$snapshot_branch" | yq -p=json ".product-images.image-list[] | select(.publish-name == \"$publish_name\") | .konflux-component-name"
+  get_gen_config "$application_part" "$snapshot_branch" | yq ".product-images.image-list[] | select(.publish-name == \"$publish_name\") | .konflux-component-name"
 }
 
 function get_revision_for_image {
@@ -446,7 +446,7 @@ while read -r url revision_a revision_b; do
     echo "Repo: $url" > "$SCRIPT_DIR/diffs/$repo-$application.diff"
     echo "Base Commit: $base" >> "$SCRIPT_DIR/diffs/$repo-$application.diff"
     echo "New Commits:" >> "$SCRIPT_DIR/diffs/$repo-$application.diff"
-    echo "$compare_json" | yq -p=json '.commits[] | .sha' | awk '{print "+", $1}' >> "$SCRIPT_DIR/diffs/$repo-$application.diff"
+    echo "$compare_json" | yq '.commits[] | .sha' | awk '{print "+", $1}' >> "$SCRIPT_DIR/diffs/$repo-$application.diff"
     echo "" >> "$SCRIPT_DIR/diffs/$repo-$application.diff"
 
     github_api_call "https://api.github.com/repos/$org/$repo/compare/$base...$head" "application/vnd.github.v3.diff" >> "$SCRIPT_DIR/diffs/$repo-$application.diff"
