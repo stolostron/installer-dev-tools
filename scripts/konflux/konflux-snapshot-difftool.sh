@@ -458,11 +458,16 @@ while read -r url revision_a revision_b; do
     fi
 
     echo "Repo: $url" > "$SCRIPT_DIR/diffs/$repo-$application.diff"
+    echo "Diff: https://github.com/$org/$repo/compare/$base..$head" >> "$SCRIPT_DIR/diffs/$repo-$application.diff"
     echo "Base Commit: $base" >> "$SCRIPT_DIR/diffs/$repo-$application.diff"
     echo "New Commits:" >> "$SCRIPT_DIR/diffs/$repo-$application.diff"
     echo "$compare_json" | yq '.commits[] | .sha' | awk '{print "+", $1}' >> "$SCRIPT_DIR/diffs/$repo-$application.diff"
     echo "" >> "$SCRIPT_DIR/diffs/$repo-$application.diff"
 
     github_api_call "https://api.github.com/repos/$org/$repo/compare/$base...$head" "application/vnd.github.v3.diff" >> "$SCRIPT_DIR/diffs/$repo-$application.diff"
-    echo "🛈 Diff for $repo-$application written to $SCRIPT_DIR/diffs/$repo-$application.diff"
+
+    echo "┌─── $org/$repo"
+    echo "├── https://github.com/$org/$repo/compare/$base..$head"
+    echo "└── Diff for $repo-$application written to $SCRIPT_DIR/diffs/$repo-$application.diff"
+    # echo "🛈 Diff for $repo-$application written to $SCRIPT_DIR/diffs/$repo-$application.diff"
 done <<< "$revision_diffs"
