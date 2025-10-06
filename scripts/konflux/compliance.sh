@@ -60,6 +60,17 @@ if [[ "$show_help" == "true" ]] || [[ -z "$application" ]]; then
     exit 0
 fi
 
+# Check that we're in the correct OpenShift project
+echo "Checking OpenShift project..."
+oc_project_output=$(oc project 2>&1)
+if [[ ! "$oc_project_output" == *"Using project \"crt-redhat-acm-tenant\""* ]]; then
+    echo "Error: Not in the correct OpenShift project."
+    echo "Expected: Using project \"crt-redhat-acm-tenant\""
+    echo "Got: $oc_project_output"
+    exit 1
+fi
+echo "Verified: In correct OpenShift project (crt-redhat-acm-tenant)"
+
 mkdir -p data
 compliancefile="data/$application-compliance.csv"
 > $compliancefile
