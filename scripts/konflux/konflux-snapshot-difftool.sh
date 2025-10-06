@@ -100,6 +100,8 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
+auth_check_failures=0
+
 authorization=""
 if [ -f "$SCRIPT_DIR/authorization.txt" ]; then
 	authorization="Authorization: Bearer $(cat "$SCRIPT_DIR/authorization.txt")"
@@ -108,7 +110,7 @@ else
     echo "Error: authorization.txt not found"
     echo "Please create $SCRIPT_DIR/authorization.txt with your GitHub token"
     echo "github.com > settings > developer settings > personal access tokens > fine-grained personal access tokens"
-    exit 1
+    ((auth_check_failures++))
 fi
 
 # Check that we're in the correct OpenShift project
@@ -118,18 +120,25 @@ if [[ ! "$oc_project_output" == *"Using project \"crt-redhat-acm-tenant\""* ]]; 
     echo "Error: Not in the correct OpenShift project."
     echo "Expected: Using project \"crt-redhat-acm-tenant\""
     echo "Got: $oc_project_output"
-    exit 1
+    ((auth_check_failures++))
+else
+    echo "Verified: Correct OpenShift project selected (crt-redhat-acm-tenant)"
 fi
-echo "Verified: In correct OpenShift project (crt-redhat-acm-tenant)"
 
 # Check that we're logged into quay.io
 echo "Checking quay.io login..."
 if ! podman login --get-login quay.io &>/dev/null; then
     echo "Error: Not logged into quay.io"
     echo "Please run: podman login quay.io"
+    ((auth_check_failures++))
+else
+    echo "Verified: Logged into quay.io"
+fi
+
+# Exit if any auth checks failed
+if [ $auth_check_failures -ne 0 ]; then
     exit 1
 fi
-echo "Verified: Logged into quay.io"
 
 # Validate inputs
 if [ -z "$version" ]; then
