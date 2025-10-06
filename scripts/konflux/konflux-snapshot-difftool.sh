@@ -100,6 +100,26 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
+# Check that we're in the correct OpenShift project
+echo "Checking OpenShift project..."
+oc_project_output=$(oc project 2>&1)
+if [[ ! "$oc_project_output" == *"Using project \"crt-redhat-acm-tenant\""* ]]; then
+    echo "Error: Not in the correct OpenShift project."
+    echo "Expected: Using project \"crt-redhat-acm-tenant\""
+    echo "Got: $oc_project_output"
+    exit 1
+fi
+echo "Verified: In correct OpenShift project (crt-redhat-acm-tenant)"
+
+# Check that we're logged into quay.io
+echo "Checking quay.io login..."
+if ! podman login --get-login quay.io &>/dev/null; then
+    echo "Error: Not logged into quay.io"
+    echo "Please run: podman login quay.io"
+    exit 1
+fi
+echo "Verified: Logged into quay.io"
+
 # Validate inputs
 if [ -z "$version" ]; then
     echo "Error: --semantic-version is required"
@@ -165,9 +185,9 @@ debug_echo "Minor Version: $minor_version"
 debug_echo "Patch Version: $patch_version"
 
 if [ "$application_part" = "acm" ]; then
-  csv_name="advanced-cluster-management.v$version_number*"
+  csv_name="advanced-cluster-management.v$version_number"
 else
-  csv_name="multicluster-engine.v$version_number*"
+  csv_name="multicluster-engine.v$version_number"
 fi
 
 debug_echo "CSV Name: $csv_name"
@@ -187,7 +207,7 @@ if [ -n "$tag_a" ]; then
     else
         echo "🛈 Using cached $tag_a_file"
     fi
-    tag_a_images=$(cat "$tag_a_file" | yq "select(.name==\"$csv_name\") | .relatedImages[].image")
+    tag_a_images=$(cat "$tag_a_file" | yq "select(.name | contains(\"$csv_name\")) | .relatedImages[].image")
 fi
 
 if [ -n "$tag_b" ]; then
@@ -198,7 +218,7 @@ if [ -n "$tag_b" ]; then
     else
         echo "🛈 Using cached $tag_b_file"
     fi
-    tag_b_images=$(cat "$tag_b_file" | yq "select(.name==\"$csv_name\") | .relatedImages[].image")
+    tag_b_images=$(cat "$tag_b_file" | yq "select(.name | contains(\"$csv_name\")) | .relatedImages[].image")
 fi
 
 if [ -n "$snapshot_a" ]; then
@@ -235,7 +255,7 @@ function get_gen_config() {
 
 function get_konflux_component_name() {
   local publish_name="$1"
-  get_gen_config "$application_part" "$snapshot_branch" | yq -p=json ".product-images.image-list[] | select(.publish-name == \"$publish_name\") | .konflux-component-name"
+  get_gen_config "$application_part" "$snapshot_branch" | yq ".product-images.image-list[] | select(.publish-name == \"$publish_name\") | .konflux-component-name"
 }
 
 function get_revision_for_image {
@@ -406,6 +426,7 @@ while read -r url revision_a revision_b; do
 
     # Check which revision is ahead
     compare_json=$(github_api_call "https://api.github.com/repos/$org/$repo/compare/$revision_a...$revision_b")
+    
     status=$(echo "$compare_json" | jq -r '.status')
 
     if [[ "$status" == "ahead" ]]; then
@@ -422,6 +443,12 @@ while read -r url revision_a revision_b; do
         continue
     fi
 
-    github_api_call "https://api.github.com/repos/$org/$repo/compare/$base...$head" "application/vnd.github.v3.diff" > "$SCRIPT_DIR/diffs/$repo-$application.diff"
+    echo "Repo: $url" > "$SCRIPT_DIR/diffs/$repo-$application.diff"
+    echo "Base Commit: $base" >> "$SCRIPT_DIR/diffs/$repo-$application.diff"
+    echo "New Commits:" >> "$SCRIPT_DIR/diffs/$repo-$application.diff"
+    echo "$compare_json" | yq '.commits[] | .sha' | awk '{print "+", $1}' >> "$SCRIPT_DIR/diffs/$repo-$application.diff"
+    echo "" >> "$SCRIPT_DIR/diffs/$repo-$application.diff"
+
+    github_api_call "https://api.github.com/repos/$org/$repo/compare/$base...$head" "application/vnd.github.v3.diff" >> "$SCRIPT_DIR/diffs/$repo-$application.diff"
     echo "🛈 Diff for $repo-$application written to $SCRIPT_DIR/diffs/$repo-$application.diff"
 done <<< "$revision_diffs"
