@@ -108,6 +108,7 @@ else
     echo "Error: authorization.txt not found"
     echo "Please create $SCRIPT_DIR/authorization.txt with your GitHub token"
     echo "github.com > settings > developer settings > personal access tokens > fine-grained personal access tokens"
+    exit 1
 fi
 
 # Check that we're in the correct OpenShift project
