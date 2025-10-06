@@ -2,7 +2,7 @@
 # Set up file descriptor 3 for output messages
 exec 3>&1
 # Cache for gen_config to avoid repeated fetches
-declare -g gen_config_cache=""
+declare gen_config_cache=""
 
 # Get script directory
 SCRIPT_DIR="$(cd "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
@@ -100,6 +100,16 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
+authorization=""
+if [ -f "$SCRIPT_DIR/authorization.txt" ]; then
+	authorization="Authorization: Bearer $(cat "$SCRIPT_DIR/authorization.txt")"
+	echo "🛈 Authorization found. Applying to github API requests"
+else
+    echo "Error: authorization.txt not found"
+    echo "Please create $SCRIPT_DIR/authorization.txt with your GitHub token"
+    echo "github.com > settings > developer settings > personal access tokens > fine-grained personal access tokens"
+fi
+
 # Check that we're in the correct OpenShift project
 echo "Checking OpenShift project..."
 oc_project_output=$(oc project 2>&1)
@@ -192,16 +202,10 @@ fi
 
 debug_echo "CSV Name: $csv_name"
 
-authorization=""
-if [ -f "$SCRIPT_DIR/authorization.txt" ]; then
-	authorization="Authorization: Bearer $(cat "$SCRIPT_DIR/authorization.txt")"
-	echo "🛈 Authorization found. Applying to github API requests"
-fi
-
 # Load images based on input type
 if [ -n "$tag_a" ]; then
     tag_a_file="$SCRIPT_DIR/cache/${tag_a}.cs.yaml"
-    if [ "$force_opm_render" = true ] || [ ! -f "$tag_a_file" ]; then
+    if [ "$force_opm_render" = true ] || [ ! -f "$tag_a_file" ] || [ ! -s "$tag_a_file" ]; then
         echo "🛈 Rendering $application_part-dev-catalog:$tag_a"
         opm render quay.io/acm-d/$application_part-dev-catalog:$tag_a --migrate -oyaml > "$tag_a_file"
     else
@@ -212,7 +216,7 @@ fi
 
 if [ -n "$tag_b" ]; then
     tag_b_file="$SCRIPT_DIR/cache/${tag_b}.cs.yaml"
-    if [ "$force_opm_render" = true ] || [ ! -f "$tag_b_file" ]; then
+    if [ "$force_opm_render" = true ] || [ ! -f "$tag_b_file" ] || [ ! -s "$tag_b_file" ]; then
         echo "🛈 Rendering $application_part-dev-catalog:$tag_b"
         opm render quay.io/acm-d/$application_part-dev-catalog:$tag_b --migrate -oyaml > "$tag_b_file"
     else
