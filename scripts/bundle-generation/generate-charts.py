@@ -983,12 +983,13 @@ def update_helm_resources(chartName, helmChart, skip_rbac_overrides, exclusions,
                     if kind == "ClusterRoleBinding":
                         resource_data = replace_default(resource_data, 'PLACEHOLDER_NAMESPACE', '{{ .Values.global.namespace }}')
                     if kind == "ClusterRole":
-                        resource_data['metadata']['name'] = 'flightctl-api-{{ .Values.global.namespace }}'
+                        resource_data = replace_default(resource_data, 'PLACEHOLDER_NAMESPACE', '{{ .Values.global.namespace }}')
 
                     if kind == "NetworkPolicy":
-                        resource_data = replace_default(resource_data, '{{ .Release.Namespace }}', '{{ .Values.global.namespace }}')
+                        resource_data['metadata']['namespace'] = '{{ .Values.global.namespace }}'
+                        resource_data = replace_default(resource_data, 'PLACEHOLDER_NAMESPACE', '{{ .Values.global.namespace }}')
                     if kind == "Job":
-                        resource_data = replace_default(resource_data, '{{ .Release.Namespace }}', '{{ .Values.global.namespace }}')
+                        resource_data = replace_default(resource_data, 'PLACEHOLDER_NAMESPACE', '{{ .Values.global.namespace }}')
 
                 if chartName != "managed-serviceaccount":
                     if kind == "ClusterRoleBinding" or kind == "RoleBinding":
