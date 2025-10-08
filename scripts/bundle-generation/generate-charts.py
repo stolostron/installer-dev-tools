@@ -981,10 +981,9 @@ def update_helm_resources(chartName, helmChart, skip_rbac_overrides, exclusions,
                         resource_data['data'] = replace_default(resource_data['data'], 'PLACEHOLDER_NAMESPACE', '{{ .Values.global.namespace }}')
                 
                     if kind == "ClusterRoleBinding":
-                        resource_data['metadata']['name'] = 'flightctl-api-{{ .Values.global.namespace }}'
-                        resource_data['roleRef']['name'] = 'flightctl-api-{{ .Values.global.namespace }}'
+                        resource_data = replace_default(resource_data, 'PLACEHOLDER_NAMESPACE', '{{ .Values.global.namespace }}')
                     if kind == "ClusterRole":
-                        resource_data['metadata']['name'] = 'flightctl-api-{{ .Values.global.namespace }}'
+                        resource_data = replace_default(resource_data, 'PLACEHOLDER_NAMESPACE', '{{ .Values.global.namespace }}')
 
                     if kind == "NetworkPolicy":
                         resource_data['metadata']['namespace'] = '{{ .Values.global.namespace }}'
