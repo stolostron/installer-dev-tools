@@ -88,7 +88,10 @@ if [ -f "authorization.txt" ]; then
 	echo "Authorization found. Applying to github API requests"
 fi
 
-if [[ "$OS" == "Darwin" && "$ARCH" == "arm64" ]]; then
+# Detect macOS ARM64 for skopeo platform override
+detected_os=$(uname -s)
+detected_arch=$(uname -m)
+if [[ "$detected_os" == "Darwin" && "$detected_arch" == "arm64" ]]; then
     echo "Detected macOS ARM64. Adding skopeo platform override."
     skopeo_mac_args="--override-arch amd64 --override-os linux"
 fi
@@ -395,8 +398,8 @@ for line in $components; do
 
     # Retrigger component if build failed and --retrigger flag is set
     if [[ "$retrigger" == "true" ]]; then
-        # Check if component has any failures (Push Failure or Failed status)
-        if echo "$data" | grep -q "Failed\|Push Failure"; then
+        # Check if component has any failures (Push Failure or actual Failed status, but not Successful)
+        if echo "$data" | grep -qE "(^|,)(Failed|Push Failure|IMAGE_PULL_FAILURE|INSPECTION_FAILURE|DIGEST_FAILURE|Not Enabled|Not Compliant)(,|$)"; then
             echo "🔄 Retriggering component: $line" >&3
             kubectl annotate components/$line build.appstudio.openshift.io/request=trigger-pac-build --overwrite
             if [ $? -eq 0 ]; then
