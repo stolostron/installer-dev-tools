@@ -14,12 +14,14 @@ ARGUMENTS:
 OPTIONS:
     --debug=<component>   Run against a specific Konflux component only
     --debug               Enable debug logging output
+    --retrigger           Retrigger failed components automatically
     -h, --help            Show this help message
 
 EXAMPLES:
     compliance.sh acm-215
     compliance.sh --debug=my-component acm-215
     compliance.sh --debug acm-215
+    compliance.sh --retrigger acm-215
 EOF
 }
 
@@ -32,6 +34,10 @@ while [[ $# -gt 0 ]]; do
             ;;
         --debug)
             debug=true
+            shift
+            ;;
+        --retrigger)
+            retrigger=true
             shift
             ;;
         -h|--help)
@@ -386,4 +392,18 @@ for line in $components; do
     echo ""
 
     echo "$data" >> $compliancefile
+
+    # Retrigger component if build failed and --retrigger flag is set
+    if [[ "$retrigger" == "true" ]]; then
+        # Check if component has any failures (Push Failure or Failed status)
+        if echo "$data" | grep -q "Failed\|Push Failure"; then
+            echo "🔄 Retriggering component: $line" >&3
+            kubectl annotate components/$line build.appstudio.openshift.io/request=trigger-pac-build --overwrite
+            if [ $? -eq 0 ]; then
+                echo "✅ Successfully triggered rebuild for $line" >&3
+            else
+                echo "❌ Failed to trigger rebuild for $line" >&3
+            fi
+        fi
+    fi
 done
