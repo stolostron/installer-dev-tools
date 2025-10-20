@@ -871,7 +871,7 @@ def update_helm_resources(chartName, helmChart, skip_rbac_overrides, exclusions,
     resource_kinds = [
         "AddOnTemplate", "ClusterManagementAddOn", "ClusterRole", "ClusterRoleBinding", "ConfigMap", "Deployment", "ManagedClusterSetBinding", "MutatingWebhookConfiguration",
         "NetworkPolicy", "PersistentVolumeClaim", "Placement", "RoleBinding", "Role", "Route", "Secret", "Service", "StatefulSet",
-        "ValidatingWebhookConfiguration", "Job", "ConsolePlugin"
+        "ValidatingWebhookConfiguration", "Job", "ConsolePlugin", "Certificate"
     ]
 
     namespace_scoped_kinds = [
