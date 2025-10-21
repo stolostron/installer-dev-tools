@@ -38,7 +38,9 @@ Input Arguments (exactly 2 required):
 
 Optional Arguments:
   --force-opm-render                Force re-rendering of catalog YAML files (default: use cached)
+  --history-depth DEPTH             Number of commits to search when looking up revisions (default: 30)
   --debug                           Enable debug output
+  --debug=COMPONENT                 Enable debug output and filter to specific component (e.g., multiclusterhub-operator)
   -h, --help                        Show this help message
 
 Examples:
@@ -62,7 +64,9 @@ tags=()
 snapshots=()
 version=""
 debug=false
+debug_component=""
 force_opm_render=false
+history_depth=30
 
 # Parse command line arguments
 while [[ $# -gt 0 ]]; do
@@ -79,8 +83,17 @@ while [[ $# -gt 0 ]]; do
             snapshots+=("$2")
             shift 2
             ;;
+        --history-depth)
+            history_depth="$2"
+            shift 2
+            ;;
         --debug)
             debug=true
+            shift
+            ;;
+        --debug=*)
+            debug=true
+            debug_component="${1#*=}"
             shift
             ;;
         --force-opm-render)
@@ -280,7 +293,7 @@ function get_revision_for_image {
   debug_echo "Looking up revision for image: $image"
 
   # Get commit history for latest-snapshot.yaml
-  local commits_url="https://api.github.com/repos/$repo_owner/$repo_name/commits?path=latest-snapshot.yaml&sha=$snapshot_branch"
+  local commits_url="https://api.github.com/repos/$repo_owner/$repo_name/commits?path=latest-snapshot.yaml&sha=$snapshot_branch&per_page=$history_depth"
   local commits=$(github_api_call "$commits_url")
 
   # Check each commit until we find the image
@@ -350,6 +363,11 @@ fi
 
 # Compare images
 image_diffs=$(paste <(echo "$images_a" | sort) <(echo "$images_b" | sort) | awk '$1 != $2')
+
+# Filter image diffs if debug component is specified
+if [[ -n "$debug_component" ]]; then
+    image_diffs=$(echo "$image_diffs" | grep -E "^$debug_component-")
+fi
 
 debug_echo "--- Image Diffs ---"
 debug_echo "$image_diffs"
@@ -437,6 +455,12 @@ debug_echo ""
 while read -r url revision_a revision_b; do
     org=$(echo "$url" | cut -d'/' -f4)
     repo=$(echo "$url" | cut -d'/' -f5)
+
+    # Check if either revision was not found
+    if [[ "$revision_a" == "__NOT_FOUND__" ]] || [[ "$revision_b" == "__NOT_FOUND__" ]]; then
+        echo "⚠ Skipping $repo-$application: Revision not found in last $history_depth commits. Try increasing --history-depth"
+        continue
+    fi
 
     # Check which revision is ahead
     compare_json=$(github_api_call "https://api.github.com/repos/$org/$repo/compare/$revision_a...$revision_b")
