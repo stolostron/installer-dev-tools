@@ -223,13 +223,14 @@ function print_pr_testability {
 	local number=$(basename $pr_url)
 	local repo=$(basename $(dirname $(dirname $pr_url)))
 	local org=$(basename $(dirname $(dirname $(dirname $pr_url))))
-    local published_sha=$2
+  local published_sha=$2
+  local branch=$3
 
-    debug_echo "Testing PR testability of $pr_url"
-    debug_echo "Repo: $repo"
-    debug_echo "Org: $org"
+  debug_echo "Testing PR testability of $pr_url"
+  debug_echo "Repo: $repo"
+  debug_echo "Org: $org"
 
-	local commits="https://api.github.com/repos/$org/$repo/commits"
+	local commits="https://api.github.com/repos/$org/$repo/commits?sha=$branch"
     debug_echo "Commits url: $commits"
 	# echo $org $repo $number
 
@@ -240,14 +241,16 @@ function print_pr_testability {
 
 	# echo -e "commits: ${repo_commits["$repo"]}"
 
-	# echo "attempting to pull sha for $repo"
+	debug_echo "attempting to pull sha for $repo"
 	# echo ${repo_commits["$repo"]}
 	local pr_sha=$(echo "${repo_commits["$repo"]}" | jq -r '.[]| select(.commit.message | contains("#'$number'")) | .sha')
 
 	# echo -e "pr: $pr_sha\npublished: $published_sha"
 
 	# echo "comparing $org/$repo/pull/$number"
-    compared_shas_url="https://api.github.com/repos/$org/$repo/compare/$pr_sha...$published_sha"
+  debug_echo "Published Sha: $published_sha"
+  debug_echo "PR Sha: $pr_sha"
+  compared_shas_url="https://api.github.com/repos/$org/$repo/compare/$pr_sha...$published_sha"
     # echo "$compared_shas_url"
 	local status=$(curl -LsH "Accept: application/vnd.github+json" -H"X-GitHub-Api-Version: 2022-11-28" -H "$authorization" $compared_shas_url | jq -r '.status')
 
@@ -281,5 +284,5 @@ for pr_url in "${pr_urls[@]}"; do
   if [ "$revision" = "CSV_ERROR" ]; then
     exit 1
   fi
-  print_pr_testability "$pr_url" "$revision"
+  print_pr_testability "$pr_url" "$revision" "$branch"
 done
