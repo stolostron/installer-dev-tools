@@ -536,7 +536,7 @@ def is_version_compatible(branch, min_release_version, min_backplane_version, mi
         # Extract the version part from the branch name (e.g., '2.12-integration' -> '2.12')
         pattern = r'(\d+\.\d+)'  # Matches versions like '2.12'
 
-        if branch == "main" or branch == "master":
+        if branch == "main" or branch == "master" or branch == "k8s-charts":
             if enforce_master_check:
                 return True
             else:
@@ -871,7 +871,7 @@ def update_helm_resources(chartName, helmChart, skip_rbac_overrides, exclusions,
     resource_kinds = [
         "AddOnTemplate", "ClusterManagementAddOn", "ClusterRole", "ClusterRoleBinding", "ConfigMap", "Deployment", "ManagedClusterSetBinding", "MutatingWebhookConfiguration",
         "NetworkPolicy", "PersistentVolumeClaim", "Placement", "RoleBinding", "Role", "Route", "Secret", "Service", "StatefulSet",
-        "ValidatingWebhookConfiguration", "Job", "ConsolePlugin"
+        "ValidatingWebhookConfiguration", "Job", "ConsolePlugin", "Certificate", "Issuer"
     ]
 
     namespace_scoped_kinds = [
@@ -899,6 +899,7 @@ def update_helm_resources(chartName, helmChart, skip_rbac_overrides, exclusions,
                     resource_data = yaml.safe_load(f)
                     resource_name = resource_data['metadata'].get('name')
                     logging.info(f"Processing resource: {resource_name} from template: {template_path}")
+                resource_data = replace_default(resource_data, 'PLACEHOLDER_NAMESPACE', '{{ .Values.global.namespace }}')
 
                 if chartName == 'flight-control':
                     if kind == 'ConsolePlugin':
@@ -956,6 +957,7 @@ def update_helm_resources(chartName, helmChart, skip_rbac_overrides, exclusions,
                 # defaulting to Helm values if not specified.
                 if kind == 'PersistentVolumeClaim':
                     ensure_pvc_storage_class(resource_data, resource_name)
+                resource_data = replace_default(resource_data, 'PLACEHOLDER_NAMESPACE', '{{ .Values.global.namespace }}')
 
                 if chartName == 'flight-control':
                     if kind == 'Route':

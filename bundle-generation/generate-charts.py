@@ -515,7 +515,7 @@ def is_version_compatible(branch, min_release_version, min_backplane_version, mi
         # Extract the version part from the branch name (e.g., '2.12-integration' -> '2.12')
         pattern = r'(\d+\.\d+)'  # Matches versions like '2.12'
 
-        if branch == "main" or branch == "master":
+        if branch == "main" or branch == "master" or branch == "k8s-charts":
             if enforce_master_check:
                 return True
             else:
