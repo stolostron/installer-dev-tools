@@ -348,8 +348,8 @@ if [ -n "$tag_a" ] && [ -n "$tag_b" ]; then
 
 elif [ -n "$snapshot_a" ] && [ -n "$snapshot_b" ]; then
     # Two snapshots: extract images directly
-    images_a=$(echo "$snapshot_a_images" | cut -d'/' -f4)
-    images_b=$(echo "$snapshot_b_images" | cut -d'/' -f4)
+    images_a=$(echo "$snapshot_a_images" | xargs -n1 basename)
+    images_b=$(echo "$snapshot_b_images" | xargs -n1 basename)
 
 elif [ -n "$tag_a" ] && [ -n "$snapshot_b" ]; then
     # One tag and one snapshot: convert tag to konflux, extract snapshot
@@ -358,7 +358,7 @@ elif [ -n "$tag_a" ] && [ -n "$snapshot_b" ]; then
         echo "${result:-__EMPTY__}"
     done | awk '$1 != "__EMPTY__"')
 
-    images_b=$(echo "$snapshot_b_images" | cut -d'/' -f4)
+    images_b=$(echo "$snapshot_b_images" | xargs -n1 basename)
 fi
 
 # Compare images
