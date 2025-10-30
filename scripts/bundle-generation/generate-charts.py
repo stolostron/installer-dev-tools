@@ -978,7 +978,7 @@ def update_helm_resources(chartName, helmChart, skip_rbac_overrides, exclusions,
                                 key_data = replace_default(key_data, 'placeholder_apiurl', '{{ .Values.global.apiUrl }}')
                                 key_data = replace_default(key_data, 'placeholder_basedomain', '{{ .Values.global.baseDomain }}')
                                 updated_yaml = yaml.dump(key_data, default_flow_style=False, allow_unicode=True, width=float("inf"))
-                                  updated_yaml = re.sub(r": (?!['\"])(.*\{\{[^}]+\}\}.*?)$", r": '\1'", updated_yaml, flags=re.MULTILINE)
+                                updated_yaml = re.sub(r": (?!['\"])(.*\{\{[^}]+\}\}.*?)$", r": '\1'", updated_yaml, flags=re.MULTILINE)
                                 config_data[key] = updated_yaml
                                 resource_data['data'] = config_data
                         resource_data['data'] = replace_default(resource_data['data'], 'PLACEHOLDER_NAMESPACE', '{{ .Values.global.namespace }}')
