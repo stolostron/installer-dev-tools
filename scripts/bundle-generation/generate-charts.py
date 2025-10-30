@@ -957,7 +957,7 @@ def update_helm_resources(chartName, helmChart, skip_rbac_overrides, exclusions,
                 # defaulting to Helm values if not specified.
                 if kind == 'PersistentVolumeClaim':
                     ensure_pvc_storage_class(resource_data, resource_name)
-                resource_data = replace_default(resource_data, 'PLACEHOLDER_NAMESPACE', '{{ .Values.global.namespace }}')
+                
 
                 if chartName == 'flight-control':
                     if kind == 'Route':
@@ -1008,6 +1008,7 @@ def update_helm_resources(chartName, helmChart, skip_rbac_overrides, exclusions,
                                     target_namespace = f"{{{{ default \"{subject_namespace}\" .Values.global.namespace }}}}"
                                     subject['namespace'] = target_namespace
                             logging.info(f"Subject namespace for {resource_name} set to: {target_namespace} (Helm default used).\n")
+                resource_data = replace_default(resource_data, 'PLACEHOLDER_NAMESPACE', '{{ .Values.global.namespace }}')
 
                 with open(template_path, 'w') as f:
                     yaml.dump(resource_data, f, width=float("inf"), default_flow_style=False, allow_unicode=True)
