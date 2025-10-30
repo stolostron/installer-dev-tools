@@ -334,7 +334,7 @@ def copyHelmChart(destinationChartPath, repo, chart, chartVersion, branch):
         logging.warning(f"No specific values.yaml found for chart '{chartName}'")
 
     logging.info(f"Running 'helm template' for chart: '{chartName}'")
-    helmTemplateOutput = subprocess.getoutput(['helm template '+ chartPath + ' --namespace=PLACEHOLDER_NAMESPACE --set global.namespace=PLACEHOLDER_NAMESPACE --set global.apiUrl=placeholder_apiurl --set global.baseDomain=placeholder_basedomain'])
+    helmTemplateOutput = subprocess.getoutput(['helm template '+ chartPath + ' --namespace=PLACEHOLDER_NAMESPACE'])
 
     yamlList = helmTemplateOutput.split('---')
     for outputContent in yamlList:
@@ -971,6 +971,7 @@ def update_helm_resources(chartName, helmChart, skip_rbac_overrides, exclusions,
                         config_data = resource_data.get('data')
                         for key, value in config_data.items():
                             if key.endswith(".yaml") or key.endswith(".yml"):
+                                value = re.sub(r": ([^'\"\n]*\{\{[^}]+\}\}[^'\"\n]*)$", r": '\1'", value, flags=re.MULTILINE)
                                 key_data = yaml.safe_load(value)
                                 # logging.warning(f"key_data={key_data.get('database').get('hostname')}")
                                 # hostname = key_data.get('database').get('hostname')
