@@ -1071,7 +1071,7 @@ def fixImageReferencesForAddonTemplate(helmChart, imageKeyMapping):
             if 'manifests' not in workload:
                 return
             manifests = workload['manifests']
-            imageKeys = []
+            # imageKeys = []
             for manifest in manifests:
                 if manifest['kind'] == 'Deployment':
                     containers = manifest['spec']['template']['spec']['containers']
