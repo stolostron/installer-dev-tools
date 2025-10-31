@@ -536,7 +536,7 @@ def is_version_compatible(branch, min_release_version, min_backplane_version, mi
         # Extract the version part from the branch name (e.g., '2.12-integration' -> '2.12')
         pattern = r'(\d+\.\d+)'  # Matches versions like '2.12'
 
-        if branch == "main" or branch == "master" or branch == "k8s-charts":
+        if branch == "main" or branch == "master" or branch == "k8s-chart-fix":
             if enforce_master_check:
                 return True
             else:
@@ -904,8 +904,8 @@ def update_helm_resources(chartName, helmChart, skip_rbac_overrides, exclusions,
                 if chartName == 'flight-control':
                     if kind == 'ConsolePlugin':
                         resource_data = replace_default(resource_data, 'PLACEHOLDER_NAMESPACE', '{{ .Values.global.namespace }}')
-                    # if kind == 'ConfigMap':
-                    #     resource_data = replace_default(resource_data, 'PLACEHOLDER_NAMESPACE', '{{ .Values.global.namespace }}')
+                    if kind == 'ConfigMap':
+                        resource_data = replace_default(resource_data, 'PLACEHOLDER_NAMESPACE', '{{ .Values.global.namespace }}')
                     if kind == 'Deployment':
                         resource_data = replace_default(resource_data, 'PLACEHOLDER_NAMESPACE', '{{ .Values.global.namespace }}')
 
@@ -957,7 +957,7 @@ def update_helm_resources(chartName, helmChart, skip_rbac_overrides, exclusions,
                 # defaulting to Helm values if not specified.
                 if kind == 'PersistentVolumeClaim':
                     ensure_pvc_storage_class(resource_data, resource_name)
-                resource_data = replace_default(resource_data, 'PLACEHOLDER_NAMESPACE', '{{ .Values.global.namespace }}')
+                
 
                 if chartName == 'flight-control':
                     if kind == 'Route':
@@ -971,6 +971,7 @@ def update_helm_resources(chartName, helmChart, skip_rbac_overrides, exclusions,
                         config_data = resource_data.get('data')
                         for key, value in config_data.items():
                             if key.endswith(".yaml") or key.endswith(".yml"):
+                                value = re.sub(r": ([^'\"\n]*\{\{[^}]+\}\}[^'\"\n]*)$", r": '\1'", value, flags=re.MULTILINE)
                                 key_data = yaml.safe_load(value)
                                 # logging.warning(f"key_data={key_data.get('database').get('hostname')}")
                                 # hostname = key_data.get('database').get('hostname')
@@ -978,6 +979,7 @@ def update_helm_resources(chartName, helmChart, skip_rbac_overrides, exclusions,
                                 key_data = replace_default(key_data, 'placeholder_apiurl', '{{ .Values.global.apiUrl }}')
                                 key_data = replace_default(key_data, 'placeholder_basedomain', '{{ .Values.global.baseDomain }}')
                                 updated_yaml = yaml.dump(key_data, default_flow_style=False, allow_unicode=True, width=float("inf"))
+                                updated_yaml = re.sub(r": (?!['\"])(.*\{\{[^}]+\}\}.*?)$", r": '\1'", updated_yaml, flags=re.MULTILINE)
                                 config_data[key] = updated_yaml
                                 resource_data['data'] = config_data
                         resource_data['data'] = replace_default(resource_data['data'], 'PLACEHOLDER_NAMESPACE', '{{ .Values.global.namespace }}')
@@ -1007,6 +1009,7 @@ def update_helm_resources(chartName, helmChart, skip_rbac_overrides, exclusions,
                                     target_namespace = f"{{{{ default \"{subject_namespace}\" .Values.global.namespace }}}}"
                                     subject['namespace'] = target_namespace
                             logging.info(f"Subject namespace for {resource_name} set to: {target_namespace} (Helm default used).\n")
+                resource_data = replace_default(resource_data, 'PLACEHOLDER_NAMESPACE', '{{ .Values.global.namespace }}')
 
                 with open(template_path, 'w') as f:
                     yaml.dump(resource_data, f, width=float("inf"), default_flow_style=False, allow_unicode=True)
