@@ -12,6 +12,7 @@ ARGUMENTS:
 OPTIONS:
     --debug          Enable debug logging output
     --retrigger      Retrigger failed components automatically
+    --squad=<squad>  Run against components owned by a specific squad
     -h, --help       Show this help message
 
 EXAMPLES:
@@ -20,6 +21,8 @@ EXAMPLES:
     batch-compliance.sh --debug acm-215 mce-210
     batch-compliance.sh --retrigger mce-210 mce-29 mce-28 mce-27 mce-26
     batch-compliance.sh --retrigger acm-215 acm-214 acm-213 acm-212 acm-211 mce-210 mce-29 mce-28 mce-27 mce-26
+    batch-compliance.sh --squad=grc acm-215
+    batch-compliance.sh --squad=observability --retrigger acm-215
 
 NOTES:
     - Results are saved to logs/<application>-log.txt
@@ -41,6 +44,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # Parse options
 debug_flag=""
 retrigger_flag=""
+squad_flag=""
 apps=()
 for arg in "$@"; do
     case $arg in
@@ -53,6 +57,9 @@ for arg in "$@"; do
             ;;
         --retrigger)
             retrigger_flag="--retrigger"
+            ;;
+        --squad=*)
+            squad_flag="$arg"
             ;;
         *)
             apps+=("$arg")
@@ -71,8 +78,8 @@ fi
 mkdir -p logs
 
 for app in "${apps[@]}"; do
-    echo "Executing $SCRIPT_DIR/compliance.sh $debug_flag $retrigger_flag $app"
-    "$SCRIPT_DIR/compliance.sh" $debug_flag $retrigger_flag $app > logs/$app-log.txt 2> logs/$app-error.txt &
+    echo "Executing $SCRIPT_DIR/compliance.sh $debug_flag $retrigger_flag $squad_flag $app"
+    "$SCRIPT_DIR/compliance.sh" $debug_flag $retrigger_flag $squad_flag $app > logs/$app-log.txt 2> logs/$app-error.txt &
 done
 
 echo "Waiting for all processes to complete"

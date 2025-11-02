@@ -15,6 +15,7 @@ OPTIONS:
     --debug=<component>   Run against a specific Konflux component only
     --debug               Enable debug logging output
     --retrigger           Retrigger failed components automatically
+    --squad=<squad>       Run against components owned by a specific squad
     -h, --help            Show this help message
 
 EXAMPLES:
@@ -22,6 +23,7 @@ EXAMPLES:
     compliance.sh --debug=my-component acm-215
     compliance.sh --debug acm-215
     compliance.sh --retrigger acm-215
+    compliance.sh --squad=policy acm-215
 EOF
 }
 
@@ -38,6 +40,10 @@ while [[ $# -gt 0 ]]; do
             ;;
         --retrigger)
             retrigger=true
+            shift
+            ;;
+        --squad=*)
+            squad="${1#*=}"
             shift
             ;;
         -h|--help)
@@ -80,6 +86,32 @@ echo "Verified: In correct OpenShift project (crt-redhat-acm-tenant)"
 mkdir -p data
 compliancefile="data/$application-compliance.csv"
 > $compliancefile
+
+# Function to get components for a specific squad from YAML config
+get_squad_components() {
+    local squad_key="$1"
+    # Get the directory where this script is located
+    local script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    local config_file="$script_dir/component-squad.yaml"
+
+    if [[ ! -f "$config_file" ]]; then
+        echo "Error: $config_file not found"
+        exit 1
+    fi
+
+    # Parse the YAML file and extract component names for the specified squad
+    local components=$(yq ".squads.\"${squad_key}\".components[]" "$config_file" 2>/dev/null)
+
+    if [[ -z "$components" ]]; then
+        echo "Error: No components found for squad '$squad_key' in $config_file"
+        echo ""
+        echo "Available squads:"
+        yq '.squads | to_entries | .[] | .key + " (" + .value.name + ")"' "$config_file"
+        exit 1
+    fi
+
+    echo "$components"
+}
 
 echo "Checking for Github auth token"
 authorization=""
@@ -327,6 +359,11 @@ check_bundle_operator() {
 
 if [[ -n "$debug" && "$debug" != "true" ]]; then
     components=$debug
+elif [[ -n "$squad" ]]; then
+    # Get components for the specified squad
+    squad_components=$(get_squad_components "$squad")
+    # Filter by application
+    components=$(oc get components | grep $application | awk '{print $1}' | grep -F -f <(echo "$squad_components"))
 else
     components=$(oc get components | grep $application | awk '{print $1}')
 fi

@@ -1,0 +1,185 @@
+# Component to Squad mapping configuration
+# Auto-generated from component-squad-owner.md
+
+squads:
+  server-foundation:
+    name: "Server Foundation"
+    components:
+      - addon-manager-mce
+      - cluster-proxy-addon-mce
+      - cluster-proxy-mce
+      - clusterlifecycle-state-metrics-mce
+      - managed-serviceaccount-mce
+      - managedcluster-import-controller-mce
+      - multicloud-manager-mce
+      - placement-mce
+      - registration-mce
+      - registration-operator-mce
+      - work-mce
+      - klusterlet-addon-controller-acm
+
+  install:
+    name: "Install"
+    components:
+      - backplane-must-gather-mce
+      - backplane-operator-mce
+      - discovery-operator-mce
+      - mce-operator-bundle-mce
+      - acm-operator-bundle-acm
+      - multiclusterhub-operator-acm
+
+  hypershift:
+    name: "Hypershift"
+    components:
+      - cluster-api-provider-agent-mce
+      - cluster-api-provider-kubevirt-mce
+      - hypershift-addon-operator-mce
+      - hypershift-cli-mce
+      - hypershift-release-mce
+
+  capi:
+    name: "CAPI"
+    components:
+      - cluster-api-provider-aws-mce
+      - cluster-api-webhook-config-mce
+      - ose-cluster-api-rhel9
+      - ose-aws-cluster-api-controllers-rhel9
+      - ose-baremetal-cluster-api-controllers-rhel9
+
+  assisted-installer:
+    name: "Assisted Installer"
+    components:
+      - cluster-api-provider-openshift-assisted-bootstrap-mce
+      - cluster-api-provider-openshift-assisted-control-plane-mce
+      - assisted-image-service
+      - assisted-installer
+      - assisted-installer-agent
+      - assisted-installer-controller
+      - assisted-service-8
+      - assisted-service-9
+      - postgresql-12
+
+  cluster-lifecycle:
+    name: "Cluster Lifecycle"
+    components:
+      - cluster-curator-controller-mce
+      - cluster-image-set-controller-mce
+      - clusterclaims-controller-mce
+      - provider-credential-controller-mce
+
+  console:
+    name: "Console"
+    components:
+      - console-mce-mce
+      - console-acm
+
+  hive:
+    name: "Hive"
+    components:
+      - hive-mce
+
+  ibio:
+    name: "IBIO"
+    components:
+      - image-based-install-operator-mce
+
+  hypershift-observability:
+    name: "Hypershift / Observability"
+    components:
+      - kube-rbac-proxy-mce
+
+  grc:
+    name: "GRC"
+    components:
+      - acm-cli-acm
+      - cert-policy-controller-acm
+      - config-policy-controller-acm
+      - governance-policy-addon-controller-acm
+      - governance-policy-framework-addon-acm
+      - governance-policy-propagator-acm
+      - multicluster-role-assignment-acm
+      - must-gather-acm
+
+  business-continuity:
+    name: "Business Continuity"
+    components:
+      - cluster-backup-operator-acm
+      - volsync-addon-controller-acm
+      - volsync
+
+  application-lifecycle:
+    name: "Application Lifecycle"
+    components:
+      - cluster-permission-acm
+      - multicloud-integrations-acm
+      - multicluster-operators-application-acm
+      - multicluster-operators-channel-acm
+      - multicluster-operators-subscription-acm
+
+  observability:
+    name: "Observability"
+    components:
+      - endpoint-monitoring-operator-acm
+      - grafana-acm
+      - grafana-dashboard-loader-acm
+      - kube-rbac-proxy-acm
+      - kube-state-metrics-acm
+      - memcached-exporter-acm
+      - metrics-collector-acm
+      - multicluster-observability-addon-acm
+      - multicluster-observability-operator-acm
+      - node-exporter-acm
+      - observatorium-acm
+      - observatorium-operator-acm
+      - prometheus-acm
+      - prometheus-alertmanager-acm
+      - prometheus-config-reloader-acm
+      - prometheus-operator-acm
+      - rbac-query-proxy-acm
+      - thanos-acm
+      - thanos-receive-controller-acm
+      - configmap-reloader
+      - memcached
+      - ose-kube-rbac-proxy
+
+  search:
+    name: "Search"
+    components:
+      - insights-client-acm
+      - insights-metrics-acm
+      - search-collector-acm
+      - search-indexer-acm
+      - search-v2-api-acm
+      - search-v2-operator-acm
+      - postgresql-16
+
+  virtualization:
+    name: "Virtualization"
+    components:
+      - mtv-integrations-acm
+
+  siteconfig:
+    name: "Siteconfig"
+    components:
+      - siteconfig-acm
+
+  submariner:
+    name: "Submariner"
+    components:
+      - submariner-addon-acm
+
+  edge-manager:
+    name: "Edge Manager"
+    components:
+      - flightctl-api
+      - flightctl-ocp-ui
+      - flightctl-periodic
+      - flightctl-ui
+      - flightctl-worker
+      - flightctl-cli-artifacts
+      - flightctl-alert-exporter
+      - flightctl-alertmanager-proxy
+      - flightctl-db-setup
+      - flightctl-db-userinfo-proxy
+      - origin-cli
+      - redis-7-c9s
