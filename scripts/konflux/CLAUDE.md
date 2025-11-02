@@ -20,6 +20,10 @@ Primary script for checking Konflux component compliance across multiple dimensi
 
 # Debug specific component only
 ./compliance.sh --debug=my-component acm-215
+
+# Filter by squad ownership
+./compliance.sh --squad=grc acm-215
+./compliance.sh --squad=observability mce-29
 ```
 
 **Output**: Creates CSV files in `data/` directory with compliance results.
@@ -30,6 +34,10 @@ Runs compliance checks for multiple applications in parallel:
 ```bash
 # Run compliance checks for multiple applications
 ./batch-compliance.sh acm-215 mce-29 acm-214
+
+# Filter by squad ownership
+./batch-compliance.sh --squad=grc acm-215 mce-210
+./batch-compliance.sh --squad=observability --retrigger acm-215 mce-210
 ```
 
 **Output**: Creates log files in `logs/` directory for each application.
@@ -79,6 +87,7 @@ The compliance.sh script validates four key areas:
 - `data/` - CSV compliance reports (e.g., `acm-215-compliance.csv`)
 - `logs/` - Execution logs and error output
 - `authorization.txt` - GitHub API token (gitignored)
+- `component-squad.yaml` - Component to squad ownership mapping
 
 ## Development Guidelines
 
