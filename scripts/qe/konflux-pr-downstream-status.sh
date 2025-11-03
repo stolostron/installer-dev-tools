@@ -117,8 +117,8 @@ fi
 # Set channel based on application type
 if [ "$application_part" = "mce" ]; then
   channel="stable-$major_version.$minor_version"
-else
-  channel="$branch"
+elif [ "$application_part" = "acm" ]; then
+  channel="release-$major_version.$minor_version"
 fi
 
 latest_snapshot_url="https://raw.githubusercontent.com/stolostron/$application_part-operator-bundle/refs/heads/$snapshot_branch/latest-snapshot.yaml"
@@ -260,9 +260,10 @@ function print_pr_testability {
 	# identical
 	# ahead
 	# we only actually care if it's behind or not
-
+  pr_sha=${pr_sha:-"[PR_SHA_NOT_FOUND]"}
+  published_sha=${published_sha:-"[PUBLISHED_SHA_NOT_FOUND]"}
 	if [ "$status" == "404" ]; then
-		echo "🟨 $org/$repo pull $number has not been merged into the specified branch yet"
+		echo "🟨 404: no revision path from $pr_sha to $published_sha"
 	elif [ $status == "ahead" ] || [ $status == "identical" ]; then
 		echo "🟩 $org/$repo pull $number is in the downstream build"
 	elif [ $status == "behind" ]; then
