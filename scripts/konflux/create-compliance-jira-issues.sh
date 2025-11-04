@@ -26,7 +26,7 @@ ARGUMENTS:
 OPTIONS:
     --project PROJECT        JIRA project key (default: from JIRA_PROJECT env var or "ACM")
     --issue-type TYPE        JIRA issue type (default: "Bug")
-    --priority PRIORITY      JIRA priority (default: "Major")
+    --priority PRIORITY      JIRA priority (default: "Critical")
     --component COMPONENT    JIRA component field (optional, overrides auto-detection from component-squad.yaml)
     --labels LABELS          Comma-separated labels (default: "konflux,compliance")
     --dry-run                Show what would be created without actually creating issues
@@ -93,7 +93,7 @@ NC='\033[0m' # No Color
 # Default values
 JIRA_PROJECT="${JIRA_PROJECT:-ACM}"
 ISSUE_TYPE="Bug"
-PRIORITY="Major"
+PRIORITY="Critical"
 COMPONENT=""
 LABELS="konflux,compliance"
 DRY_RUN=false
@@ -311,6 +311,7 @@ h3. Pipeline Run Links
         echo -e "${BLUE}Priority:${NC} $PRIORITY"
         echo -e "${BLUE}Labels:${NC} $LABELS"
         echo ""
+        echo "DRY-RUN-ISSUE"  # Output placeholder for dry-run mode
         return 0
     fi
 
@@ -322,8 +323,9 @@ h3. Pipeline Run Links
         local existing_issues=$(jira issue list --jql "$jql" --plain --no-headers --columns KEY 2>/dev/null || echo "")
 
         if [[ -n "$existing_issues" ]]; then
-            local existing_key=$(echo "$existing_issues" | head -n 1 | awk '{print $1}')
-            echo -e "${YELLOW}⊘${NC} Skipping $component_name - similar issue already exists: $existing_key"
+            local existing_key=$(echo "$existing_issues" | head -n 1 | awk '{print $1}' | xargs)
+            echo -e "${YELLOW}⊘${NC} Skipping $component_name - similar issue already exists: $existing_key" >&2
+            echo "$existing_key"  # Output existing issue key for tracking
             return 0
         fi
     fi
@@ -340,6 +342,8 @@ h3. Pipeline Run Links
         "--priority" "$PRIORITY"
         "--summary" "$summary"
         "--template" "$desc_file"
+        "--custom" "activity-type=Quality / Stability / Reliability"
+        "--custom" "severity=Critical"
         "--no-input"
     )
 
@@ -451,8 +455,8 @@ while IFS=',' read -r component_name build_time promotion_status hermetic_status
 
         if [[ $create_exit_code -eq 0 ]]; then
             created_count=$((created_count + 1))
-            # Extract the issue key (last line of output)
-            issue_key=$(echo "$issue_output" | tail -n 1)
+            # Extract the issue key (last line of output) and trim whitespace
+            issue_key=$(echo "$issue_output" | tail -n 1 | xargs)
             created_issues+=("$component_name:$issue_key")
             if [[ -n "$OUTPUT_JSON" ]]; then
                 # Store in JSON format as well
@@ -487,7 +491,7 @@ echo -e "${RED}Failed:${NC} $failed_count"
 # Print list of created issues with URLs
 if [[ ${#created_issues[@]} -gt 0 ]]; then
     echo ""
-    echo -e "${BLUE}Created Issues:${NC}"
+    echo -e "${BLUE}Issues:${NC}"
     # Get JIRA URL from jira-cli config file directly
     jira_config="${HOME}/.config/.jira/.config.yml"
     if [[ -f "$jira_config" ]]; then
@@ -498,6 +502,8 @@ if [[ ${#created_issues[@]} -gt 0 ]]; then
     for issue_info in "${created_issues[@]}"; do
         comp_name="${issue_info%%:*}"
         issue_key="${issue_info##*:}"
+        # Trim any whitespace from issue key
+        issue_key=$(echo "$issue_key" | xargs)
         echo -e "  • $comp_name: $jira_url/browse/$issue_key"
     done
 fi
