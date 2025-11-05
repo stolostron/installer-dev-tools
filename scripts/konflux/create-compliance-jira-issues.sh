@@ -35,7 +35,7 @@ OPTIONS:
     --issue-type TYPE        JIRA issue type (default: "Bug")
     --priority PRIORITY      JIRA priority (default: "Critical")
     --component COMPONENT    JIRA component field (optional, overrides auto-detection from component-squad.yaml)
-    --labels LABELS          Comma-separated labels (default: "konflux,compliance")
+    --labels LABELS          Comma-separated labels (default: "konflux,compliance,auto-created")
     --dry-run                Show what would be created without actually creating issues
     --skip-duplicates        Skip creating issues if similar ones already exist
     --output-json FILE       Save created issues to JSON file
@@ -44,8 +44,8 @@ OPTIONS:
 
 NOTE:
     The script automatically sets the JIRA Component/s field based on the squad mapping
-    in component-squad.yaml. Each component is mapped to its squad name (e.g., "Server Foundation",
-    "Install", "GRC", etc.). You can override this by using the --component option.
+    in component-squad.yaml. Each component is mapped to its jira-component value (e.g., "Server Foundation",
+    "Installer", "GRC", "HyperShift", etc.). You can override this by using the --component option.
 
 ENVIRONMENT VARIABLES:
     Required (for automatic jira-cli initialization):
@@ -63,11 +63,13 @@ PREREQUISITES:
 
     Installation:
     # macOS (Homebrew)
-    brew install ankitpokhrel/jira-cli/jira-cli
+    brew tap ankitpokhrel/jira-cli
+    brew install jira-cli
 
-    # Linux
-    curl -sL https://github.com/ankitpokhrel/jira-cli/releases/latest/download/jira_linux_amd64.tar.gz | tar xz
-    sudo mv jira /usr/local/bin/
+    # Linux (download binary from releases)
+    # Visit https://github.com/ankitpokhrel/jira-cli/releases
+    # Or use Go:
+    go install github.com/ankitpokhrel/jira-cli/cmd/jira@latest
 
     Configuration (Automatic):
     The script will automatically configure jira-cli if not already set up.
@@ -95,7 +97,7 @@ EXAMPLES:
     ./create-compliance-jira-issues.sh --dry-run data/acm-215-compliance.csv
 
     # Create issues with custom labels and priority
-    ./create-compliance-jira-issues.sh --labels "konflux,compliance,urgent" --priority "Critical" data/acm-215-compliance.csv
+    ./create-compliance-jira-issues.sh --labels "konflux,compliance,auto-created" --priority "Critical" data/acm-215-compliance.csv
 
     # Skip duplicates and save output
     ./create-compliance-jira-issues.sh --skip-duplicates --output-json issues.json data/acm-215-compliance.csv
@@ -121,7 +123,7 @@ JIRA_PROJECT="${JIRA_PROJECT:-ACM}"
 ISSUE_TYPE="Bug"
 PRIORITY="Critical"
 COMPONENT=""
-LABELS="konflux,compliance"
+LABELS="konflux,compliance,auto-created"
 DRY_RUN=false
 SKIP_DUPLICATES=false
 OUTPUT_JSON=""
@@ -209,13 +211,15 @@ if ! command -v jira &> /dev/null; then
     echo "Install jira-cli from: https://github.com/ankitpokhrel/jira-cli"
     echo ""
     echo "macOS (Homebrew):"
-    echo "  brew install ankitpokhrel/jira-cli/jira-cli"
+    echo "  brew tap ankitpokhrel/jira-cli"
+    echo "  brew install jira-cli"
     echo ""
     echo "Linux:"
-    echo "  curl -sL https://github.com/ankitpokhrel/jira-cli/releases/latest/download/jira_linux_amd64.tar.gz | tar xz"
-    echo "  sudo mv jira /usr/local/bin/"
+    echo "  Download from: https://github.com/ankitpokhrel/jira-cli/releases"
+    echo "  Or use Go: go install github.com/ankitpokhrel/jira-cli/cmd/jira@latest"
     echo ""
-    echo "After installation, run: jira init"
+    echo "After installation, the script will configure jira-cli automatically"
+    echo "when you run it with the required environment variables set."
     exit 1
 fi
 
@@ -391,7 +395,7 @@ h3. Pipeline Run Links
 
     # Check for duplicates if requested
     if [[ "$SKIP_DUPLICATES" == true ]]; then
-        local jql="project=$JIRA_PROJECT AND summary~\"$component_name\" AND labels IN (konflux,compliance) AND status NOT IN (Closed,Done,Resolved)"
+        local jql="project=$JIRA_PROJECT AND summary~\"$component_name\" AND labels=konflux AND labels=compliance AND labels=auto-created AND status NOT IN (Closed,Done,Resolved)"
 
         # Use jira-cli to search for existing issues
         local existing_issues=$(jira issue list --jql "$jql" --plain --no-headers --columns KEY 2>/dev/null || echo "")
