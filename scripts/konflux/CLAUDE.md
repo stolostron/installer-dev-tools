@@ -52,6 +52,36 @@ Monitors component promotion status and build information:
 
 **Output**: Creates timestamped log files with promotion status.
 
+### create-compliance-jira-issues.sh - JIRA Issue Creator
+Automatically creates JIRA issues for non-compliant components from compliance.sh output:
+
+```bash
+# First time setup - configure environment variables
+cp .env.template .env
+# Edit .env file with JIRA_USER, JIRA_API_TOKEN, JIRA_AUTH_TYPE
+source .env
+
+# Preview what would be created (dry-run)
+./create-compliance-jira-issues.sh --dry-run data/acm-215-compliance.csv
+
+# Create issues with default settings
+./create-compliance-jira-issues.sh data/acm-215-compliance.csv
+
+# Skip duplicates and save output
+./create-compliance-jira-issues.sh --skip-duplicates --output-json issues.json data/acm-215-compliance.csv
+
+# Custom labels and priority
+./create-compliance-jira-issues.sh --labels "konflux,compliance,urgent" --priority "Critical" data/acm-215-compliance.csv
+```
+
+**Features**:
+- Automatic jira-cli initialization using environment variables
+- Duplicate detection to avoid creating redundant issues
+- Squad-based JIRA Component/s field assignment from component-squad.yaml
+- Detailed issue descriptions with remediation steps and pipeline run links
+
+**Output**: Creates JIRA issues and optionally saves issue keys to JSON file.
+
 ## Prerequisites
 
 ### Required Tools

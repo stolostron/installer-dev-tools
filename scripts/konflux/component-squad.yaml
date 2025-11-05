@@ -1,4 +1,5 @@
-# Component to Squad mapping configuration
+# Konflux Component to Squad mapping configuration
+# The jira-component info can be found at https://issues.redhat.com/projects/ACM?selectedItem=com.atlassian.jira.jira-projects-plugin:components-page
 
 squads:
   server-foundation:
