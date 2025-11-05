@@ -2,6 +2,13 @@
 
 exec 3>&1
 
+# Debug output function
+debug_echo() {
+  if [ "$debug" = true ]; then
+    echo "$@" >&3
+  fi
+}
+
 show_help() {
     cat << EOF
 Usage: compliance.sh [OPTIONS] <application>
@@ -15,6 +22,7 @@ OPTIONS:
     --debug=<component>   Run against a specific Konflux component only
     --debug               Enable debug logging output
     --retrigger           Retrigger failed components automatically
+    --squad=<squad>       Run against components owned by a specific squad
     -h, --help            Show this help message
 
 EXAMPLES:
@@ -22,6 +30,7 @@ EXAMPLES:
     compliance.sh --debug=my-component acm-215
     compliance.sh --debug acm-215
     compliance.sh --retrigger acm-215
+    compliance.sh --squad=policy acm-215
 EOF
 }
 
@@ -38,6 +47,10 @@ while [[ $# -gt 0 ]]; do
             ;;
         --retrigger)
             retrigger=true
+            shift
+            ;;
+        --squad=*)
+            squad="${1#*=}"
             shift
             ;;
         -h|--help)
@@ -80,6 +93,37 @@ echo "Verified: In correct OpenShift project (crt-redhat-acm-tenant)"
 mkdir -p data
 compliancefile="data/$application-compliance.csv"
 > $compliancefile
+
+# Function to get components for a specific squad from YAML config
+get_squad_components() {
+    local squad_key="$1"
+    # Get the directory where this script is located
+    local script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    local config_file="$script_dir/component-squad.yaml"
+
+    if [[ ! -f "$config_file" ]]; then
+        echo "Error: $config_file not found"
+        exit 1
+    fi
+
+    debug_echo "[debug] Squad Key: $squad_key"
+
+    # Parse the YAML file and extract component names for the specified squad
+    local components=$(yq ".squads.\"${squad_key}\".components[]" "$config_file" 2>/dev/null)
+
+    if [[ -z "$components" ]]; then
+        echo "Error: No components found for squad '$squad_key' in $config_file" >&3
+        echo "" >&3
+        echo "Available squads:" >&3
+        echo $(yq '.squads | to_entries | .[] | .key + " (" + .value.name + ")"' "$config_file") >&3
+        echo "INVALID_SQUAD"
+        exit 1
+    fi
+
+    debug_echo "[debug] Components"
+    debug_echo "$components"
+    echo "$components"
+}
 
 echo "Checking for Github auth token"
 authorization=""
@@ -135,33 +179,33 @@ check_hermetic_builds() {
     
     # Check pathInRepo (first .spec, then fallback to .spec.pipelineSpec)
     pathinrepo=$(echo "$yaml" | yq ".spec.pipelineRef.params | .[] | select(.name==\"pathInRepo\")")
-    [[ -n "$debug" ]] && echo "[debug] pathInRepo (push): using .spec = $pathinrepo" >&3
+    debug_echo "[debug] pathInRepo (push): using .spec = $pathinrepo"
     if [[ -z "$pathinrepo" ]]; then
         pathinrepo=$(echo "$yaml" | yq ".spec.pipelineSpec.pipelineRef.params | .[] | select(.name==\"pathInRepo\")")
-        [[ -n "$debug" ]] && echo "[debug] pathInRepo (push): using .spec.pipelineSpec fallback = $pathinrepo" >&3
+        debug_echo "[debug] pathInRepo (push): using .spec.pipelineSpec fallback = $pathinrepo"
     fi
     
     pullpathinrepo=$(echo "$pull_yaml" | yq ".spec.pipelineRef.params | .[] | select(.name==\"pathInRepo\")")
-    [[ -n "$debug" ]] && echo "[debug] pathInRepo (pull): using .spec = $pullpathinrepo" >&3
+    debug_echo "[debug] pathInRepo (pull): using .spec = $pullpathinrepo"
     if [[ -z "$pullpathinrepo" ]]; then
         pullpathinrepo=$(echo "$pull_yaml" | yq ".spec.pipelineSpec.pipelineRef.params | .[] | select(.name==\"pathInRepo\")")
-        [[ -n "$debug" ]] && echo "[debug] pathInRepo (pull): using .spec.pipelineSpec fallback = $pullpathinrepo" >&3
+        debug_echo "[debug] pathInRepo (pull): using .spec.pipelineSpec fallback = $pullpathinrepo"
     fi
 
     if [[ -z "$pathinrepo" || -z "$pullpathinrepo" ]]; then
         # Check build-source-image (first .spec.params.value, then fallback to .spec.pipelineSpec.params.default)
         buildsourceimage=$(echo "$yaml" | yq ".spec.params | .[] | select(.name==\"build-source-image\") | .value")
-        [[ -n "$debug" ]] && echo "[debug] build-source-image (push): using .spec.params.value = $buildsourceimage" >&3
+        debug_echo "[debug] build-source-image (push): using .spec.params.value = $buildsourceimage"
         if [[ -z "$buildsourceimage" ]]; then
             buildsourceimage=$(echo "$yaml" | yq ".spec.pipelineSpec.params | .[] | select(.name==\"build-source-image\") | .default")
-            [[ -n "$debug" ]] && echo "[debug] build-source-image (push): using .spec.pipelineSpec.params.default = $buildsourceimage" >&3
+            debug_echo "[debug] build-source-image (push): using .spec.pipelineSpec.params.default = $buildsourceimage"
         fi
         
         pull_bsi=$(echo "$pull_yaml" | yq ".spec.params | .[] | select(.name==\"build-source-image\") | .value")
-        [[ -n "$debug" ]] && echo "[debug] build-source-image (pull): using .spec.params.value = $pull_bsi" >&3
+        debug_echo "[debug] build-source-image (pull): using .spec.params.value = $pull_bsi"
         if [[ -z "$pull_bsi" ]]; then
             pull_bsi=$(echo "$pull_yaml" | yq ".spec.pipelineSpec.params | .[] | select(.name==\"build-source-image\") | .default")
-            [[ -n "$debug" ]] && echo "[debug] build-source-image (pull): using .spec.pipelineSpec.params.default = $pull_bsi" >&3
+            debug_echo "[debug] build-source-image (pull): using .spec.pipelineSpec.params.default = $pull_bsi"
         fi
         
         if [[ !($buildsourceimage == true || $buildsourceimage == "true") || !($pull_bsi == true || $pull_bse == "true") ]]; then
@@ -170,17 +214,17 @@ check_hermetic_builds() {
 
         # Check hermetic (first .spec.params.value, then fallback to .spec.pipelineSpec.params.default)
         hermetic=$(echo "$yaml" | yq ".spec.params | .[] | select(.name==\"hermetic\") | .value")
-        [[ -n "$debug" ]] && echo "[debug] hermetic (push): using .spec.params.value = $hermetic" >&3
+        debug_echo "[debug] hermetic (push): using .spec.params.value = $hermetic"
         if [[ -z "$hermetic" ]]; then
             hermetic=$(echo "$yaml" | yq ".spec.pipelineSpec.params | .[] | select(.name==\"hermetic\") | .default")
-            [[ -n "$debug" ]] && echo "[debug] hermetic (push): using .spec.pipelineSpec.params.default = $hermetic" >&3
+            debug_echo "[debug] hermetic (push): using .spec.pipelineSpec.params.default = $hermetic"
         fi
         
         pull_hermetic=$(echo "$pull_yaml" | yq ".spec.params | .[] | select(.name==\"hermetic\") | .value")
-        [[ -n "$debug" ]] && echo "[debug] hermetic (pull): using .spec.params.value = $pull_hermetic" >&3
+        debug_echo "[debug] hermetic (pull): using .spec.params.value = $pull_hermetic"
         if [[ -z "$pull_hermetic" ]]; then
             pull_hermetic=$(echo "$pull_yaml" | yq ".spec.pipelineSpec.params | .[] | select(.name==\"hermetic\") | .default")
-            [[ -n "$debug" ]] && echo "[debug] hermetic (pull): using .spec.pipelineSpec.params.default = $pull_hermetic" >&3
+            debug_echo "[debug] hermetic (pull): using .spec.pipelineSpec.params.default = $pull_hermetic"
         fi
         
         if [[ $hermetic != true || $hermetic != "true" || $pull_hermetic != true || $pull_hermetic != "true" ]]; then
@@ -193,17 +237,17 @@ check_hermetic_builds() {
     
     # Check prefetch-input (first .spec.params.value, then fallback to .spec.pipelineSpec.params.default)
     prefetch=$(echo "$yaml" | yq ".spec.params | .[] | select(.name==\"prefetch-input\") | .value")
-    [[ -n "$debug" ]] && echo "[debug] prefetch-input (push): using .spec.params.value = $prefetch" >&3
+    debug_echo "[debug] prefetch-input (push): using .spec.params.value = $prefetch"
     if [[ -z "$prefetch" ]]; then
         prefetch=$(echo "$yaml" | yq ".spec.pipelineSpec.params | .[] | select(.name==\"prefetch-input\") | .default")
-        [[ -n "$debug" ]] && echo "[debug] prefetch-input (push): using .spec.pipelineSpec.params.default = $prefetch" >&3
+        debug_echo "[debug] prefetch-input (push): using .spec.pipelineSpec.params.default = $prefetch"
     fi
     
     pull_prefetch=$(echo "$pull_yaml" | yq ".spec.params | .[] | select(.name==\"prefetch-input\") | .value")
-    [[ -n "$debug" ]] && echo "[debug] prefetch-input (pull): using .spec.params.value = $pull_prefetch" >&3
+    debug_echo "[debug] prefetch-input (pull): using .spec.params.value = $pull_prefetch"
     if [[ -z "$pull_prefetch" ]]; then
         pull_prefetch=$(echo "$pull_yaml" | yq ".spec.pipelineSpec.params | .[] | select(.name==\"prefetch-input\") | .default")
-        [[ -n "$debug" ]] && echo "[debug] prefetch-input (pull): using .spec.pipelineSpec.params.default = $pull_prefetch" >&3
+        debug_echo "[debug] prefetch-input (pull): using .spec.pipelineSpec.params.default = $pull_prefetch"
     fi
     
     # echo "$prefetch $pull_prefetch"
@@ -327,6 +371,14 @@ check_bundle_operator() {
 
 if [[ -n "$debug" && "$debug" != "true" ]]; then
     components=$debug
+elif [[ -n "$squad" ]]; then
+    # Get components for the specified squad
+    squad_components=$(get_squad_components "$squad")
+    if [[ "$squad_components" == "INVALID_SQUAD" ]]; then
+        exit 1
+    fi
+    # Filter by application
+    components=$(oc get components | grep $application | awk '{print $1}' | grep -F -f <(echo "$squad_components"))
 else
     components=$(oc get components | grep $application | awk '{print $1}')
 fi
@@ -347,7 +399,7 @@ for line in $components; do
     push="https://raw.githubusercontent.com/$org/$repo/refs/heads/$branch/.tekton/$line-push.yaml"
     pull="https://raw.githubusercontent.com/$org/$repo/refs/heads/$branch/.tekton/$line-pull-request.yaml"
 
-    [[ -n "$debug" ]] && echo -e "[debug] Push: $push\n[debug] Pull: $pull" # debug
+    debug_echo "[debug] Push: $push\n[debug] Pull: $pull" # debug
 
     echo "--- $line : $org/$repo : $branch ---"
     yaml=$(curl -Ls -w "%{http_code}" $push)
