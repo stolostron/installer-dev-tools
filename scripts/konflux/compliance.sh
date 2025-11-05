@@ -95,7 +95,7 @@ compliancefile="data/$application-compliance.csv"
 > $compliancefile
 
 # Write CSV header
-echo "Konflux Component,Promoted,Hermetic Builds,Enterprise Contract,Multiarch Support,Push PipelineRun URL,EC PipelineRun URL" > $compliancefile
+echo "Konflux Component,Promoted Time,Promoted Status,Hermetic Builds,Enterprise Contract,Multiarch Support,Push Status,Push PipelineRun URL,EC PipelineRun URL" > $compliancefile
 
 # Function to get components for a specific squad from YAML config
 get_squad_components() {
@@ -475,8 +475,8 @@ for line in $components; do
         data="$data,$(check_multiarch_support "$yaml" "$repo")"
     fi
 
-    # Append PipelineRun URLs
-    data="$data,$push_url,$ec_url"
+    # Append Push Status and PipelineRun URLs
+    data="$data,$push_status,$push_url,$ec_url"
 
     echo ""
 

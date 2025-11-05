@@ -323,8 +323,9 @@ create_jira_issue() {
     local hermetic_status="$4"
     local ec_status="$5"
     local multiarch_status="$6"
-    local push_pipelinerun_url="$7"
-    local ec_pipelinerun_url="$8"
+    local push_status="$7"
+    local push_pipelinerun_url="$8"
+    local ec_pipelinerun_url="$9"
 
     # Build description with compliance details
     local description="h2. Component Compliance Failure
@@ -340,6 +341,7 @@ h3. Compliance Status
 |Hermetic Builds|$hermetic_status|
 |Enterprise Contract|$ec_status|
 |Multiarch Support|$multiarch_status|
+|Push Pipeline|$push_status|
 
 h3. Required Actions
 "
@@ -371,6 +373,11 @@ h3. Required Actions
     if [[ "$multiarch_status" == "Not Enabled" ]]; then
         description+="* Enable multiarch support:
 ** Add \`build-platforms\` parameter with 4 platforms: [linux/amd64, linux/arm64, linux/ppc64le, linux/s390x]
+"
+    fi
+
+    if [[ "$push_status" == "Failed" ]]; then
+        description+="* Fix push pipeline failures - check the build pipeline run logs for errors
 "
     fi
 
@@ -550,12 +557,14 @@ is_non_compliant() {
     local hermetic_status="$2"
     local ec_status="$3"
     local multiarch_status="$4"
+    local push_status="$5"
 
     # Check for any failure conditions
     if [[ "$promotion_status" =~ (Failed|IMAGE_PULL_FAILURE|INSPECTION_FAILURE|DIGEST_FAILURE) ]] || \
        [[ "$hermetic_status" == "Not Enabled" ]] || \
        [[ "$ec_status" =~ (Not Compliant|Push Failure) ]] || \
-       [[ "$multiarch_status" == "Not Enabled" ]]; then
+       [[ "$multiarch_status" == "Not Enabled" ]] || \
+       [[ "$push_status" == "Failed" ]]; then
         return 0  # true - is non-compliant
     fi
 
@@ -572,7 +581,7 @@ echo -e "${BLUE}JIRA Auth Type:${NC} ${JIRA_AUTH_TYPE:-not set}"
 echo ""
 
 # Read compliance data from CSV
-# The CSV format is: component_name,build_time,promotion_status,hermetic_status,ec_status,multiarch_status,push_pipelinerun_url,ec_pipelinerun_url
+# The CSV format is: component_name,build_time,promotion_status,hermetic_status,ec_status,multiarch_status,push_status,push_pipelinerun_url,ec_pipelinerun_url
 created_count=0
 skipped_count=0
 failed_count=0
@@ -587,7 +596,7 @@ echo -e "${BLUE}File content (first 3 lines):${NC}" >&2
 head -3 "$COMPLIANCE_FILE" >&2
 echo "" >&2
 
-while IFS=',' read -r component_name build_time promotion_status hermetic_status ec_status multiarch_status push_pipelinerun_url ec_pipelinerun_url; do
+while IFS=',' read -r component_name build_time promotion_status hermetic_status ec_status multiarch_status push_status push_pipelinerun_url ec_pipelinerun_url; do
     total_count=$((total_count + 1))
     echo -e "${BLUE}DEBUG: Read line $total_count: component=$component_name${NC}" >&2
 
@@ -597,10 +606,10 @@ while IFS=',' read -r component_name build_time promotion_status hermetic_status
     fi
 
     # Check if component is non-compliant
-    if is_non_compliant "$promotion_status" "$hermetic_status" "$ec_status" "$multiarch_status"; then
+    if is_non_compliant "$promotion_status" "$hermetic_status" "$ec_status" "$multiarch_status" "$push_status"; then
         echo -e "${BLUE}Processing:${NC} $component_name"
 
-        issue_output=$(create_jira_issue "$component_name" "$build_time" "$promotion_status" "$hermetic_status" "$ec_status" "$multiarch_status" "$push_pipelinerun_url" "$ec_pipelinerun_url")
+        issue_output=$(create_jira_issue "$component_name" "$build_time" "$promotion_status" "$hermetic_status" "$ec_status" "$multiarch_status" "$push_status" "$push_pipelinerun_url" "$ec_pipelinerun_url")
         create_exit_code=$?
 
         if [[ $create_exit_code -eq 0 ]]; then
@@ -623,7 +632,7 @@ while IFS=',' read -r component_name build_time promotion_status hermetic_status
 done < "$COMPLIANCE_FILE"
 
 # Save output JSON if requested
-if [[ -n "$OUTPUT_JSON" && ${#created_issues_json[@]} -gt 0 ]]; then
+if [[ -n "$OUTPUT_JSON" && "${created_count}" -gt 0 ]]; then
     printf "[%s]\n" "$(IFS=,; echo "${created_issues_json[*]}")" | jq '.' > "$OUTPUT_JSON"
     echo -e "${GREEN}✓${NC} Saved created issues to $OUTPUT_JSON"
 fi
@@ -639,7 +648,7 @@ echo -e "${GREEN}Issues created:${NC} $created_count"
 echo -e "${RED}Failed:${NC} $failed_count"
 
 # Print list of created issues with URLs
-if [[ ${#created_issues[@]} -gt 0 ]]; then
+if [[ "${created_count}" -gt 0 ]]; then
     echo ""
     echo -e "${BLUE}Issues:${NC}"
     # Get JIRA URL from jira-cli config file directly
