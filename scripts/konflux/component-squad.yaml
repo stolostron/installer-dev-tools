@@ -1,9 +1,8 @@
 # Component to Squad mapping configuration
-# Auto-generated from component-squad-owner.md
 
 squads:
   server-foundation:
-    name: "Server Foundation"
+    jira-component: "Server Foundation"
     components:
       - addon-manager-mce
       - cluster-proxy-addon-mce
@@ -19,7 +18,7 @@ squads:
       - klusterlet-addon-controller-acm
 
   install:
-    name: "Install"
+    jira-component: "Installer"
     components:
       - backplane-must-gather-mce
       - backplane-operator-mce
@@ -29,16 +28,17 @@ squads:
       - multiclusterhub-operator-acm
 
   hypershift:
-    name: "Hypershift"
+    jira-component: "HyperShift"
     components:
       - cluster-api-provider-agent-mce
       - cluster-api-provider-kubevirt-mce
       - hypershift-addon-operator-mce
       - hypershift-cli-mce
       - hypershift-release-mce
+      - kube-rbac-proxy-mce
 
   capi:
-    name: "CAPI"
+    jira-component: "CAPI"
     components:
       - cluster-api-provider-aws-mce
       - cluster-api-webhook-config-mce
@@ -47,7 +47,7 @@ squads:
       - ose-baremetal-cluster-api-controllers-rhel9
 
   assisted-installer:
-    name: "Assisted Installer"
+    jira-component: "Infrastructure Operator"
     components:
       - cluster-api-provider-openshift-assisted-bootstrap-mce
       - cluster-api-provider-openshift-assisted-control-plane-mce
@@ -60,7 +60,7 @@ squads:
       - postgresql-12
 
   cluster-lifecycle:
-    name: "Cluster Lifecycle"
+    jira-component: "Cluster Lifecycle"
     components:
       - cluster-curator-controller-mce
       - cluster-image-set-controller-mce
@@ -68,28 +68,23 @@ squads:
       - provider-credential-controller-mce
 
   console:
-    name: "Console"
+    jira-component: "Console"
     components:
       - console-mce-mce
       - console-acm
 
   hive:
-    name: "Hive"
+    jira-component: "Hive"
     components:
       - hive-mce
 
   ibio:
-    name: "IBIO"
+    jira-component: "Image Based Install Operator"
     components:
       - image-based-install-operator-mce
 
-  hypershift-observability:
-    name: "Hypershift / Observability"
-    components:
-      - kube-rbac-proxy-mce
-
   grc:
-    name: "GRC"
+    jira-component: "GRC"
     components:
       - acm-cli-acm
       - cert-policy-controller-acm
@@ -101,14 +96,13 @@ squads:
       - must-gather-acm
 
   business-continuity:
-    name: "Business Continuity"
     components:
       - cluster-backup-operator-acm
       - volsync-addon-controller-acm
       - volsync
 
   application-lifecycle:
-    name: "Application Lifecycle"
+    jira-component: "Application Lifecycle"
     components:
       - cluster-permission-acm
       - multicloud-integrations-acm
@@ -117,7 +111,7 @@ squads:
       - multicluster-operators-subscription-acm
 
   observability:
-    name: "Observability"
+    jira-component: "Observability"
     components:
       - endpoint-monitoring-operator-acm
       - grafana-acm
@@ -141,9 +135,10 @@ squads:
       - configmap-reloader
       - memcached
       - ose-kube-rbac-proxy
+      - kube-rbac-proxy-mce
 
   search:
-    name: "Search"
+    jira-component: "Search"
     components:
       - insights-client-acm
       - insights-metrics-acm
@@ -154,22 +149,23 @@ squads:
       - postgresql-16
 
   virtualization:
-    name: "Virtualization"
+    jira-component: "Container Native Virtualization"
     components:
       - mtv-integrations-acm
 
   siteconfig:
-    name: "Siteconfig"
+    jira-component: "SiteConfig Operator"
     components:
       - siteconfig-acm
 
   submariner:
     name: "Submariner"
+    jira-component: "submariner"
     components:
       - submariner-addon-acm
 
   edge-manager:
-    name: "Edge Manager"
+    jira-component: "Edge Manager"
     components:
       - flightctl-api
       - flightctl-ocp-ui
