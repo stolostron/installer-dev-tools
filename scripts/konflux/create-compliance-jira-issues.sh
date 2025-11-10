@@ -277,8 +277,41 @@ fi
 
 # Extract application name from filename
 # e.g., data/acm-215-compliance.csv -> acm-215
-APP_NAME=$(basename "$COMPLIANCE_FILE" | sed 's/-compliance\.csv$//')
+#       data/discovery-operator-mce-29-compliance.csv -> mce-29
+# Pattern: Extract the last occurrence of (acm|mce)-<digits> from the filename
+APP_NAME=$(basename "$COMPLIANCE_FILE" | sed 's/-compliance\.csv$//' | grep -oE '(acm|mce)-[0-9]+$' || basename "$COMPLIANCE_FILE" | sed 's/-compliance\.csv$//')
 echo -e "${BLUE}Processing compliance data for application: $APP_NAME${NC}"
+
+# Function to derive JIRA "Affects Version/s" from APP_NAME
+# Format: acm-215 -> "ACM 2.15.0", mce-29 -> "MCE 2.9.0"
+get_affects_version() {
+    local app_name="$1"
+
+    # Extract product (acm/mce) and version number
+    local product=$(echo "$app_name" | cut -d'-' -f1 | tr '[:lower:]' '[:upper:]')
+    local version_num=$(echo "$app_name" | cut -d'-' -f2)
+
+    # Convert version number: 215 -> 2.15.0, 29 -> 2.9.0
+    if [[ ${#version_num} -eq 3 ]]; then
+        # Three digits: XYZ -> X.YZ.0
+        local major="${version_num:0:1}"
+        local minor="${version_num:1:2}"
+        echo "${product} ${major}.${minor}.0"
+    elif [[ ${#version_num} -eq 2 ]]; then
+        # Two digits: XY -> X.Y.0
+        local major="${version_num:0:1}"
+        local minor="${version_num:1:1}"
+        echo "${product} ${major}.${minor}.0"
+    else
+        # Unsupported format, return empty
+        echo ""
+    fi
+}
+
+AFFECTS_VERSION=$(get_affects_version "$APP_NAME")
+if [[ -n "$AFFECTS_VERSION" ]]; then
+    echo -e "${BLUE}Affects Version:${NC} $AFFECTS_VERSION"
+fi
 
 # Check if jq is installed
 if ! command -v jq &> /dev/null; then
@@ -432,6 +465,11 @@ h3. Pipeline Run Links
         "--no-input"
     )
 
+    # Add Affects Version/s if available
+    if [[ -n "$AFFECTS_VERSION" ]]; then
+        jira_cmd_args+=("--affects-version" "$AFFECTS_VERSION")
+    fi
+
     # Add labels
     if [[ -n "$LABELS" ]]; then
         IFS=',' read -ra LABEL_ARRAY <<< "$LABELS"
@@ -466,6 +504,9 @@ h3. Pipeline Run Links
         echo -e "${BLUE}Type:${NC} $ISSUE_TYPE" >&2
         echo -e "${BLUE}Priority:${NC} $PRIORITY" >&2
         echo -e "${BLUE}Labels:${NC} $LABELS" >&2
+        if [[ -n "$AFFECTS_VERSION" ]]; then
+            echo -e "${BLUE}Affects Version/s:${NC} $AFFECTS_VERSION" >&2
+        fi
 
         # Show component(s) if any
         local components_list=""
@@ -546,7 +587,7 @@ h3. Pipeline Run Links
         echo "$issue_key"  # Output issue key for capture
         return 0
     else
-        echo -e "${RED}✗${NC} Failed to create issue for $component_name: $output"
+        echo -e "${RED}✗${NC} Failed to create issue for $component_name: $output" >&2
         return 1
     fi
 }
