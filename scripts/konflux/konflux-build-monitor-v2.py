@@ -16,6 +16,7 @@ import requests
 import time
 import os
 import base64
+import platform
 from datetime import datetime, timedelta
 from typing import Dict, List, Any, Optional
 from dataclasses import dataclass
@@ -40,12 +41,25 @@ class KonfluxMonitor:
         self.verbose = verbose
         self.applications = self._load_application_config()
         self.quay_auth = self._setup_quay_auth()
+        self.skopeo_platform_args = self._get_skopeo_platform_args()
         
     def _log(self, message: str):
         """Log progress message if verbose mode is enabled"""
         if self.verbose:
             timestamp = datetime.now().strftime("%H:%M:%S")
             print(f"[{timestamp}] {message}", file=sys.stderr)
+
+    def _get_skopeo_platform_args(self) -> List[str]:
+        """Get platform override arguments for skopeo on macOS"""
+        system = platform.system()
+        machine = platform.machine()
+
+        # On macOS, override to linux/arm64 to inspect container images
+        if system == "Darwin":
+            self._log(f"Detected macOS ({machine}), using linux/arm64 platform override for skopeo")
+            return ["--override-os", "linux", "--override-arch", "arm64"]
+
+        return []
     
     def _setup_quay_auth(self) -> Optional[str]:
         """Setup Quay authentication from environment variables"""
@@ -76,6 +90,8 @@ class KonfluxMonitor:
                             "acm-d/acm-operator-bundle", "acm-d/acm-dev-catalog"),
             ApplicationConfig("release-acm-215", "acm", "2.15", "bundle-release-acm-215",
                             "acm-d/acm-operator-bundle", "acm-d/acm-dev-catalog"),
+            ApplicationConfig("release-acm-216", "acm", "2.16", "bundle-release-acm-216",
+                            "acm-d/acm-operator-bundle", "acm-d/acm-dev-catalog"),
             
             # MCE Applications  
             ApplicationConfig("release-mce-26", "mce", "2.6", "bundle-release-mce-26",
@@ -87,6 +103,8 @@ class KonfluxMonitor:
             ApplicationConfig("release-mce-29", "mce", "2.9", "bundle-release-mce-29",
                             "acm-d/mce-operator-bundle", "acm-d/mce-dev-catalog"),
             ApplicationConfig("release-mce-210", "mce", "2.10", "bundle-release-mce-210",
+                            "acm-d/mce-operator-bundle", "acm-d/mce-dev-catalog"),
+            ApplicationConfig("release-mce-211", "mce", "2.11", "bundle-release-mce-211",
                             "acm-d/mce-operator-bundle", "acm-d/mce-dev-catalog"),
         ]
     
@@ -182,9 +200,9 @@ class KonfluxMonitor:
         """Check age of a container image using skopeo inspect command"""
         try:
             self._log(f"Inspecting image age with skopeo: {image_url}")
-            
+
             # Use skopeo to inspect the image and get metadata
-            cmd = ["skopeo", "inspect", f"docker://{image_url}"]
+            cmd = ["skopeo", "inspect"] + self.skopeo_platform_args + [f"docker://{image_url}"]
             result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
             
             if result.returncode != 0:
@@ -241,9 +259,9 @@ class KonfluxMonitor:
             # Construct the image tag for the latest version
             image_url = f"{image_repo}:latest-{version}"
             self._log(f"Inspecting catalog image: {image_url}")
-            
+
             # Use skopeo to inspect the catalog image
-            cmd = ["skopeo", "inspect", f"docker://{image_url}"]
+            cmd = ["skopeo", "inspect"] + self.skopeo_platform_args + [f"docker://{image_url}"]
             result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
             
             if result.returncode != 0:
