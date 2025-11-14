@@ -145,9 +145,11 @@ function get_revision_for_image {
   debug_echo "Looking up revision for image: $image"
 
   # Get commit history for latest-snapshot.yaml
-  local commits_url="https://api.github.com/repos/$repo_owner/$repo_name/commits?path=latest-snapshot.yaml&sha=$branch"
+  local commits_url="https://api.github.com/repos/$repo_owner/$repo_name/commits?path=latest-snapshot.yaml&sha=$snapshot_branch"
   local commits=$(curl -LsH "Accept: application/vnd.github+json" -H "X-GitHub-Api-Version: 2022-11-28" -H "$authorization" "$commits_url")
 
+  # debug_echo "Commits:"
+  # debug_echo "$commits"
   # Check each commit until we find the image
   echo "$commits" | jq -r '.[].sha' | while read commit_sha; do
     debug_echo "Checking commit: $commit_sha"
@@ -229,10 +231,11 @@ function print_pr_testability {
   debug_echo "Testing PR testability of $pr_url"
   debug_echo "Repo: $repo"
   debug_echo "Org: $org"
+  debug_echo "Branch: $branch"
 
 	local commits="https://api.github.com/repos/$org/$repo/commits?sha=$branch"
-    debug_echo "Commits url: $commits"
-	# echo $org $repo $number
+  debug_echo "Commits url: $commits"
+	debug_echo $org $repo $number
 
 	if [[ ! -v repo_commits["$repo"] ]]; then
 		# echo "adding commits for $repo"
@@ -242,8 +245,8 @@ function print_pr_testability {
 	# echo -e "commits: ${repo_commits["$repo"]}"
 
 	debug_echo "attempting to pull sha for $repo"
-	# echo ${repo_commits["$repo"]}
-	local pr_sha=$(echo "${repo_commits["$repo"]}" | jq -r '.[]| select(.commit.message | contains("#'$number'")) | .sha')
+	debug_echo ${repo_commits["$repo"]}
+	local pr_sha=$(echo "${repo_commits["$repo"]}" | jq -r '.[]| select(.commit.message | split("\n")[0] | contains("#2729")) | .sha')
 
 	# echo -e "pr: $pr_sha\npublished: $published_sha"
 
