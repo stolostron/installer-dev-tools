@@ -38,6 +38,7 @@ OPTIONS:
     --labels LABELS          Comma-separated labels (default: "konflux,compliance,auto-created")
     --dry-run                Show what would be created without actually creating issues
     --skip-duplicates        Skip creating issues if similar ones already exist
+    --auto-close             Auto-close existing issues for components that are now compliant
     --output-json FILE       Save created issues to JSON file
     --debug                  Enable debug output (shows jira-cli command in dry-run mode)
     -h, --help               Show this help message
@@ -102,6 +103,9 @@ EXAMPLES:
     # Skip duplicates and save output
     ./create-compliance-jira-issues.sh --skip-duplicates --output-json issues.json data/acm-215-compliance.csv
 
+    # Auto-close resolved issues
+    ./create-compliance-jira-issues.sh --auto-close data/acm-215-compliance.csv
+
 CSV FORMAT:
     The compliance CSV file should have the following format (from compliance.sh):
     <component-name>,<build-timestamp>,<promotion-status>,<hermetic-status>,<ec-status>,<multiarch-status>,<pipelinerun-url>
@@ -126,6 +130,7 @@ COMPONENT=""
 LABELS="konflux,compliance,auto-created"
 DRY_RUN=false
 SKIP_DUPLICATES=false
+AUTO_CLOSE=false
 OUTPUT_JSON=""
 COMPLIANCE_FILE=""
 DEBUG=false
@@ -159,6 +164,10 @@ while [[ $# -gt 0 ]]; do
             ;;
         --skip-duplicates)
             SKIP_DUPLICATES=true
+            shift
+            ;;
+        --auto-close)
+            AUTO_CLOSE=true
             shift
             ;;
         --output-json)
@@ -612,6 +621,166 @@ is_non_compliant() {
     return 1  # false - is compliant
 }
 
+# Function to extract component name from JIRA summary
+# Summary format: "[app-name] component-name - Konflux compliance failure"
+extract_component_from_summary() {
+    local summary="$1"
+
+    # Extract component name between "] " and " - Konflux"
+    # e.g., "[acm-215] cluster-curator-controller-215 - Konflux compliance failure"
+    #       -> "cluster-curator-controller-215"
+    echo "$summary" | sed -n 's/.*\] \(.*\) - Konflux.*/\1/p'
+}
+
+# Function to close JIRA issue with resolution comment
+close_jira_issue() {
+    local issue_key="$1"
+    local component_name="$2"
+    local build_time="$3"
+    local promotion_status="$4"
+    local hermetic_status="$5"
+    local ec_status="$6"
+    local multiarch_status="$7"
+    local push_status="$8"
+
+    # Build resolution comment
+    local comment="Component \`$component_name\` is now compliant based on the latest compliance scan.
+
+h3. Compliance Status (Latest Scan)
+
+||Check||Status||
+|Image Promotion|$promotion_status|
+|Hermetic Builds|$hermetic_status|
+|Enterprise Contract|$ec_status|
+|Multiarch Support|$multiarch_status|
+|Push Pipeline|$push_status|
+
+*Build Time:* $build_time
+
+All compliance checks are now passing. Auto-closing this issue."
+
+    if [[ "$DRY_RUN" == true ]]; then
+        echo -e "${YELLOW}[DRY RUN]${NC} Would close issue $issue_key for component $component_name" >&2
+        if [[ "$DEBUG" == true ]]; then
+            echo -e "${BLUE}Comment:${NC}" >&2
+            echo "$comment" >&2
+            echo "" >&2
+        fi
+        return 0
+    fi
+
+    # Add comment to issue
+    local comment_file=$(mktemp)
+    echo "$comment" > "$comment_file"
+
+    if [[ "$DEBUG" == true ]]; then
+        debug_echo "${BLUE}Adding comment to $issue_key${NC}"
+        debug_echo "$(cat "$comment_file")"
+    fi
+
+    jira issue comment add "$issue_key" --template "$comment_file" 2>&1 > /dev/null
+    local comment_exit_code=$?
+    rm -f "$comment_file"
+
+    if [[ $comment_exit_code -ne 0 ]]; then
+        echo -e "${RED}✗${NC} Failed to add comment to $issue_key" >&2
+        return 1
+    fi
+
+    # Close the issue (transition to Done or Closed)
+    if jira issue close "$issue_key" 2>&1 > /dev/null; then
+        echo -e "${GREEN}✓${NC} Closed issue $issue_key for component $component_name" >&2
+        return 0
+    else
+        echo -e "${RED}✗${NC} Failed to close issue $issue_key (transition failed)" >&2
+        return 1
+    fi
+}
+
+# Function to get open JIRA issues and auto-close resolved ones
+auto_close_resolved_issues() {
+    local project="$1"
+    local labels="$2"
+
+    # Build JQL query
+    local label_filters=""
+    IFS=',' read -ra LABEL_ARRAY <<< "$labels"
+    for label in "${LABEL_ARRAY[@]}"; do
+        label=$(echo "$label" | xargs)  # trim whitespace
+        if [[ -n "$label_filters" ]]; then
+            label_filters+=" AND "
+        fi
+        label_filters+="labels=$label"
+    done
+
+    local jql="project=$project AND $label_filters AND status NOT IN (Closed,Done,Resolved)"
+
+    debug_echo "${BLUE}JQL Query: $jql${NC}"
+
+    # Query JIRA for open issues
+    # Format: KEY<tab>SUMMARY
+    local open_issues=$(jira issue list --jql "$jql" --plain --no-headers --columns KEY,SUMMARY 2>/dev/null || echo "")
+
+    if [[ -z "$open_issues" ]]; then
+        echo -e "${BLUE}No open issues found to auto-close${NC}"
+        return 0
+    fi
+
+    local closed_count=0
+    local skipped_count=0
+    local failed_count=0
+
+    echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    echo -e "${BLUE}Auto-closing resolved issues${NC}"
+    echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+
+    while IFS=$'\t' read -r issue_key summary; do
+        # Extract component name from summary
+        local component_name=$(extract_component_from_summary "$summary")
+
+        if [[ -z "$component_name" ]]; then
+            echo -e "${YELLOW}⊘${NC} Skipping $issue_key - could not extract component name from summary"
+            skipped_count=$((skipped_count + 1))
+            continue
+        fi
+
+        debug_echo "${BLUE}Checking $issue_key: $component_name${NC}"
+
+        # Check if component exists in COMPLIANCE_STATUS map
+        if [[ ! -v COMPLIANCE_STATUS["$component_name"] ]]; then
+            echo -e "${YELLOW}⊘${NC} Skipping $issue_key - component $component_name not found in compliance CSV"
+            skipped_count=$((skipped_count + 1))
+            continue
+        fi
+
+        # Check if component is now compliant
+        if [[ "${COMPLIANCE_STATUS[$component_name]}" == "compliant" ]]; then
+            echo -e "${BLUE}Processing:${NC} $component_name ($issue_key)"
+
+            # Parse compliance details
+            IFS=',' read -r promotion_status hermetic_status ec_status multiarch_status push_status build_time <<< "${COMPLIANCE_DETAILS[$component_name]}"
+
+            if close_jira_issue "$issue_key" "$component_name" "$build_time" "$promotion_status" "$hermetic_status" "$ec_status" "$multiarch_status" "$push_status"; then
+                closed_count=$((closed_count + 1))
+            else
+                failed_count=$((failed_count + 1))
+            fi
+        else
+            debug_echo "${YELLOW}⊘${NC} Skipping $issue_key - component $component_name is still non-compliant"
+            skipped_count=$((skipped_count + 1))
+        fi
+
+    done <<< "$open_issues"
+
+    # Print auto-close summary
+    echo ""
+    echo -e "${BLUE}Auto-close Summary:${NC}"
+    echo -e "${GREEN}Issues closed:${NC} $closed_count"
+    echo -e "${YELLOW}Issues skipped:${NC} $skipped_count"
+    echo -e "${RED}Failed:${NC} $failed_count"
+    echo ""
+}
+
 # Main processing
 echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
 echo -e "${BLUE}Konflux Compliance JIRA Issue Creator${NC}"
@@ -631,6 +800,10 @@ total_count=0
 declare -a created_issues
 declare -a created_issues_json
 
+# For auto-close feature: track compliance status
+declare -A COMPLIANCE_STATUS
+declare -A COMPLIANCE_DETAILS
+
 echo -e "${BLUE}Starting to process CSV file: $COMPLIANCE_FILE${NC}" >&2
 echo -e "${BLUE}File exists: $(test -f "$COMPLIANCE_FILE" && echo yes || echo no)${NC}" >&2
 echo -e "${BLUE}File content (first 3 lines):${NC}" >&2
@@ -641,9 +814,18 @@ while IFS=',' read -r component_name build_time promotion_status hermetic_status
     total_count=$((total_count + 1))
     echo -e "${BLUE}DEBUG: Read line $total_count: component=$component_name${NC}" >&2
 
-    # Skip empty lines
-    if [[ -z "$component_name" ]]; then
+    # Skip empty lines and header
+    if [[ -z "$component_name" || "$component_name" == "Konflux Component" ]]; then
         continue
+    fi
+
+    # Track compliance status for auto-close feature
+    if is_non_compliant "$promotion_status" "$hermetic_status" "$ec_status" "$multiarch_status" "$push_status"; then
+        COMPLIANCE_STATUS["$component_name"]="non-compliant"
+    else
+        COMPLIANCE_STATUS["$component_name"]="compliant"
+        # Store details for auto-close comment
+        COMPLIANCE_DETAILS["$component_name"]="$promotion_status,$hermetic_status,$ec_status,$multiarch_status,$push_status,$build_time"
     fi
 
     # Check if component is non-compliant
@@ -671,6 +853,11 @@ while IFS=',' read -r component_name build_time promotion_status hermetic_status
     fi
 
 done < "$COMPLIANCE_FILE"
+
+# Auto-close resolved issues if requested
+if [[ "$AUTO_CLOSE" == true ]]; then
+    auto_close_resolved_issues "$JIRA_PROJECT" "$LABELS"
+fi
 
 # Save output JSON if requested
 if [[ -n "$OUTPUT_JSON" && "${created_count}" -gt 0 ]]; then

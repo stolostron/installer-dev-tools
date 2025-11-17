@@ -195,14 +195,44 @@ Issues:
   • managedcluster-import-controller-215: https://issues.redhat.com/browse/ACM-12346
 ```
 
+### Auto-Closing Resolved Issues
+
+The script can automatically close JIRA issues for components that have become compliant:
+
+```bash
+./create-compliance-jira-issues.sh --auto-close data/acm-215-compliance.csv
+```
+
+**How it works**:
+
+1. Reads the compliance CSV to build a map of component compliance status
+2. Queries JIRA for open issues with the configured labels (`konflux,compliance,auto-created` by default)
+3. For each open issue, extracts the component name from the issue summary
+4. Checks if that component is now compliant in the latest scan
+5. If compliant, adds a resolution comment showing the passing compliance status and closes the issue
+
+**Resolution comment includes**:
+
+- Component name and confirmation of compliance
+- Table showing all compliance checks passing (Image Promotion, Hermetic Builds, EC, Multiarch, Push Status)
+- Build timestamp from latest scan
+
+**Example**:
+
+```bash
+# Dry-run to see what would be closed
+./create-compliance-jira-issues.sh --auto-close --dry-run data/acm-215-compliance.csv
+
+# Actually close resolved issues
+./create-compliance-jira-issues.sh --auto-close data/acm-215-compliance.csv
+
+# Combine with issue creation: create new issues AND close resolved ones
+./create-compliance-jira-issues.sh --skip-duplicates --auto-close data/acm-215-compliance.csv
+```
+
 **TODO / Future Enhancements**:
 
-1. **Auto-close resolved issues**
-   - When a new compliance scan shows a component is now compliant, automatically close the existing JIRA issue
-   - Add a closing comment with the new scan results showing all checks passing
-   - Implementation: Query for open issues with same component name + labels, check if component is now compliant, close with resolution comment
-
-2. **Handle updated scan results for existing issues**
+1. **Handle updated scan results for existing issues**
    - Decision needed on how to handle components that remain non-compliant across scans:
    - **Option A**: Close old issue, create new one with updated scan data (keeps issue history clean, clear timeline)
    - **Option B**: Add comment to existing issue with new scan results (preserves discussion thread, shows progression)
@@ -241,6 +271,20 @@ Issues:
        - Contact: JIRA admin team for service account creation
        - Scope: Issue creation, search, and comment permissions on ACM project
    - Recommended schedule: Daily
+
+5. **Check for common pipeline usage**
+   - Verify that components are using the standardized common pipeline
+   - Reference: [stolostron/konflux-build-catalog common.yaml](https://github.com/stolostron/konflux-build-catalog/blob/main/pipelines/common.yaml)
+   - Implementation:
+     - Check if `.tekton/*.yaml` files reference the common pipeline
+     - Look for `pipelineRef` pointing to `common` pipeline from konflux-build-catalog
+     - Flag components using custom/non-standard pipelines
+   - Benefits:
+     - Ensures consistent build processes across all components
+     - Easier maintenance and updates to pipeline definitions
+     - Compliance with team standards
+   - Add to compliance checks and create JIRA issues for non-compliant components
+   - Proposed label: `custom-pipeline` for components not using common pipeline
 
 ## Prerequisites
 
