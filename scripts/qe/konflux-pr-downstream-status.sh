@@ -246,7 +246,7 @@ function print_pr_testability {
 
 	debug_echo "attempting to pull sha for $repo"
 	debug_echo ${repo_commits["$repo"]}
-	local pr_sha=$(echo "${repo_commits["$repo"]}" | jq -r '.[]| select(.commit.message | split("\n")[0] | contains("#2729")) | .sha')
+	local pr_sha=$(echo "${repo_commits["$repo"]}" | jq -r ".[]| select(.commit.message | split(\"\\n\")[0] | contains(\"#$number\")) | .sha")
 
 	# echo -e "pr: $pr_sha\npublished: $published_sha"
 
