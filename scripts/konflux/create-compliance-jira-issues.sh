@@ -122,12 +122,29 @@ YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
+# Compliance status constants
+readonly STATUS_FAILED="Failed"
+readonly STATUS_NOT_ENABLED="Not Enabled"
+readonly STATUS_NOT_COMPLIANT="Not Compliant"
+readonly STATUS_PUSH_FAILURE="Push Failure"
+readonly STATUS_COMPLIANT="Compliant"
+readonly STATUS_ENABLED="Enabled"
+readonly STATUS_IMAGE_PULL_FAILURE="IMAGE_PULL_FAILURE"
+readonly STATUS_INSPECTION_FAILURE="INSPECTION_FAILURE"
+readonly STATUS_DIGEST_FAILURE="DIGEST_FAILURE"
+
+# JIRA field constants
+readonly JIRA_ACTIVITY_TYPE="Quality / Stability / Reliability"
+readonly JIRA_SEVERITY="Critical"
+readonly DEFAULT_LABELS="konflux,compliance,auto-created"
+readonly DEFAULT_JIRA_SERVER="https://issues.redhat.com"
+
 # Default values
 JIRA_PROJECT="${JIRA_PROJECT:-ACM}"
 ISSUE_TYPE="Bug"
 PRIORITY="Critical"
 COMPONENT=""
-LABELS="konflux,compliance,auto-created"
+LABELS="$DEFAULT_LABELS"
 DRY_RUN=false
 SKIP_DUPLICATES=false
 AUTO_CLOSE=false
@@ -250,7 +267,7 @@ if [[ ! -f "$JIRA_CONFIG_FILE" ]]; then
     fi
 
     # Set defaults for jira init
-    JIRA_SERVER="${JIRA_SERVER:-https://issues.redhat.com}"
+    JIRA_SERVER="${JIRA_SERVER:-$DEFAULT_JIRA_SERVER}"
     JIRA_INSTALLATION="${JIRA_INSTALLATION:-Local}"
     JIRA_LOGIN="${JIRA_LOGIN:-${JIRA_USER:-}}"
     JIRA_AUTH_TYPE="${JIRA_AUTH_TYPE:-bearer}"
@@ -329,6 +346,102 @@ if ! command -v jq &> /dev/null; then
     exit 1
 fi
 
+# Function to get JIRA server URL from configuration
+get_jira_server_url() {
+    local jira_config="${JIRA_CONFIG_FILE:-$HOME/.config/.jira/.config.yml}"
+    local url=""
+
+    if [[ -f "$jira_config" ]]; then
+        url=$(grep "^[[:space:]]*server:" "$jira_config" | awk '{print $2}' | tr -d '"' 2>/dev/null || echo "")
+    fi
+
+    echo "${url:-$DEFAULT_JIRA_SERVER}"
+}
+
+# Function to build issue description with compliance details
+build_issue_description() {
+    local component_name="$1"
+    local build_time="$2"
+    local promotion_status="$3"
+    local hermetic_status="$4"
+    local ec_status="$5"
+    local multiarch_status="$6"
+    local push_status="$7"
+    local push_pipelinerun_url="$8"
+    local ec_pipelinerun_url="$9"
+
+    local description="h2. Component Compliance Failure
+
+*Component:* \`$component_name\`
+*Application:* \`$APP_NAME\`
+*Build Time:* $build_time
+
+h3. Compliance Status
+
+||Check||Status||
+|Image Promotion|$promotion_status|
+|Hermetic Builds|$hermetic_status|
+|Enterprise Contract|$ec_status|
+|Multiarch Support|$multiarch_status|
+|Push Pipeline|$push_status|
+
+h3. Required Actions
+"
+
+    # Add specific action items based on failures
+    if [[ "$promotion_status" =~ ($STATUS_FAILED|$STATUS_IMAGE_PULL_FAILURE|$STATUS_INSPECTION_FAILURE|$STATUS_DIGEST_FAILURE) ]]; then
+        description+="* Fix image promotion issues - component has no valid promoted image
+"
+    fi
+
+    if [[ "$hermetic_status" == "$STATUS_NOT_ENABLED" ]]; then
+        description+="* Enable hermetic builds:
+** Set \`hermetic: true\` in .tekton pipeline YAML
+** Set \`build-source-image: true\` in .tekton pipeline YAML
+** Add \`prefetch-input\` configuration or vendor dependencies
+"
+    fi
+
+    if [[ "$ec_status" == "$STATUS_NOT_COMPLIANT" ]]; then
+        description+="* Fix Enterprise Contract violations - check Konflux pipeline logs
+"
+    fi
+
+    if [[ "$ec_status" == "$STATUS_PUSH_FAILURE" ]]; then
+        description+="* Fix pipeline push failures - component build is failing
+"
+    fi
+
+    if [[ "$multiarch_status" == "$STATUS_NOT_ENABLED" ]]; then
+        description+="* Enable multiarch support:
+** Add \`build-platforms\` parameter with 4 platforms: [linux/amd64, linux/arm64, linux/ppc64le, linux/s390x]
+"
+    fi
+
+    if [[ "$push_status" == "$STATUS_FAILED" ]]; then
+        description+="* Fix push pipeline failures - check the build pipeline run logs for errors
+"
+    fi
+
+    description+="
+h3. Pipeline Run Links
+"
+
+    # Add push pipelinerun link if available
+    if [[ -n "$push_pipelinerun_url" && "$push_pipelinerun_url" != "N/A" && "$push_pipelinerun_url" != "null" ]]; then
+        description+="
+* [Build Pipeline Run|$push_pipelinerun_url]"
+    fi
+
+    # Add EC pipelinerun link if available
+    if [[ -n "$ec_pipelinerun_url" && "$ec_pipelinerun_url" != "N/A" && "$ec_pipelinerun_url" != "null" ]]; then
+        description+="
+* [Enterprise Contract Pipeline Run|$ec_pipelinerun_url]"
+    fi
+
+    echo "$description"
+}
+
 # Function to get all JIRA component names for a component (handles multi-squad components)
 # Only returns jira-component field values, does not fall back to name field
 get_component_squads() {
@@ -369,75 +482,8 @@ create_jira_issue() {
     local push_pipelinerun_url="$8"
     local ec_pipelinerun_url="$9"
 
-    # Build description with compliance details
-    local description="h2. Component Compliance Failure
-
-*Component:* \`$component_name\`
-*Application:* \`$APP_NAME\`
-*Build Time:* $build_time
-
-h3. Compliance Status
-
-||Check||Status||
-|Image Promotion|$promotion_status|
-|Hermetic Builds|$hermetic_status|
-|Enterprise Contract|$ec_status|
-|Multiarch Support|$multiarch_status|
-|Push Pipeline|$push_status|
-
-h3. Required Actions
-"
-
-    # Add specific action items based on failures
-    if [[ "$promotion_status" =~ (Failed|IMAGE_PULL_FAILURE|INSPECTION_FAILURE|DIGEST_FAILURE) ]]; then
-        description+="* Fix image promotion issues - component has no valid promoted image
-"
-    fi
-
-    if [[ "$hermetic_status" == "Not Enabled" ]]; then
-        description+="* Enable hermetic builds:
-** Set \`hermetic: true\` in .tekton pipeline YAML
-** Set \`build-source-image: true\` in .tekton pipeline YAML
-** Add \`prefetch-input\` configuration or vendor dependencies
-"
-    fi
-
-    if [[ "$ec_status" == "Not Compliant" ]]; then
-        description+="* Fix Enterprise Contract violations - check Konflux pipeline logs
-"
-    fi
-
-    if [[ "$ec_status" == "Push Failure" ]]; then
-        description+="* Fix pipeline push failures - component build is failing
-"
-    fi
-
-    if [[ "$multiarch_status" == "Not Enabled" ]]; then
-        description+="* Enable multiarch support:
-** Add \`build-platforms\` parameter with 4 platforms: [linux/amd64, linux/arm64, linux/ppc64le, linux/s390x]
-"
-    fi
-
-    if [[ "$push_status" == "Failed" ]]; then
-        description+="* Fix push pipeline failures - check the build pipeline run logs for errors
-"
-    fi
-
-    description+="
-h3. Pipeline Run Links
-"
-
-    # Add push pipelinerun link if available
-    if [[ -n "$push_pipelinerun_url" && "$push_pipelinerun_url" != "N/A" && "$push_pipelinerun_url" != "null" ]]; then
-        description+="
-* [Build Pipeline Run|$push_pipelinerun_url]"
-    fi
-
-    # Add EC pipelinerun link if available
-    if [[ -n "$ec_pipelinerun_url" && "$ec_pipelinerun_url" != "N/A" && "$ec_pipelinerun_url" != "null" ]]; then
-        description+="
-* [Enterprise Contract Pipeline Run|$ec_pipelinerun_url]"
-    fi
+    # Build description using helper function
+    local description=$(build_issue_description "$component_name" "$build_time" "$promotion_status" "$hermetic_status" "$ec_status" "$multiarch_status" "$push_status" "$push_pipelinerun_url" "$ec_pipelinerun_url")
 
     # Build summary
     local summary="[$APP_NAME] $component_name - Konflux compliance failure"
@@ -469,8 +515,8 @@ h3. Pipeline Run Links
         "--priority" "$PRIORITY"
         "--summary" "$summary"
         "--template" "$desc_file"
-        "--custom" "activity-type=Quality / Stability / Reliability"
-        "--custom" "severity=Critical"
+        "--custom" "activity-type=$JIRA_ACTIVITY_TYPE"
+        "--custom" "severity=$JIRA_SEVERITY"
         "--no-input"
     )
 
@@ -588,10 +634,7 @@ h3. Pipeline Run Links
 
     if [[ $exit_code -eq 0 && -n "$issue_key" ]]; then
         # Get JIRA URL from jira-cli config
-        local jira_url=$(jira config list 2>/dev/null | grep "server:" | awk '{print $2}' || echo "")
-        if [[ -z "$jira_url" ]]; then
-            jira_url="https://issues.redhat.com"
-        fi
+        local jira_url=$(get_jira_server_url)
         echo -e "${GREEN}✓${NC} Created issue $issue_key for $component_name: $jira_url/browse/$issue_key" >&2
         echo "$issue_key"  # Output issue key for capture
         return 0
@@ -599,6 +642,32 @@ h3. Pipeline Run Links
         echo -e "${RED}✗${NC} Failed to create issue for $component_name: $output" >&2
         return 1
     fi
+}
+
+# Function to validate CSV line format
+# Expected format: at least 7 required fields (component,build_time,promotion,hermetic,ec,multiarch,push)
+# Optional fields: push_url, ec_url
+validate_csv_line() {
+    local line="$1"
+    local line_number="$2"
+    local min_required_fields=7
+
+    # Skip empty lines
+    if [[ -z "$line" ]]; then
+        return 0
+    fi
+
+    # Count fields
+    local field_count=$(echo "$line" | awk -F',' '{print NF}')
+
+    if [[ "$field_count" -lt "$min_required_fields" ]]; then
+        echo -e "${RED}ERROR:${NC} Invalid CSV format at line $line_number" >&2
+        echo -e "${RED}Expected at least $min_required_fields fields, got $field_count${NC}" >&2
+        echo -e "${YELLOW}Line:${NC} $line" >&2
+        return 1
+    fi
+
+    return 0
 }
 
 # Function to check if a component is non-compliant
@@ -610,11 +679,11 @@ is_non_compliant() {
     local push_status="$5"
 
     # Check for any failure conditions
-    if [[ "$promotion_status" =~ (Failed|IMAGE_PULL_FAILURE|INSPECTION_FAILURE|DIGEST_FAILURE) ]] || \
-       [[ "$hermetic_status" == "Not Enabled" ]] || \
-       [[ "$ec_status" =~ (Not Compliant|Push Failure) ]] || \
-       [[ "$multiarch_status" == "Not Enabled" ]] || \
-       [[ "$push_status" == "Failed" ]]; then
+    if [[ "$promotion_status" =~ ($STATUS_FAILED|$STATUS_IMAGE_PULL_FAILURE|$STATUS_INSPECTION_FAILURE|$STATUS_DIGEST_FAILURE) ]] || \
+       [[ "$hermetic_status" == "$STATUS_NOT_ENABLED" ]] || \
+       [[ "$ec_status" =~ ($STATUS_NOT_COMPLIANT|$STATUS_PUSH_FAILURE) ]] || \
+       [[ "$multiarch_status" == "$STATUS_NOT_ENABLED" ]] || \
+       [[ "$push_status" == "$STATUS_FAILED" ]]; then
         return 0  # true - is non-compliant
     fi
 
@@ -687,8 +756,8 @@ All compliance checks are now passing. Auto-closing this issue."
         return 1
     fi
 
-    # Close the issue (transition to Done or Closed)
-    if jira issue close "$issue_key" 2>&1 > /dev/null; then
+    # Close the issue (transition to Closed state)
+    if jira issue move "$issue_key" "Closed" 2>&1 > /dev/null; then
         echo -e "${GREEN}✓${NC} Closed issue $issue_key for component $component_name" >&2
         return 0
     else
@@ -812,6 +881,16 @@ echo "" >&2
 
 while IFS=',' read -r component_name build_time promotion_status hermetic_status ec_status multiarch_status push_status push_pipelinerun_url ec_pipelinerun_url; do
     total_count=$((total_count + 1))
+
+    # Read the original line for validation
+    IFS= read -r original_line < <(sed -n "${total_count}p" "$COMPLIANCE_FILE")
+
+    # Validate CSV line format (allows optional trailing fields)
+    if ! validate_csv_line "$original_line" "$total_count"; then
+        failed_count=$((failed_count + 1))
+        continue
+    fi
+
     echo -e "${BLUE}DEBUG: Read line $total_count: component=$component_name${NC}" >&2
 
     # Skip empty lines and header
@@ -879,13 +958,8 @@ echo -e "${RED}Failed:${NC} $failed_count"
 if [[ "${created_count}" -gt 0 ]]; then
     echo ""
     echo -e "${BLUE}Issues:${NC}"
-    # Get JIRA URL from jira-cli config file directly
-    jira_config="${HOME}/.config/.jira/.config.yml"
-    if [[ -f "$jira_config" ]]; then
-        jira_url=$(grep "^[[:space:]]*server:" "$jira_config" | awk '{print $2}' | tr -d '"' || echo "https://issues.redhat.com")
-    else
-        jira_url="https://issues.redhat.com"
-    fi
+    # Get JIRA URL from jira-cli config
+    jira_url=$(get_jira_server_url)
     for issue_info in "${created_issues[@]}"; do
         comp_name="${issue_info%%:*}"
         issue_key="${issue_info##*:}"
