@@ -108,7 +108,7 @@ EXAMPLES:
 
 CSV FORMAT:
     The compliance CSV file should have the following format (from compliance.sh):
-    <component-name>,<build-timestamp>,<promotion-status>,<hermetic-status>,<ec-status>,<multiarch-status>,<pipelinerun-url>
+    <component-name>,<scan-time>,<promoted-time>,<promotion-status>,<hermetic-status>,<ec-status>,<multiarch-status>,<push-status>,<push-url>,<ec-url>
 
     Each line represents one component with its compliance data.
 
@@ -124,6 +124,7 @@ NC='\033[0m' # No Color
 
 # Compliance status constants
 readonly STATUS_FAILED="Failed"
+readonly STATUS_SUCCESSFUL="Successful"
 readonly STATUS_NOT_ENABLED="Not Enabled"
 readonly STATUS_NOT_COMPLIANT="Not Compliant"
 readonly STATUS_PUSH_FAILURE="Push Failure"
@@ -361,67 +362,36 @@ get_jira_server_url() {
 # Function to build issue description with compliance details
 build_issue_description() {
     local component_name="$1"
-    local build_time="$2"
-    local promotion_status="$3"
-    local hermetic_status="$4"
-    local ec_status="$5"
-    local multiarch_status="$6"
-    local push_status="$7"
-    local push_pipelinerun_url="$8"
-    local ec_pipelinerun_url="$9"
+    local scan_time="$2"
+    local promoted_time="$3"
+    local promotion_status="$4"
+    local hermetic_status="$5"
+    local ec_status="$6"
+    local multiarch_status="$7"
+    local push_status="$8"
+    local push_pipelinerun_url="$9"
+    local ec_pipelinerun_url="${10}"
+
+    # Build compliance status table using common helper
+    local compliance_table=$(build_compliance_status_table "$promotion_status" "$promoted_time" "$hermetic_status" "$ec_status" "$multiarch_status" "$push_status")
+
+    # Build action items using common helper
+    local action_items=$(build_action_items "$promotion_status" "$promoted_time" "$hermetic_status" "$ec_status" "$multiarch_status" "$push_status")
 
     local description="h2. Component Compliance Failure
 
 *Component:* \`$component_name\`
 *Application:* \`$APP_NAME\`
-*Build Time:* $build_time
+*Scan Time:* $scan_time
+*Image Build Time:* $promoted_time
 
 h3. Compliance Status
 
-||Check||Status||
-|Image Promotion|$promotion_status|
-|Hermetic Builds|$hermetic_status|
-|Enterprise Contract|$ec_status|
-|Multiarch Support|$multiarch_status|
-|Push Pipeline|$push_status|
+$compliance_table
 
 h3. Required Actions
-"
 
-    # Add specific action items based on failures
-    if [[ "$promotion_status" =~ ($STATUS_FAILED|$STATUS_IMAGE_PULL_FAILURE|$STATUS_INSPECTION_FAILURE|$STATUS_DIGEST_FAILURE) ]]; then
-        description+="* Fix image promotion issues - component has no valid promoted image
-"
-    fi
-
-    if [[ "$hermetic_status" == "$STATUS_NOT_ENABLED" ]]; then
-        description+="* Enable hermetic builds:
-** Set \`hermetic: true\` in .tekton pipeline YAML
-** Set \`build-source-image: true\` in .tekton pipeline YAML
-** Add \`prefetch-input\` configuration or vendor dependencies
-"
-    fi
-
-    if [[ "$ec_status" == "$STATUS_NOT_COMPLIANT" ]]; then
-        description+="* Fix Enterprise Contract violations - check Konflux pipeline logs
-"
-    fi
-
-    if [[ "$ec_status" == "$STATUS_PUSH_FAILURE" ]]; then
-        description+="* Fix pipeline push failures - component build is failing
-"
-    fi
-
-    if [[ "$multiarch_status" == "$STATUS_NOT_ENABLED" ]]; then
-        description+="* Enable multiarch support:
-** Add \`build-platforms\` parameter with 4 platforms: [linux/amd64, linux/arm64, linux/ppc64le, linux/s390x]
-"
-    fi
-
-    if [[ "$push_status" == "$STATUS_FAILED" ]]; then
-        description+="* Fix push pipeline failures - check the build pipeline run logs for errors
-"
-    fi
+$action_items"
 
     description+="
 h3. Pipeline Run Links
@@ -473,17 +443,18 @@ get_component_squads() {
 # Function to create JIRA issue
 create_jira_issue() {
     local component_name="$1"
-    local build_time="$2"
-    local promotion_status="$3"
-    local hermetic_status="$4"
-    local ec_status="$5"
-    local multiarch_status="$6"
-    local push_status="$7"
-    local push_pipelinerun_url="$8"
-    local ec_pipelinerun_url="$9"
+    local scan_time="$2"
+    local promoted_time="$3"
+    local promotion_status="$4"
+    local hermetic_status="$5"
+    local ec_status="$6"
+    local multiarch_status="$7"
+    local push_status="$8"
+    local push_pipelinerun_url="$9"
+    local ec_pipelinerun_url="${10}"
 
     # Build description using helper function
-    local description=$(build_issue_description "$component_name" "$build_time" "$promotion_status" "$hermetic_status" "$ec_status" "$multiarch_status" "$push_status" "$push_pipelinerun_url" "$ec_pipelinerun_url")
+    local description=$(build_issue_description "$component_name" "$scan_time" "$promoted_time" "$promotion_status" "$hermetic_status" "$ec_status" "$multiarch_status" "$push_status" "$push_pipelinerun_url" "$ec_pipelinerun_url")
 
     # Build summary
     local summary="[$APP_NAME] $component_name - Konflux compliance failure"
@@ -497,9 +468,17 @@ create_jira_issue() {
 
         if [[ -n "$existing_issues" ]]; then
             local existing_key=$(echo "$existing_issues" | head -n 1 | awk '{print $1}' | xargs)
-            echo -e "${YELLOW}⊘${NC} Skipping $component_name - similar issue already exists: $existing_key" >&2
-            echo "$existing_key"  # Output existing issue key for tracking
-            return 0
+            echo -e "${YELLOW}⊘${NC} Found existing issue $existing_key for $component_name - adding update comment" >&2
+
+            # Add update comment with latest scan results
+            if update_existing_issue "$existing_key" "$component_name" "$scan_time" "$promoted_time" "$promotion_status" "$hermetic_status" "$ec_status" "$multiarch_status" "$push_status" "$push_pipelinerun_url" "$ec_pipelinerun_url"; then
+                echo "UPDATED:$existing_key"  # Output with UPDATED prefix for tracking
+                return 0
+            else
+                # Failed to update, but we still don't want to create a duplicate
+                echo "FAILED_UPDATE:$existing_key"  # Output with FAILED_UPDATE prefix for tracking
+                return 1
+            fi
         fi
     fi
 
@@ -645,12 +624,11 @@ create_jira_issue() {
 }
 
 # Function to validate CSV line format
-# Expected format: at least 7 required fields (component,build_time,promotion,hermetic,ec,multiarch,push)
-# Optional fields: push_url, ec_url
+# Expected format: at least 9 required fields (component,scan_time,promoted_time,promotion,hermetic,ec,multiarch,push,push_url,ec_url)
 validate_csv_line() {
     local line="$1"
     local line_number="$2"
-    local min_required_fields=7
+    local min_required_fields=9
 
     # Skip empty lines
     if [[ -z "$line" ]]; then
@@ -670,6 +648,30 @@ validate_csv_line() {
     return 0
 }
 
+# Function to check if image build time is stale (>2 weeks)
+is_image_stale() {
+    local promoted_time="$1"
+
+    # Check if promoted_time is a valid timestamp
+    if [[ "$promoted_time" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2} ]]; then
+        # Convert promoted_time to epoch seconds (handle both Z suffix and no suffix)
+        local promoted_time_clean="${promoted_time%Z}"
+        local promoted_epoch=$(date -j -f "%Y-%m-%dT%H:%M:%S" "$promoted_time_clean" "+%s" 2>/dev/null)
+
+        if [[ -n "$promoted_epoch" ]]; then
+            local current_epoch=$(date +%s)
+            local age_seconds=$((current_epoch - promoted_epoch))
+            local two_weeks_seconds=$((14 * 24 * 60 * 60))  # 2 weeks in seconds
+
+            if [[ $age_seconds -gt $two_weeks_seconds ]]; then
+                return 0  # true - is stale
+            fi
+        fi
+    fi
+
+    return 1  # false - not stale
+}
+
 # Function to check if a component is non-compliant
 is_non_compliant() {
     local promotion_status="$1"
@@ -677,10 +679,20 @@ is_non_compliant() {
     local ec_status="$3"
     local multiarch_status="$4"
     local push_status="$5"
+    local promoted_time="$6"
 
-    # Check for any failure conditions
-    if [[ "$promotion_status" =~ ($STATUS_FAILED|$STATUS_IMAGE_PULL_FAILURE|$STATUS_INSPECTION_FAILURE|$STATUS_DIGEST_FAILURE) ]] || \
-       [[ "$hermetic_status" == "$STATUS_NOT_ENABLED" ]] || \
+    # Check for promotion failures
+    if [[ "$promotion_status" =~ ($STATUS_FAILED|$STATUS_IMAGE_PULL_FAILURE|$STATUS_INSPECTION_FAILURE|$STATUS_DIGEST_FAILURE) ]]; then
+        return 0  # true - is non-compliant
+    fi
+
+    # Check if successful promotion but image is stale (>2 weeks) - treat as non-compliant
+    if [[ "$promotion_status" == "$STATUS_SUCCESSFUL" ]] && is_image_stale "$promoted_time"; then
+        return 0  # true - is non-compliant (stale image)
+    fi
+
+    # Check for other failure conditions
+    if [[ "$hermetic_status" == "$STATUS_NOT_ENABLED" ]] || \
        [[ "$ec_status" =~ ($STATUS_NOT_COMPLIANT|$STATUS_PUSH_FAILURE) ]] || \
        [[ "$multiarch_status" == "$STATUS_NOT_ENABLED" ]] || \
        [[ "$push_status" == "$STATUS_FAILED" ]]; then
@@ -688,6 +700,104 @@ is_non_compliant() {
     fi
 
     return 1  # false - is compliant
+}
+
+# Function to format Image Promotion status with timestamp and staleness check
+# Returns: "Successful(timestamp)", "Stale(timestamp)" if >2 weeks old, or original status
+format_promotion_status() {
+    local promotion_status="$1"
+    local promoted_time="$2"
+
+    # If promotion was successful, check if image is stale (>2 weeks)
+    if [[ "$promotion_status" == "$STATUS_SUCCESSFUL" ]]; then
+        if is_image_stale "$promoted_time"; then
+            echo "Stale($promoted_time)"
+        else
+            echo "Successful($promoted_time)"
+        fi
+        return
+    fi
+
+    # For all other statuses (Failed, IMAGE_PULL_FAILURE, etc.), return as-is
+    echo "$promotion_status"
+}
+
+# Function to build compliance status table (common for all JIRA issue operations)
+build_compliance_status_table() {
+    local promotion_status="$1"
+    local promoted_time="$2"
+    local hermetic_status="$3"
+    local ec_status="$4"
+    local multiarch_status="$5"
+    local push_status="$6"
+
+    # Format promotion status with timestamp and staleness check
+    local formatted_promotion_status=$(format_promotion_status "$promotion_status" "$promoted_time")
+
+    local table="||Check||Status||
+|Image Promotion|$formatted_promotion_status|
+|Hermetic Builds|$hermetic_status|
+|Enterprise Contract|$ec_status|
+|Multiarch Support|$multiarch_status|
+|Push Pipeline|$push_status|"
+
+    echo "$table"
+}
+
+# Function to build action items based on compliance failures (common for all JIRA issue operations)
+build_action_items() {
+    local promotion_status="$1"
+    local promoted_time="$2"
+    local hermetic_status="$3"
+    local ec_status="$4"
+    local multiarch_status="$5"
+    local push_status="$6"
+
+    local actions=""
+
+    # Promotion failures or stale images
+    if [[ "$promotion_status" =~ ($STATUS_FAILED|$STATUS_IMAGE_PULL_FAILURE|$STATUS_INSPECTION_FAILURE|$STATUS_DIGEST_FAILURE) ]]; then
+        actions+="* Fix image promotion issues - component has no valid promoted image
+"
+    elif [[ "$promotion_status" == "$STATUS_SUCCESSFUL" ]] && is_image_stale "$promoted_time"; then
+        actions+="* Rebuild component - image is over 2 weeks old and needs to be updated
+"
+    fi
+
+    # Hermetic builds
+    if [[ "$hermetic_status" == "$STATUS_NOT_ENABLED" ]]; then
+        actions+="* Enable hermetic builds:
+** Set \`hermetic: true\` in .tekton pipeline YAML
+** Set \`build-source-image: true\` in .tekton pipeline YAML
+** Add \`prefetch-input\` configuration or vendor dependencies
+"
+    fi
+
+    # Enterprise Contract
+    if [[ "$ec_status" == "$STATUS_NOT_COMPLIANT" ]]; then
+        actions+="* Fix Enterprise Contract violations - check Konflux pipeline logs
+"
+    fi
+
+    if [[ "$ec_status" == "$STATUS_PUSH_FAILURE" ]]; then
+        actions+="* Fix pipeline push failures - component build is failing
+"
+    fi
+
+    # Multiarch support
+    if [[ "$multiarch_status" == "$STATUS_NOT_ENABLED" ]]; then
+        actions+="* Enable multiarch support:
+** Add \`build-platforms\` parameter with 4 platforms: [linux/amd64, linux/arm64, linux/ppc64le, linux/s390x]
+"
+    fi
+
+    # Push pipeline
+    if [[ "$push_status" == "$STATUS_FAILED" ]]; then
+        actions+="* Fix push pipeline failures - check the build pipeline run logs for errors
+"
+    fi
+
+    echo "$actions"
 }
 
 # Function to extract component name from JIRA summary
@@ -701,30 +811,117 @@ extract_component_from_summary() {
     echo "$summary" | sed -n 's/.*\] \(.*\) - Konflux.*/\1/p'
 }
 
+# Function to add update comment to existing JIRA issue with latest scan results
+update_existing_issue() {
+    local issue_key="$1"
+    local component_name="$2"
+    local scan_time="$3"
+    local promoted_time="$4"
+    local promotion_status="$5"
+    local hermetic_status="$6"
+    local ec_status="$7"
+    local multiarch_status="$8"
+    local push_status="$9"
+    local push_pipelinerun_url="${10}"
+    local ec_pipelinerun_url="${11}"
+
+    # Build compliance status table using common helper
+    local compliance_table=$(build_compliance_status_table "$promotion_status" "$promoted_time" "$hermetic_status" "$ec_status" "$multiarch_status" "$push_status")
+
+    # Build action items using common helper
+    local action_items=$(build_action_items "$promotion_status" "$promoted_time" "$hermetic_status" "$ec_status" "$multiarch_status" "$push_status")
+
+    # Build update comment with latest scan results
+    local comment="h2. Updated Compliance Scan Results
+
+Component \`$component_name\` remains non-compliant. Latest scan results below.
+
+h3. Current Compliance Status
+
+$compliance_table
+
+*Scan Time:* $scan_time
+*Image Build Time:* $promoted_time
+
+h3. Required Actions
+
+$action_items"
+
+    # Add pipeline run links if available
+    if [[ -n "$push_pipelinerun_url" && "$push_pipelinerun_url" != "N/A" && "$push_pipelinerun_url" != "null" ]] || \
+       [[ -n "$ec_pipelinerun_url" && "$ec_pipelinerun_url" != "N/A" && "$ec_pipelinerun_url" != "null" ]]; then
+        comment+="
+
+h3. Latest Pipeline Run Links
+"
+
+        if [[ -n "$push_pipelinerun_url" && "$push_pipelinerun_url" != "N/A" && "$push_pipelinerun_url" != "null" ]]; then
+            comment+="
+* [Build Pipeline Run|$push_pipelinerun_url]"
+        fi
+
+        if [[ -n "$ec_pipelinerun_url" && "$ec_pipelinerun_url" != "N/A" && "$ec_pipelinerun_url" != "null" ]]; then
+            comment+="
+* [Enterprise Contract Pipeline Run|$ec_pipelinerun_url]"
+        fi
+    fi
+
+    if [[ "$DRY_RUN" == true ]]; then
+        echo -e "${YELLOW}[DRY RUN]${NC} Would add update comment to issue $issue_key for component $component_name" >&2
+        if [[ "$DEBUG" == true ]]; then
+            echo -e "${BLUE}Comment:${NC}" >&2
+            echo "$comment" >&2
+            echo "" >&2
+        fi
+        return 0
+    fi
+
+    # Add comment to issue
+    local comment_file=$(mktemp)
+    echo "$comment" > "$comment_file"
+
+    if [[ "$DEBUG" == true ]]; then
+        debug_echo "${BLUE}Adding update comment to $issue_key${NC}"
+        debug_echo "$(cat "$comment_file")"
+    fi
+
+    jira issue comment add "$issue_key" --template "$comment_file" 2>&1 > /dev/null
+    local comment_exit_code=$?
+    rm -f "$comment_file"
+
+    if [[ $comment_exit_code -eq 0 ]]; then
+        echo -e "${GREEN}✓${NC} Updated issue $issue_key with latest scan results" >&2
+        return 0
+    else
+        echo -e "${RED}✗${NC} Failed to add comment to $issue_key" >&2
+        return 1
+    fi
+}
+
 # Function to close JIRA issue with resolution comment
 close_jira_issue() {
     local issue_key="$1"
     local component_name="$2"
-    local build_time="$3"
-    local promotion_status="$4"
-    local hermetic_status="$5"
-    local ec_status="$6"
-    local multiarch_status="$7"
-    local push_status="$8"
+    local scan_time="$3"
+    local promoted_time="$4"
+    local promotion_status="$5"
+    local hermetic_status="$6"
+    local ec_status="$7"
+    local multiarch_status="$8"
+    local push_status="$9"
+
+    # Build compliance status table using common helper
+    local compliance_table=$(build_compliance_status_table "$promotion_status" "$promoted_time" "$hermetic_status" "$ec_status" "$multiarch_status" "$push_status")
 
     # Build resolution comment
     local comment="Component \`$component_name\` is now compliant based on the latest compliance scan.
 
 h3. Compliance Status (Latest Scan)
 
-||Check||Status||
-|Image Promotion|$promotion_status|
-|Hermetic Builds|$hermetic_status|
-|Enterprise Contract|$ec_status|
-|Multiarch Support|$multiarch_status|
-|Push Pipeline|$push_status|
+$compliance_table
 
-*Build Time:* $build_time
+*Scan Time:* $scan_time
+*Image Build Time:* $promoted_time
 
 All compliance checks are now passing. Auto-closing this issue."
 
@@ -827,9 +1024,9 @@ auto_close_resolved_issues() {
             echo -e "${BLUE}Processing:${NC} $component_name ($issue_key)"
 
             # Parse compliance details
-            IFS=',' read -r promotion_status hermetic_status ec_status multiarch_status push_status build_time <<< "${COMPLIANCE_DETAILS[$component_name]}"
+            IFS=',' read -r scan_time promoted_time promotion_status hermetic_status ec_status multiarch_status push_status <<< "${COMPLIANCE_DETAILS[$component_name]}"
 
-            if close_jira_issue "$issue_key" "$component_name" "$build_time" "$promotion_status" "$hermetic_status" "$ec_status" "$multiarch_status" "$push_status"; then
+            if close_jira_issue "$issue_key" "$component_name" "$scan_time" "$promoted_time" "$promotion_status" "$hermetic_status" "$ec_status" "$multiarch_status" "$push_status"; then
                 closed_count=$((closed_count + 1))
             else
                 failed_count=$((failed_count + 1))
@@ -862,11 +1059,13 @@ echo ""
 # Read compliance data from CSV
 # The CSV format is: component_name,build_time,promotion_status,hermetic_status,ec_status,multiarch_status,push_status,push_pipelinerun_url,ec_pipelinerun_url
 created_count=0
+updated_count=0
 skipped_count=0
 failed_count=0
 total_count=0
 
 declare -a created_issues
+declare -a updated_issues
 declare -a created_issues_json
 
 # For auto-close feature: track compliance status
@@ -879,7 +1078,7 @@ echo -e "${BLUE}File content (first 3 lines):${NC}" >&2
 head -3 "$COMPLIANCE_FILE" >&2
 echo "" >&2
 
-while IFS=',' read -r component_name build_time promotion_status hermetic_status ec_status multiarch_status push_status push_pipelinerun_url ec_pipelinerun_url; do
+while IFS=',' read -r component_name scan_time promoted_time promotion_status hermetic_status ec_status multiarch_status push_status push_pipelinerun_url ec_pipelinerun_url; do
     total_count=$((total_count + 1))
 
     # Read the original line for validation
@@ -899,29 +1098,41 @@ while IFS=',' read -r component_name build_time promotion_status hermetic_status
     fi
 
     # Track compliance status for auto-close feature
-    if is_non_compliant "$promotion_status" "$hermetic_status" "$ec_status" "$multiarch_status" "$push_status"; then
+    if is_non_compliant "$promotion_status" "$hermetic_status" "$ec_status" "$multiarch_status" "$push_status" "$promoted_time"; then
         COMPLIANCE_STATUS["$component_name"]="non-compliant"
     else
         COMPLIANCE_STATUS["$component_name"]="compliant"
         # Store details for auto-close comment
-        COMPLIANCE_DETAILS["$component_name"]="$promotion_status,$hermetic_status,$ec_status,$multiarch_status,$push_status,$build_time"
+        COMPLIANCE_DETAILS["$component_name"]="$scan_time,$promoted_time,$promotion_status,$hermetic_status,$ec_status,$multiarch_status,$push_status"
     fi
 
     # Check if component is non-compliant
-    if is_non_compliant "$promotion_status" "$hermetic_status" "$ec_status" "$multiarch_status" "$push_status"; then
+    if is_non_compliant "$promotion_status" "$hermetic_status" "$ec_status" "$multiarch_status" "$push_status" "$promoted_time"; then
         echo -e "${BLUE}Processing:${NC} $component_name"
 
-        issue_output=$(create_jira_issue "$component_name" "$build_time" "$promotion_status" "$hermetic_status" "$ec_status" "$multiarch_status" "$push_status" "$push_pipelinerun_url" "$ec_pipelinerun_url")
+        issue_output=$(create_jira_issue "$component_name" "$scan_time" "$promoted_time" "$promotion_status" "$hermetic_status" "$ec_status" "$multiarch_status" "$push_status" "$push_pipelinerun_url" "$ec_pipelinerun_url")
         create_exit_code=$?
 
         if [[ $create_exit_code -eq 0 ]]; then
-            created_count=$((created_count + 1))
             # Extract the issue key (last line of output) and trim whitespace
             issue_key=$(echo "$issue_output" | tail -n 1 | xargs)
-            created_issues+=("$component_name:$issue_key")
-            if [[ -n "$OUTPUT_JSON" ]]; then
-                # Store in JSON format as well
-                created_issues_json+=("{\"component\": \"$component_name\", \"status\": \"created\", \"issue_key\": \"$issue_key\"}")
+
+            # Check if this was an update or a new creation
+            if [[ "$issue_key" == UPDATED:* ]]; then
+                # This was an existing issue that we updated
+                updated_count=$((updated_count + 1))
+                actual_key="${issue_key#UPDATED:}"
+                updated_issues+=("$component_name:$actual_key")
+                if [[ -n "$OUTPUT_JSON" ]]; then
+                    created_issues_json+=("{\"component\": \"$component_name\", \"status\": \"updated\", \"issue_key\": \"$actual_key\"}")
+                fi
+            else
+                # This was a new issue creation
+                created_count=$((created_count + 1))
+                created_issues+=("$component_name:$issue_key")
+                if [[ -n "$OUTPUT_JSON" ]]; then
+                    created_issues_json+=("{\"component\": \"$component_name\", \"status\": \"created\", \"issue_key\": \"$issue_key\"}")
+                fi
             fi
         else
             failed_count=$((failed_count + 1))
@@ -952,15 +1163,31 @@ echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━�
 echo -e "Total components processed: $total_count"
 echo -e "${GREEN}Compliant (skipped):${NC} $skipped_count"
 echo -e "${GREEN}Issues created:${NC} $created_count"
+echo -e "${YELLOW}Issues updated:${NC} $updated_count"
 echo -e "${RED}Failed:${NC} $failed_count"
 
 # Print list of created issues with URLs
 if [[ "${created_count}" -gt 0 ]]; then
     echo ""
-    echo -e "${BLUE}Issues:${NC}"
+    echo -e "${BLUE}Created Issues:${NC}"
     # Get JIRA URL from jira-cli config
     jira_url=$(get_jira_server_url)
     for issue_info in "${created_issues[@]}"; do
+        comp_name="${issue_info%%:*}"
+        issue_key="${issue_info##*:}"
+        # Trim any whitespace from issue key
+        issue_key=$(echo "$issue_key" | xargs)
+        echo -e "  • $comp_name: $jira_url/browse/$issue_key"
+    done
+fi
+
+# Print list of updated issues with URLs
+if [[ "${updated_count}" -gt 0 ]]; then
+    echo ""
+    echo -e "${BLUE}Updated Issues:${NC}"
+    # Get JIRA URL from jira-cli config
+    jira_url=$(get_jira_server_url)
+    for issue_info in "${updated_issues[@]}"; do
         comp_name="${issue_info%%:*}"
         issue_key="${issue_info##*:}"
         # Trim any whitespace from issue key

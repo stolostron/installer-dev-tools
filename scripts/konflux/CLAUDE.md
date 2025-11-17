@@ -230,20 +230,59 @@ The script can automatically close JIRA issues for components that have become c
 ./create-compliance-jira-issues.sh --skip-duplicates --auto-close data/acm-215-compliance.csv
 ```
 
+### Handling Updated Scan Results for Existing Issues
+
+When `--skip-duplicates` is enabled, the script now automatically adds update comments to existing open issues for components that remain non-compliant:
+
+**How it works**:
+
+1. When processing a non-compliant component, the script searches for existing open issues with matching labels
+2. If an existing issue is found, instead of skipping it entirely, the script adds a comment with the latest scan results
+3. The update comment includes:
+   - Current compliance status table showing all check results
+   - Latest scan timestamp
+   - Updated required actions based on current failures
+   - Links to the latest pipeline runs
+
+**Benefits**:
+
+- Preserves discussion thread and context from the original issue
+- Shows progression over time through comments
+- Keeps all related information in one place
+- Provides visibility into whether issues are getting better or worse
+
+**Example Usage**:
+
+```bash
+# Process compliance data and update existing issues with latest scan results
+./create-compliance-jira-issues.sh --skip-duplicates data/acm-215-compliance.csv
+
+# Dry-run to see what would be updated
+./create-compliance-jira-issues.sh --skip-duplicates --dry-run data/acm-215-compliance.csv
+```
+
+**Summary Output**:
+
+The script now reports separate counts for created vs updated issues:
+
+```text
+Summary:
+Total components processed: 45
+Compliant (skipped): 30
+Issues created: 5
+Issues updated: 10
+Failed: 0
+
+Created Issues:
+  • new-component-215: https://issues.redhat.com/browse/ACM-12345
+
+Updated Issues:
+  • existing-component-215: https://issues.redhat.com/browse/ACM-12340
+```
+
 **TODO / Future Enhancements**:
 
-1. **Handle updated scan results for existing issues**
-   - Decision needed on how to handle components that remain non-compliant across scans:
-   - **Option A**: Close old issue, create new one with updated scan data (keeps issue history clean, clear timeline)
-   - **Option B**: Add comment to existing issue with new scan results (preserves discussion thread, shows progression)
-   - **Option C**: Update existing issue description with latest scan data (single source of truth, but loses history)
-   - Recommended: Option B (comment-based updates) to preserve context and discussion
-   - Implementation considerations:
-     - Track issue creation timestamp vs scan timestamp
-     - Compare old vs new compliance status to show what changed
-     - Use JIRA transitions to update status if needed (e.g., Reopened if previously In Progress)
-
-3. **Add compliance-specific labels**
+1. **Add compliance-specific labels**
    - Tag issues with specific compliance failure types for better filtering and tracking
    - Proposed labels based on failure type:
      - `image-promotion-failure` - Image promotion issues (IMAGE_PULL_FAILURE, INSPECTION_FAILURE, DIGEST_FAILURE)
@@ -259,7 +298,7 @@ The script can automatically close JIRA issues for components that have become c
      - Automated prioritization: Critical failures like push-failure could auto-escalate
    - Implementation: Add labels in `create_jira_issue()` function based on which status checks fail
 
-4. **Automated periodic execution**
+2. **Automated periodic execution**
    - Set up automated compliance scanning and JIRA issue creation
    - Implementation options:
      - **Konflux CronJob**: Add Tekton PipelineRun with CronJob trigger in Konflux cluster
@@ -272,7 +311,7 @@ The script can automatically close JIRA issues for components that have become c
        - Scope: Issue creation, search, and comment permissions on ACM project
    - Recommended schedule: Daily
 
-5. **Check for common pipeline usage**
+3. **Check for common pipeline usage**
    - Verify that components are using the standardized common pipeline
    - Reference: [stolostron/konflux-build-catalog common.yaml](https://github.com/stolostron/konflux-build-catalog/blob/main/pipelines/common.yaml)
    - Implementation:

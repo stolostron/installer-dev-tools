@@ -94,8 +94,11 @@ mkdir -p data
 compliancefile="data/$application-compliance.csv"
 > $compliancefile
 
+# Capture scan time (when this script runs)
+SCAN_TIME=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+
 # Write CSV header
-echo "Konflux Component,Promoted Time,Promoted Status,Hermetic Builds,Enterprise Contract,Multiarch Support,Push Status,Push PipelineRun URL,EC PipelineRun URL" > $compliancefile
+echo "Konflux Component,Scan Time,Promoted Time,Promoted Status,Hermetic Builds,Enterprise Contract,Multiarch Support,Push Status,Push PipelineRun URL,EC PipelineRun URL" > $compliancefile
 
 # Function to get components for a specific squad from YAML config
 get_squad_components() {
@@ -480,7 +483,7 @@ for line in $components; do
 
     echo ""
 
-    echo "$line,$data" >> $compliancefile
+    echo "$line,$SCAN_TIME,$data" >> $compliancefile
 
     # Retrigger component if build failed and --retrigger flag is set
     if [[ "$retrigger" == "true" ]]; then
