@@ -1003,6 +1003,8 @@ close_jira_issue() {
     local ec_status="$7"
     local multiarch_status="$8"
     local push_status="$9"
+    local push_pipelinerun_url="${10}"
+    local ec_pipelinerun_url="${11}"
 
     # Build compliance status table using common helper
     local compliance_table=$(build_compliance_status_table "$promotion_status" "$promoted_time" "$hermetic_status" "$ec_status" "$multiarch_status" "$push_status")
@@ -1019,7 +1021,27 @@ $compliance_table
 
 All compliance checks are now passing. Auto-closing this issue."
 
+    # Add pipeline run links if available
+    if [[ -n "$push_pipelinerun_url" && "$push_pipelinerun_url" != "N/A" && "$push_pipelinerun_url" != "null" ]] || \
+       [[ -n "$ec_pipelinerun_url" && "$ec_pipelinerun_url" != "N/A" && "$ec_pipelinerun_url" != "null" ]]; then
+        comment+="
+
+h3. Latest Pipeline Run Links
+"
+
+        if [[ -n "$push_pipelinerun_url" && "$push_pipelinerun_url" != "N/A" && "$push_pipelinerun_url" != "null" ]]; then
+            comment+="
+* [Build Pipeline Run|$push_pipelinerun_url]"
+        fi
+
+        if [[ -n "$ec_pipelinerun_url" && "$ec_pipelinerun_url" != "N/A" && "$ec_pipelinerun_url" != "null" ]]; then
+            comment+="
+* [Enterprise Contract Pipeline Run|$ec_pipelinerun_url]"
+        fi
+    fi
+
     if [[ "$DRY_RUN" == true ]]; then
+        echo -e "${YELLOW}[DRY RUN]${NC} Would add 'auto-closed' label to issue $issue_key" >&2
         echo -e "${YELLOW}[DRY RUN]${NC} Would close issue $issue_key for component $component_name" >&2
         if [[ "$DEBUG" == true ]]; then
             echo -e "${BLUE}Comment:${NC}" >&2
@@ -1045,6 +1067,13 @@ All compliance checks are now passing. Auto-closing this issue."
     if [[ $comment_exit_code -ne 0 ]]; then
         echo -e "${RED}✗${NC} Failed to add comment to $issue_key" >&2
         return 1
+    fi
+
+    # Add "auto-closed" label before closing the issue
+    if jira issue edit "$issue_key" --label "auto-closed" --no-input 2>&1 > /dev/null; then
+        debug_echo "${GREEN}✓${NC} Added 'auto-closed' label to $issue_key"
+    else
+        echo -e "${YELLOW}⚠${NC} Failed to add 'auto-closed' label to $issue_key (continuing with close)" >&2
     fi
 
     # Close the issue (transition to Closed state)
@@ -1117,10 +1146,10 @@ auto_close_resolved_issues() {
         if [[ "${COMPLIANCE_STATUS[$component_name]}" == "compliant" ]]; then
             echo -e "${BLUE}Processing:${NC} $component_name ($issue_key)"
 
-            # Parse compliance details
-            IFS=',' read -r scan_time promoted_time promotion_status hermetic_status ec_status multiarch_status push_status <<< "${COMPLIANCE_DETAILS[$component_name]}"
+            # Parse compliance details (including pipeline URLs)
+            IFS=',' read -r scan_time promoted_time promotion_status hermetic_status ec_status multiarch_status push_status push_pipelinerun_url ec_pipelinerun_url <<< "${COMPLIANCE_DETAILS[$component_name]}"
 
-            if close_jira_issue "$issue_key" "$component_name" "$scan_time" "$promoted_time" "$promotion_status" "$hermetic_status" "$ec_status" "$multiarch_status" "$push_status"; then
+            if close_jira_issue "$issue_key" "$component_name" "$scan_time" "$promoted_time" "$promotion_status" "$hermetic_status" "$ec_status" "$multiarch_status" "$push_status" "$push_pipelinerun_url" "$ec_pipelinerun_url"; then
                 closed_count=$((closed_count + 1))
             else
                 failed_count=$((failed_count + 1))
@@ -1196,8 +1225,8 @@ while IFS=',' read -r component_name scan_time promoted_time promotion_status he
         COMPLIANCE_STATUS["$component_name"]="non-compliant"
     else
         COMPLIANCE_STATUS["$component_name"]="compliant"
-        # Store details for auto-close comment
-        COMPLIANCE_DETAILS["$component_name"]="$scan_time,$promoted_time,$promotion_status,$hermetic_status,$ec_status,$multiarch_status,$push_status"
+        # Store details for auto-close comment (including pipeline URLs)
+        COMPLIANCE_DETAILS["$component_name"]="$scan_time,$promoted_time,$promotion_status,$hermetic_status,$ec_status,$multiarch_status,$push_status,$push_pipelinerun_url,$ec_pipelinerun_url"
     fi
 
     # Check if component is non-compliant
