@@ -243,6 +243,10 @@ When `--skip-duplicates` is enabled, the script now automatically adds update co
    - Latest scan timestamp
    - Updated required actions based on current failures
    - Links to the latest pipeline runs
+4. The script automatically adds any new compliance-specific labels based on the latest scan:
+   - Compares current issue labels with required labels from the new scan
+   - Adds missing compliance-specific labels (e.g., if EC now fails, adds `enterprise-contract-failure`)
+   - Preserves all existing labels (no labels are removed)
 
 **Benefits**:
 
@@ -250,6 +254,7 @@ When `--skip-duplicates` is enabled, the script now automatically adds update co
 - Shows progression over time through comments
 - Keeps all related information in one place
 - Provides visibility into whether issues are getting better or worse
+- Automatically updates labels to reflect all current compliance failures
 
 **Example Usage**:
 
@@ -280,25 +285,83 @@ Updated Issues:
   • existing-component-215: https://issues.redhat.com/browse/ACM-12340
 ```
 
+**Compliance-Specific Labels**:
+
+The script now automatically adds labels to JIRA issues based on the specific compliance failures detected. This allows for better filtering, tracking, and analysis of compliance issues.
+
+**Automatic Labels Applied**:
+
+- `image-promotion-failure` - Image promotion issues (IMAGE_PULL_FAILURE, INSPECTION_FAILURE, DIGEST_FAILURE)
+- `image-stale-failure` - Image is over 2 weeks old and needs rebuilding
+- `hermetic-builds-failure` - Hermetic builds not configured
+- `enterprise-contract-failure` - Enterprise Contract violations
+- `push-failure` - Push pipeline failed
+- `multiarch-support-failure` - Multiarch support missing
+
+**Label Management**:
+
+- **New issues**: All relevant compliance-specific labels are added automatically when creating the issue
+- **Updated issues**: When `--skip-duplicates` is enabled and an existing issue is updated with new scan results:
+  - The script checks for new compliance failures not reflected in the current labels
+  - Missing compliance-specific labels are automatically added to the issue
+  - Existing labels are preserved (no labels are removed)
+  - Example: If an issue only has `push-failure` but the new scan shows EC also failing, `enterprise-contract-failure` will be added
+
+**Benefits**:
+
+- **Easy filtering**: `labels=konflux AND labels=push-failure`
+- **Squad-specific queries**: "Show me all hermetic build issues for Server Foundation"
+- **Trend analysis**: Track which compliance checks fail most frequently
+- **Automated prioritization**: Critical failures like push-failure can be identified quickly
+- **Multi-label support**: Issues can have multiple failure labels (e.g., both `hermetic-builds-failure` and `multiarch-support-failure`)
+- **Progressive labeling**: Labels accumulate as new failures are detected in subsequent scans
+
+**Example Usage**:
+
+```bash
+# Create issues with automatic compliance-specific labels
+./create-compliance-jira-issues.sh data/acm-215-compliance.csv
+
+# Query JIRA for specific failure types
+jira issue list --jql "labels=konflux AND labels=push-failure"
+jira issue list --jql "labels=hermetic-builds-failure AND component='Server Foundation'"
+```
+
+**Example Output**:
+
+When a component fails multiple compliance checks, it will be tagged with all relevant labels:
+
+```text
+Summary: [acm-215] cluster-curator-controller-215 - Konflux compliance failure
+Labels: konflux, compliance, auto-created, hermetic-builds-failure, multiarch-support-failure
+```
+
+**Progressive Label Example**:
+
+Day 1 - Initial issue creation (only push failure):
+```text
+Created issue ACM-12345
+Labels: konflux, compliance, auto-created, push-failure
+```
+
+Day 2 - Component now also fails EC check (issue updated with new label):
+```bash
+./create-compliance-jira-issues.sh --skip-duplicates data/acm-215-compliance.csv
+```
+```text
+Updated issue ACM-12345 with latest scan results and added 1 new label(s)
+Labels: konflux, compliance, auto-created, push-failure, enterprise-contract-failure
+```
+
+Day 3 - Component also fails hermetic builds check (another label added):
+```text
+Updated issue ACM-12345 with latest scan results and added 1 new label(s)
+Labels: konflux, compliance, auto-created, push-failure, enterprise-contract-failure, hermetic-builds-failure
+```
+
 **TODO / Future Enhancements**:
 
-1. **Add compliance-specific labels**
-   - Tag issues with specific compliance failure types for better filtering and tracking
-   - Proposed labels based on failure type:
-     - `image-promotion-failure` - Image promotion issues (IMAGE_PULL_FAILURE, INSPECTION_FAILURE, DIGEST_FAILURE)
-     - `hermetic-builds-failure` - Hermetic builds not configured
-     - `enterprise-contract-failure` - Enterprise Contract violations
-     - `multiarch-support-failure` - Multiarch support missing
-     - `push-failure` - Push pipeline failed
-
-   - Benefits:
-     - Easy filtering: `labels=konflux AND labels=push-failure`
-     - Squad-specific queries: "Show me all hermetic build issues for Server Foundation"
-     - Trend analysis: Track which compliance checks fail most frequently
-     - Automated prioritization: Critical failures like push-failure could auto-escalate
-   - Implementation: Add labels in `create_jira_issue()` function based on which status checks fail
-
-2. **Automated periodic execution**
+1. **Automated periodic execution**
    - Set up automated compliance scanning and JIRA issue creation
    - Implementation options:
      - **Konflux CronJob**: Add Tekton PipelineRun with CronJob trigger in Konflux cluster
@@ -311,7 +374,7 @@ Updated Issues:
        - Scope: Issue creation, search, and comment permissions on ACM project
    - Recommended schedule: Daily
 
-3. **Check for common pipeline usage**
+2. **Check for common pipeline usage**
    - Verify that components are using the standardized common pipeline
    - Reference: [stolostron/konflux-build-catalog common.yaml](https://github.com/stolostron/konflux-build-catalog/blob/main/pipelines/common.yaml)
    - Implementation:

@@ -440,6 +440,50 @@ get_component_squads() {
     echo "$jira_components" | grep -v '^$' | grep -v '^null$'
 }
 
+# Function to determine compliance-specific labels based on failure types
+get_compliance_labels() {
+    local promotion_status="$1"
+    local promoted_time="$2"
+    local hermetic_status="$3"
+    local ec_status="$4"
+    local multiarch_status="$5"
+    local push_status="$6"
+
+    local specific_labels=""
+
+    # Image promotion failures or stale images
+    if [[ "$promotion_status" =~ ($STATUS_FAILED|$STATUS_IMAGE_PULL_FAILURE|$STATUS_INSPECTION_FAILURE|$STATUS_DIGEST_FAILURE) ]]; then
+        specific_labels+="image-promotion-failure,"
+    elif [[ "$promotion_status" == "$STATUS_SUCCESSFUL" ]] && is_image_stale "$promoted_time"; then
+        specific_labels+="image-stale-failure,"
+    fi
+
+    # Hermetic builds
+    if [[ "$hermetic_status" == "$STATUS_NOT_ENABLED" ]]; then
+        specific_labels+="hermetic-builds-failure,"
+    fi
+
+    # Enterprise Contract
+    if [[ "$ec_status" == "$STATUS_NOT_COMPLIANT" ]]; then
+        specific_labels+="enterprise-contract-failure,"
+    fi
+
+    # Push failures (separate from general EC failures)
+    if [[ "$ec_status" == "$STATUS_PUSH_FAILURE" ]] || [[ "$push_status" == "$STATUS_FAILED" ]]; then
+        specific_labels+="push-failure,"
+    fi
+
+    # Multiarch support
+    if [[ "$multiarch_status" == "$STATUS_NOT_ENABLED" ]]; then
+        specific_labels+="multiarch-support-failure,"
+    fi
+
+    # Remove trailing comma
+    specific_labels="${specific_labels%,}"
+
+    echo "$specific_labels"
+}
+
 # Function to create JIRA issue
 create_jira_issue() {
     local component_name="$1"
@@ -504,12 +548,20 @@ create_jira_issue() {
         jira_cmd_args+=("--affects-version" "$AFFECTS_VERSION")
     fi
 
-    # Add labels
-    if [[ -n "$LABELS" ]]; then
-        IFS=',' read -ra LABEL_ARRAY <<< "$LABELS"
+    # Add labels (base labels + compliance-specific labels)
+    local compliance_specific_labels=$(get_compliance_labels "$promotion_status" "$promoted_time" "$hermetic_status" "$ec_status" "$multiarch_status" "$push_status")
+    local all_labels="$LABELS"
+    if [[ -n "$compliance_specific_labels" ]]; then
+        all_labels="$all_labels,$compliance_specific_labels"
+    fi
+
+    if [[ -n "$all_labels" ]]; then
+        IFS=',' read -ra LABEL_ARRAY <<< "$all_labels"
         for label in "${LABEL_ARRAY[@]}"; do
             label=$(echo "$label" | xargs)  # trim whitespace
-            jira_cmd_args+=("--label" "$label")
+            if [[ -n "$label" ]]; then
+                jira_cmd_args+=("--label" "$label")
+            fi
         done
     fi
 
@@ -537,7 +589,15 @@ create_jira_issue() {
         echo -e "${BLUE}Project:${NC} $JIRA_PROJECT" >&2
         echo -e "${BLUE}Type:${NC} $ISSUE_TYPE" >&2
         echo -e "${BLUE}Priority:${NC} $PRIORITY" >&2
-        echo -e "${BLUE}Labels:${NC} $LABELS" >&2
+
+        # Show all labels (base + compliance-specific)
+        local compliance_specific_labels=$(get_compliance_labels "$promotion_status" "$promoted_time" "$hermetic_status" "$ec_status" "$multiarch_status" "$push_status")
+        local all_labels="$LABELS"
+        if [[ -n "$compliance_specific_labels" ]]; then
+            all_labels="$all_labels,$compliance_specific_labels"
+        fi
+        echo -e "${BLUE}Labels:${NC} $all_labels" >&2
+
         if [[ -n "$AFFECTS_VERSION" ]]; then
             echo -e "${BLUE}Affects Version/s:${NC} $AFFECTS_VERSION" >&2
         fi
@@ -866,8 +926,14 @@ h3. Latest Pipeline Run Links
         fi
     fi
 
+    # Get compliance-specific labels that should be added
+    local compliance_specific_labels=$(get_compliance_labels "$promotion_status" "$promoted_time" "$hermetic_status" "$ec_status" "$multiarch_status" "$push_status")
+
     if [[ "$DRY_RUN" == true ]]; then
         echo -e "${YELLOW}[DRY RUN]${NC} Would add update comment to issue $issue_key for component $component_name" >&2
+        if [[ -n "$compliance_specific_labels" ]]; then
+            echo -e "${YELLOW}[DRY RUN]${NC} Would add labels: $compliance_specific_labels" >&2
+        fi
         if [[ "$DEBUG" == true ]]; then
             echo -e "${BLUE}Comment:${NC}" >&2
             echo "$comment" >&2
@@ -889,13 +955,41 @@ h3. Latest Pipeline Run Links
     local comment_exit_code=$?
     rm -f "$comment_file"
 
-    if [[ $comment_exit_code -eq 0 ]]; then
-        echo -e "${GREEN}✓${NC} Updated issue $issue_key with latest scan results" >&2
-        return 0
-    else
+    if [[ $comment_exit_code -ne 0 ]]; then
         echo -e "${RED}✗${NC} Failed to add comment to $issue_key" >&2
         return 1
     fi
+
+    # Add compliance-specific labels if any
+    if [[ -n "$compliance_specific_labels" ]]; then
+        # Get current labels from the issue
+        local current_labels=$(jira issue view "$issue_key" --plain 2>/dev/null | grep "^Labels:" | sed 's/^Labels:[[:space:]]*//' | tr ',' '\n' | xargs)
+
+        # Build label arguments for labels that don't already exist
+        local -a label_args=()
+        IFS=',' read -ra NEW_LABELS <<< "$compliance_specific_labels"
+        for new_label in "${NEW_LABELS[@]}"; do
+            new_label=$(echo "$new_label" | xargs)
+            if [[ -n "$new_label" ]] && ! echo "$current_labels" | grep -qw "$new_label"; then
+                label_args+=("--label" "$new_label")
+            fi
+        done
+
+        # Add new labels if any
+        if [[ ${#label_args[@]} -gt 0 ]]; then
+            if jira issue edit "$issue_key" "${label_args[@]}" --no-input 2>&1 > /dev/null; then
+                echo -e "${GREEN}✓${NC} Updated issue $issue_key with latest scan results and added ${#label_args[@]} new label(s)" >&2
+            else
+                echo -e "${YELLOW}⚠${NC} Updated issue $issue_key but failed to add labels" >&2
+            fi
+        else
+            echo -e "${GREEN}✓${NC} Updated issue $issue_key with latest scan results" >&2
+        fi
+    else
+        echo -e "${GREEN}✓${NC} Updated issue $issue_key with latest scan results" >&2
+    fi
+
+    return 0
 }
 
 # Function to close JIRA issue with resolution comment
