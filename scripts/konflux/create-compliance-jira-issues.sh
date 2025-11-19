@@ -56,7 +56,7 @@ DRY_RUN=false
 SKIP_DUPLICATES=false
 AUTO_CLOSE=false
 OUTPUT_JSON=""
-COMPLIANCE_FILE=""
+COMPLIANCE_FILES=()
 DEBUG=false
 
 # Script directory
@@ -1150,12 +1150,13 @@ Install with: brew install jq (macOS) or apt-get install jq (Linux)"
 
 show_help() {
     cat << EOF
-Usage: create-compliance-jira-issues.sh [OPTIONS] <compliance-csv-file>
+Usage: create-compliance-jira-issues.sh [OPTIONS] <compliance-csv-file|directory> [<file2> ...]
 
 Create JIRA issues for non-compliant components from compliance.sh output
 
 ARGUMENTS:
-    <compliance-csv-file>    Path to the compliance CSV file (e.g., data/acm-215-compliance.csv)
+    <compliance-csv-file>    Path to one or more compliance CSV files (e.g., data/acm-215-compliance.csv)
+    <directory>              Path to a directory containing CSV files (will process all *-compliance.csv files)
 
 OPTIONS:
     --project PROJECT        JIRA project key (default: from JIRA_PROJECT env var or "ACM")
@@ -1218,20 +1219,26 @@ EXAMPLES:
     # Edit .env file with your credentials
     source .env
 
-    # Create issues with default settings
+    # Create issues with default settings (single file)
     ./create-compliance-jira-issues.sh data/acm-215-compliance.csv
 
+    # Process multiple CSV files
+    ./create-compliance-jira-issues.sh data/acm-215-compliance.csv data/mce-210-compliance.csv
+
+    # Process all CSV files in a directory
+    ./create-compliance-jira-issues.sh data/
+
     # Dry run to preview what would be created
-    ./create-compliance-jira-issues.sh --dry-run data/acm-215-compliance.csv
+    ./create-compliance-jira-issues.sh --dry-run data/
 
     # Create issues with custom labels and priority
-    ./create-compliance-jira-issues.sh --labels "konflux,compliance,auto-created" --priority "Critical" data/acm-215-compliance.csv
+    ./create-compliance-jira-issues.sh --labels "konflux,compliance,auto-created" --priority "Critical" data/
 
     # Skip duplicates and save output
-    ./create-compliance-jira-issues.sh --skip-duplicates --output-json issues.json data/acm-215-compliance.csv
+    ./create-compliance-jira-issues.sh --skip-duplicates --output-json issues.json data/acm-215-compliance.csv data/mce-210-compliance.csv
 
-    # Auto-close resolved issues
-    ./create-compliance-jira-issues.sh --auto-close data/acm-215-compliance.csv
+    # Auto-close resolved issues for all CSV files in directory
+    ./create-compliance-jira-issues.sh --auto-close data/
 
 CSV FORMAT:
     The compliance CSV file should have the following format (from compliance.sh):
@@ -1300,10 +1307,21 @@ parse_arguments() {
                 exit 1
                 ;;
             *)
-                if [[ -z "$COMPLIANCE_FILE" ]]; then
-                    COMPLIANCE_FILE="$1"
+                # Check if argument is a directory
+                if [[ -d "$1" ]]; then
+                    # Find all *-compliance.csv files in the directory
+                    while IFS= read -r -d '' file; do
+                        COMPLIANCE_FILES+=("$file")
+                    done < <(find "$1" -maxdepth 1 -name "*-compliance.csv" -type f -print0 | sort -z)
+
+                    if [[ ${#COMPLIANCE_FILES[@]} -eq 0 ]]; then
+                        die "No compliance CSV files found in directory: $1"
+                    fi
+                elif [[ -f "$1" ]]; then
+                    # It's a file
+                    COMPLIANCE_FILES+=("$1")
                 else
-                    die "Multiple compliance files specified"
+                    die "File or directory not found: $1"
                 fi
                 shift
                 ;;
@@ -1311,14 +1329,10 @@ parse_arguments() {
     done
 
     # Validate required parameters
-    if [[ -z "$COMPLIANCE_FILE" ]]; then
-        die "Compliance CSV file is required
+    if [[ ${#COMPLIANCE_FILES[@]} -eq 0 ]]; then
+        die "At least one compliance CSV file or directory is required
 
 $(show_help)"
-    fi
-
-    if [[ ! -f "$COMPLIANCE_FILE" ]]; then
-        die "Compliance file not found: $COMPLIANCE_FILE"
     fi
 }
 
@@ -1327,6 +1341,7 @@ $(show_help)"
 # ==============================================================================
 
 process_compliance_csv() {
+    local compliance_file="$1"
     local created_count=0
     local updated_count=0
     local skipped_count=0
@@ -1337,17 +1352,17 @@ process_compliance_csv() {
     declare -a updated_issues
     declare -a created_issues_json
 
-    info "Starting to process CSV file: $COMPLIANCE_FILE"
-    info "File exists: $(test -f "$COMPLIANCE_FILE" && echo yes || echo no)"
+    info "Starting to process CSV file: $compliance_file"
+    info "File exists: $(test -f "$compliance_file" && echo yes || echo no)"
     info "File content (first 3 lines):"
-    head -3 "$COMPLIANCE_FILE" >&2
+    head -3 "$compliance_file" >&2
     echo "" >&2
 
     while IFS=',' read -r component_name scan_time promoted_time promotion_status hermetic_status ec_status multiarch_status push_status push_pipelinerun_url ec_pipelinerun_url; do
         total_count=$((total_count + 1))
 
         # Read the original line for validation
-        IFS= read -r original_line < <(sed -n "${total_count}p" "$COMPLIANCE_FILE")
+        IFS= read -r original_line < <(sed -n "${total_count}p" "$compliance_file")
 
         # Validate CSV line format
         if ! validate_csv_line "$original_line" "$total_count"; then
@@ -1403,12 +1418,9 @@ process_compliance_csv() {
             skipped_count=$((skipped_count + 1))
         fi
 
-    done < <(cat "$COMPLIANCE_FILE")
+    done < <(cat "$compliance_file")
 
-    # Auto-close resolved issues if requested
-    if [[ "$AUTO_CLOSE" == true ]]; then
-        auto_close_resolved_issues "$JIRA_PROJECT" "$LABELS"
-    fi
+    # Note: Auto-close is handled separately after all files are processed
 
     # Save output JSON if requested
     if [[ -n "$OUTPUT_JSON" && "${created_count}" -gt 0 ]]; then
@@ -1484,12 +1496,6 @@ main() {
     # Parse command line arguments
     parse_arguments "$@"
 
-    # Extract application name from filename
-    APP_NAME=$(basename "$COMPLIANCE_FILE" | sed 's/-compliance\.csv$//' | grep -oE '(acm|mce)-[0-9]+$' || basename "$COMPLIANCE_FILE" | sed 's/-compliance\.csv$//')
-
-    # Get affects version
-    AFFECTS_VERSION=$(get_affects_version "$APP_NAME")
-
     # Check dependencies
     check_dependencies
     check_jira_cli
@@ -1499,15 +1505,40 @@ main() {
     info "Konflux Compliance JIRA Issue Creator"
     echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
     info "Project: $JIRA_PROJECT"
-    info "Application: $APP_NAME"
-    if [[ -n "$AFFECTS_VERSION" ]]; then
-        info "Affects Version: $AFFECTS_VERSION"
-    fi
+    info "Files to process: ${#COMPLIANCE_FILES[@]}"
     info "JIRA Auth Type: ${JIRA_AUTH_TYPE:-not set}"
     echo ""
 
-    # Process CSV file
-    process_compliance_csv
+    # Process each CSV file
+    for compliance_file in "${COMPLIANCE_FILES[@]}"; do
+        # Extract application name from filename
+        APP_NAME=$(basename "$compliance_file" | sed 's/-compliance\.csv$//' | grep -oE '(acm|mce)-[0-9]+$' || basename "$compliance_file" | sed 's/-compliance\.csv$//')
+
+        # Get affects version
+        AFFECTS_VERSION=$(get_affects_version "$APP_NAME")
+
+        echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+        info "Processing file: $compliance_file"
+        info "Application: $APP_NAME"
+        if [[ -n "$AFFECTS_VERSION" ]]; then
+            info "Affects Version: $AFFECTS_VERSION"
+        fi
+        echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+        echo ""
+
+        # Process CSV file
+        process_compliance_csv "$compliance_file"
+
+        echo ""
+    done
+
+    # Auto-close resolved issues if requested (after all files are processed)
+    if [[ "$AUTO_CLOSE" == true ]]; then
+        echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+        info "Processing auto-close for all applications"
+        echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+        auto_close_resolved_issues "$JIRA_PROJECT" "$LABELS"
+    fi
 }
 
 # Run main function
