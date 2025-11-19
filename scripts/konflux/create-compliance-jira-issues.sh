@@ -70,6 +70,16 @@ AFFECTS_VERSION=""
 declare -A COMPLIANCE_STATUS
 declare -A COMPLIANCE_DETAILS
 
+# Global tracking for final summary across all CSV files
+declare -a ALL_CREATED_ISSUES
+declare -a ALL_UPDATED_ISSUES
+declare -a ALL_CLOSED_ISSUES
+GLOBAL_CREATED_COUNT=0
+GLOBAL_UPDATED_COUNT=0
+GLOBAL_SKIPPED_COUNT=0
+GLOBAL_FAILED_COUNT=0
+GLOBAL_TOTAL_COUNT=0
+
 # ==============================================================================
 # UTILITY FUNCTIONS
 # ==============================================================================
@@ -1015,6 +1025,7 @@ auto_close_resolved_issues() {
             if close_jira_issue "$issue_key" "$component_name" "$scan_time" "$promoted_time" "$promotion_status" "$hermetic_status" "$ec_status" "$multiarch_status" "$push_status" "$push_pipelinerun_url" "$ec_pipelinerun_url"; then
                 closed_count=$((closed_count + 1))
                 AUTO_CLOSED_ISSUES+=("$component_name:$issue_key")
+                ALL_CLOSED_ISSUES+=("$component_name:$issue_key")
             else
                 failed_count=$((failed_count + 1))
             fi
@@ -1400,12 +1411,14 @@ process_compliance_csv() {
                     updated_count=$((updated_count + 1))
                     actual_key="${issue_key#UPDATED:}"
                     updated_issues+=("$component_name:$actual_key")
+                    ALL_UPDATED_ISSUES+=("[$APP_NAME] $component_name:$actual_key")
                     if [[ -n "$OUTPUT_JSON" ]]; then
                         created_issues_json+=("{\"component\": \"$component_name\", \"status\": \"updated\", \"issue_key\": \"$actual_key\"}")
                     fi
                 else
                     created_count=$((created_count + 1))
                     created_issues+=("$component_name:$issue_key")
+                    ALL_CREATED_ISSUES+=("[$APP_NAME] $component_name:$issue_key")
                     if [[ -n "$OUTPUT_JSON" ]]; then
                         created_issues_json+=("{\"component\": \"$component_name\", \"status\": \"created\", \"issue_key\": \"$issue_key\"}")
                     fi
@@ -1421,6 +1434,13 @@ process_compliance_csv() {
     done < <(cat "$compliance_file")
 
     # Note: Auto-close is handled separately after all files are processed
+
+    # Update global counters
+    GLOBAL_CREATED_COUNT=$((GLOBAL_CREATED_COUNT + created_count))
+    GLOBAL_UPDATED_COUNT=$((GLOBAL_UPDATED_COUNT + updated_count))
+    GLOBAL_SKIPPED_COUNT=$((GLOBAL_SKIPPED_COUNT + skipped_count))
+    GLOBAL_FAILED_COUNT=$((GLOBAL_FAILED_COUNT + failed_count))
+    GLOBAL_TOTAL_COUNT=$((GLOBAL_TOTAL_COUNT + total_count))
 
     # Save output JSON if requested
     if [[ -n "$OUTPUT_JSON" && "${created_count}" -gt 0 ]]; then
@@ -1471,6 +1491,77 @@ process_compliance_csv() {
         info "Auto-Closed Issues:"
         local jira_url=$(get_jira_server_url)
         for issue_info in "${AUTO_CLOSED_ISSUES[@]}"; do
+            local comp_name="${issue_info%%:*}"
+            local issue_key="${issue_info##*:}"
+            issue_key=$(echo "$issue_key" | xargs)
+            echo "  • $comp_name: $jira_url/browse/$issue_key" >&2
+        done
+    fi
+
+    if [[ "$DRY_RUN" == true ]]; then
+        echo ""
+        warn "This was a dry run. No issues were actually created."
+        echo "Remove --dry-run flag to create issues." >&2
+    fi
+}
+
+# Print final summary across all CSV files
+print_final_summary() {
+    # Only print if multiple files were processed
+    if [[ ${#COMPLIANCE_FILES[@]} -le 1 ]]; then
+        return
+    fi
+
+    echo ""
+    echo -e "${BLUE}╔════════════════════════════════════════════════════════════════════════════╗${NC}"
+    echo -e "${BLUE}║${NC}                          ${GREEN}FINAL SUMMARY (All Files)${NC}                         ${BLUE}║${NC}"
+    echo -e "${BLUE}╚════════════════════════════════════════════════════════════════════════════╝${NC}"
+    echo ""
+    info "Files processed: ${#COMPLIANCE_FILES[@]}"
+    echo "Total components processed: $GLOBAL_TOTAL_COUNT" >&2
+    echo -e "${GREEN}Compliant (skipped):${NC} $GLOBAL_SKIPPED_COUNT" >&2
+    echo -e "${GREEN}Issues created:${NC} $GLOBAL_CREATED_COUNT" >&2
+    echo -e "${YELLOW}Issues updated:${NC} $GLOBAL_UPDATED_COUNT" >&2
+
+    local closed_count=0
+    if [[ -n "${ALL_CLOSED_ISSUES+x}" ]]; then
+        closed_count=${#ALL_CLOSED_ISSUES[@]}
+    fi
+    echo -e "${BLUE}Issues auto-closed:${NC} $closed_count" >&2
+    echo -e "${RED}Failed:${NC} $GLOBAL_FAILED_COUNT" >&2
+
+    # Print all created issues with URLs
+    if [[ -n "${ALL_CREATED_ISSUES+x}" && ${#ALL_CREATED_ISSUES[@]} -gt 0 ]]; then
+        echo ""
+        info "All Created Issues (${#ALL_CREATED_ISSUES[@]}):"
+        local jira_url=$(get_jira_server_url)
+        for issue_info in "${ALL_CREATED_ISSUES[@]}"; do
+            local app_and_comp="${issue_info%%:*}"
+            local issue_key="${issue_info##*:}"
+            issue_key=$(echo "$issue_key" | xargs)
+            echo "  • $app_and_comp: $jira_url/browse/$issue_key" >&2
+        done
+    fi
+
+    # Print all updated issues with URLs
+    if [[ -n "${ALL_UPDATED_ISSUES+x}" && ${#ALL_UPDATED_ISSUES[@]} -gt 0 ]]; then
+        echo ""
+        info "All Updated Issues (${#ALL_UPDATED_ISSUES[@]}):"
+        local jira_url=$(get_jira_server_url)
+        for issue_info in "${ALL_UPDATED_ISSUES[@]}"; do
+            local app_and_comp="${issue_info%%:*}"
+            local issue_key="${issue_info##*:}"
+            issue_key=$(echo "$issue_key" | xargs)
+            echo "  • $app_and_comp: $jira_url/browse/$issue_key" >&2
+        done
+    fi
+
+    # Print all auto-closed issues with URLs
+    if [[ -n "${ALL_CLOSED_ISSUES+x}" && ${#ALL_CLOSED_ISSUES[@]} -gt 0 ]]; then
+        echo ""
+        info "All Auto-Closed Issues (${#ALL_CLOSED_ISSUES[@]}):"
+        local jira_url=$(get_jira_server_url)
+        for issue_info in "${ALL_CLOSED_ISSUES[@]}"; do
             local comp_name="${issue_info%%:*}"
             local issue_key="${issue_info##*:}"
             issue_key=$(echo "$issue_key" | xargs)
@@ -1539,6 +1630,9 @@ main() {
         echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
         auto_close_resolved_issues "$JIRA_PROJECT" "$LABELS"
     fi
+
+    # Print final summary if multiple files were processed
+    print_final_summary
 }
 
 # Run main function
