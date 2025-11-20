@@ -94,6 +94,12 @@ mkdir -p data
 compliancefile="data/$application-compliance.csv"
 > $compliancefile
 
+# Capture scan time (when this script runs)
+SCAN_TIME=$(date -u +"%Y-%m-%dT%H:%M:%SZ")
+
+# Write CSV header
+echo "Konflux Component,Scan Time,Promoted Time,Promoted Status,Hermetic Builds,Enterprise Contract,Multiarch Support,Push Status,Push PipelineRun URL,EC PipelineRun URL" > $compliancefile
+
 # Function to get components for a specific squad from YAML config
 get_squad_components() {
     local squad_key="$1"
@@ -282,23 +288,35 @@ check_enterprise_contract() {
 
     if [[ -n "$suite_id" ]]; then
         # Use suite method for Konflux
-        ec=$(curl -LsH "$authorization" "https://api.github.com/repos/$org/$repo/check-suites/$suite_id/check-runs" | yq -p=json ".check_runs[] | select(.name==\"*enterprise-contract*$line\") | .conclusion")
+        check_run_data=$(curl -LsH "$authorization" "https://api.github.com/repos/$org/$repo/check-suites/$suite_id/check-runs" | yq -p=json ".check_runs[] | select(.name==\"*enterprise-contract*$line\")")
+        debug_echo "[debug] EC check_run_data: $check_run_data"
+        ec=$(echo "$check_run_data" | yq ".conclusion")
+        # Extract PipelineRun URL from output.text (embedded in HTML link)
+        output_text=$(echo "$check_run_data" | yq ".output.text")
+        ec_url=$(echo "$output_text" | sed -n 's/.*href="\(https:\/\/konflux-ui[^"]*pipelinerun\/[^"]*\)".*/\1/p' | head -1)
+        debug_echo "[debug] EC ec=$ec, ec_url=$ec_url"
     else
         # Fallback to original method
-        ec=$(curl -LsH "$authorization" "https://api.github.com/repos/$org/$repo/commits/$branch/check-runs" | yq -p=json ".check_runs[] | select(.app.name == \"Red Hat Konflux\") | select(.name==\"*enterprise-contract*$line\") | .conclusion")
+        check_run_data=$(curl -LsH "$authorization" "https://api.github.com/repos/$org/$repo/commits/$branch/check-runs" | yq -p=json ".check_runs[] | select(.app.name == \"Red Hat Konflux\") | select(.name==\"*enterprise-contract*$line\")")
+        debug_echo "[debug] EC check_run_data (fallback): $check_run_data"
+        ec=$(echo "$check_run_data" | yq ".conclusion")
+        # Extract PipelineRun URL from output.text (embedded in HTML link)
+        output_text=$(echo "$check_run_data" | yq ".output.text")
+        ec_url=$(echo "$output_text" | sed -n 's/.*href="\(https:\/\/konflux-ui[^"]*pipelinerun\/[^"]*\)".*/\1/p' | head -1)
+        debug_echo "[debug] EC ec=$ec, ec_url=$ec_url"
     fi
 
     if [[ -n "$ec" ]] && ! echo "$ec" | grep -v "^success$" > /dev/null; then
         echo "🟩 $repo $ecname: SUCCESS" >&3
-        echo "Compliant"
+        echo "Compliant|$ec_url"
     else
         echo "🟥 $repo $ecname: FAILURE (ec was: \"$ec\")" >&3
         if [[ -z "$ec" ]]; then
-            echo "EC_BLANK"
+            echo "EC_BLANK|$ec_url"
         elif [[ "$ec" == "cancelled" ]]; then
-            echo "EC_CANCELED"
+            echo "EC_CANCELED|$ec_url"
         else
-            echo "Not Compliant"
+            echo "Not Compliant|$ec_url"
         fi
     fi
 }
@@ -310,26 +328,34 @@ check_component_on_push() {
     local org="$3"
     local repo="$4"
     local branch="$5"
-    
+
     pushname="Red Hat Konflux / $line-on-push"
-    
+
     # Try check-suites first (more reliable for Konflux)
     suite_id=$(curl -LsH "$authorization" "https://api.github.com/repos/$org/$repo/commits/$branch/check-suites" | yq -p=json ".check_suites[] | select(.app.name == \"Red Hat Konflux\") | .id" | head -1)
 
     if [[ -n "$suite_id" ]]; then
         # Use suite method for Konflux
-        push_status=$(curl -LsH "$authorization" "https://api.github.com/repos/$org/$repo/check-suites/$suite_id/check-runs" | yq -p=json ".check_runs[] | select(.name==\"Red Hat Konflux / $line-on-push\") | .conclusion")
+        check_run_data=$(curl -LsH "$authorization" "https://api.github.com/repos/$org/$repo/check-suites/$suite_id/check-runs" | yq -p=json ".check_runs[] | select(.name==\"Red Hat Konflux / $line-on-push\")")
+        debug_echo "[debug] Push check_run_data: $check_run_data"
+        push_status=$(echo "$check_run_data" | yq ".conclusion")
+        push_url=$(echo "$check_run_data" | yq ".details_url")
+        debug_echo "[debug] Push push_status=$push_status, push_url=$push_url"
     else
         # Fallback to original method
-        push_status=$(curl -LsH "$authorization" "https://api.github.com/repos/$org/$repo/commits/$branch/check-runs" | yq -p=json ".check_runs[] | select(.app.name == \"Red Hat Konflux\") | select(.name==\"Red Hat Konflux / $line-on-push\") | .conclusion")
+        check_run_data=$(curl -LsH "$authorization" "https://api.github.com/repos/$org/$repo/commits/$branch/check-runs" | yq -p=json ".check_runs[] | select(.app.name == \"Red Hat Konflux\") | select(.name==\"Red Hat Konflux / $line-on-push\")")
+        debug_echo "[debug] Push check_run_data (fallback): $check_run_data"
+        push_status=$(echo "$check_run_data" | yq ".conclusion")
+        push_url=$(echo "$check_run_data" | yq ".details_url")
+        debug_echo "[debug] Push push_status=$push_status, push_url=$push_url"
     fi
 
     if [[ -n "$push_status" ]] && ! echo "$push_status" | grep -v "^success$" > /dev/null; then
         echo "🟩 $repo $pushname: SUCCESS" >&3
-        echo "Successful"
+        echo "Successful|$push_url"
     else
         echo "🟥 $repo $pushname: FAILURE (status was: \"$push_status\")" >&3
-        echo "Failed"
+        echo "Failed|$push_url"
     fi
 }
 
@@ -424,18 +450,26 @@ for line in $components; do
 
     # Check enterprise contract
     ec_result=$(check_enterprise_contract "$application" "$line" "$authorization" "$org" "$repo" "$branch")
-    
-    # If EC was blank or canceled, check on-push and determine final result
-    if [[ "$ec_result" == "EC_BLANK" || "$ec_result" == "EC_CANCELED" ]]; then
-        push_result=$(check_component_on_push "$line" "$authorization" "$org" "$repo" "$branch")
-        if [[ "$push_result" == "Successful" ]]; then
-            ec_result="Not Compliant"
+    # Extract EC status and URL (format: "Status|URL")
+    ec_status="${ec_result%%|*}"
+    ec_url="${ec_result##*|}"
+
+    # Always check on-push to get the push URL
+    push_result=$(check_component_on_push "$line" "$authorization" "$org" "$repo" "$branch")
+    # Extract push status and URL (format: "Status|URL")
+    push_status="${push_result%%|*}"
+    push_url="${push_result##*|}"
+
+    # If EC was blank or canceled, check on-push status to determine final EC result
+    if [[ "$ec_status" == "EC_BLANK" || "$ec_status" == "EC_CANCELED" ]]; then
+        if [[ "$push_status" == "Successful" ]]; then
+            ec_status="Not Compliant"
         else
-            ec_result="Push Failure"
+            ec_status="Push Failure"
         fi
     fi
-    
-    data="$data,$ec_result"
+
+    data="$data,$ec_status"
 
     # Check multiarch support (skip for bundle operators)
     if [[ "$bundle_result" == "BUNDLE_OPERATOR" ]]; then
@@ -444,9 +478,12 @@ for line in $components; do
         data="$data,$(check_multiarch_support "$yaml" "$repo")"
     fi
 
+    # Append Push Status and PipelineRun URLs
+    data="$data,$push_status,$push_url,$ec_url"
+
     echo ""
 
-    echo "$data" >> $compliancefile
+    echo "$line,$SCAN_TIME,$data" >> $compliancefile
 
     # Retrigger component if build failed and --retrigger flag is set
     if [[ "$retrigger" == "true" ]]; then
