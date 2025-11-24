@@ -285,6 +285,28 @@ function get_konflux_component_name() {
   get_gen_config "$application_part" "$snapshot_branch" | yq ".product-images.image-list[] | select(.publish-name == \"$publish_name\") | .konflux-component-name"
 }
 
+function get_pr_for_commit() {
+  local org="$1"
+  local repo="$2"
+  local commit_sha="$3"
+
+  debug_echo "Looking up PR for commit: $commit_sha"
+
+  # Get PR information for this commit
+  local prs_url="https://api.github.com/repos/$org/$repo/commits/$commit_sha/pulls"
+  local prs_json=$(github_api_call "$prs_url")
+
+  # Extract PR number and title (take the first PR if multiple)
+  local pr_number=$(echo "$prs_json" | jq -r '.[0].number // empty')
+  local pr_title=$(echo "$prs_json" | jq -r '.[0].title // empty')
+
+  if [ -n "$pr_number" ]; then
+    echo "$pr_number|$pr_title"
+  else
+    echo ""
+  fi
+}
+
 function get_revision_for_image {
   local image="$1"
   local repo_owner="stolostron"
@@ -485,7 +507,20 @@ while read -r url revision_a revision_b; do
     echo "Diff: https://github.com/$org/$repo/compare/$base..$head" >> "$SCRIPT_DIR/diffs/$repo-$application.diff"
     echo "Base Commit: $base" >> "$SCRIPT_DIR/diffs/$repo-$application.diff"
     echo "New Commits:" >> "$SCRIPT_DIR/diffs/$repo-$application.diff"
-    echo "$compare_json" | yq '.commits[] | .sha' | awk '{print "+", $1}' >> "$SCRIPT_DIR/diffs/$repo-$application.diff"
+
+    # Get commit SHAs and lookup PR information for each
+    echo "$compare_json" | yq '.commits[] | .sha' | while read commit_sha; do
+        pr_info=$(get_pr_for_commit "$org" "$repo" "$commit_sha")
+
+        if [ -n "$pr_info" ]; then
+            pr_number=$(echo "$pr_info" | cut -d'|' -f1)
+            pr_title=$(echo "$pr_info" | cut -d'|' -f2)
+            echo "+ $commit_sha (PR #$pr_number: $pr_title)" >> "$SCRIPT_DIR/diffs/$repo-$application.diff"
+        else
+            echo "+ $commit_sha" >> "$SCRIPT_DIR/diffs/$repo-$application.diff"
+        fi
+    done
+
     echo "" >> "$SCRIPT_DIR/diffs/$repo-$application.diff"
 
     github_api_call "https://api.github.com/repos/$org/$repo/compare/$base...$head" "application/vnd.github.v3.diff" >> "$SCRIPT_DIR/diffs/$repo-$application.diff"
