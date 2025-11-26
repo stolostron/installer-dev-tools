@@ -15,13 +15,14 @@ debug_echo() {
 # Help function
 show_help() {
   cat << EOF
-Usage: $0 -a|--application <application> -t|--tag <tag> [-b|--branch <branch>] [--skip-opm-render] [--debug] [PR_URL1] [PR_URL2] ...
+Usage: $0 -a|--application <application> (-t|--tag <tag> | -s|--snapshot <snapshot>) [-b|--branch <branch>] [--skip-opm-render] [--debug] [PR_URL1] [PR_URL2] ...
 
 This script checks if PRs have made it into the latest downstream build image.
 
 Options:
   -a, --application <app>    Application name (e.g., acm-215, acm-214)
-  -t, --tag <tag>           Tag name (e.g., latest-2.15)
+  -t, --tag <tag>           Tag name (e.g., latest-2.15) - mutually exclusive with --snapshot
+  -s, --snapshot <name>     Snapshot name - mutually exclusive with --tag
   -b, --branch <branch>     Branch name (optional, auto-determined from application if not provided)
   --skip-opm-render         Skip running opm render command
   --debug                   Enable debug output
@@ -30,9 +31,10 @@ Options:
 Arguments:
   PR_URL                    One or more GitHub PR URLs to check
 
-Example:
+Examples:
   $0 -a acm-215 -t latest-2.15 https://github.com/stolostron/multiclusterhub-operator/pull/2668
   $0 --application acm-214 --tag latest-2.14 --branch release-2.14 --debug https://github.com/org/repo/pull/123
+  $0 -a acm-215 -s my-snapshot https://github.com/stolostron/multiclusterhub-operator/pull/2668
 EOF
 }
 
@@ -40,6 +42,7 @@ EOF
 pr_urls=()
 debug=false
 skip_opm_render=false
+INPUT_TYPE=""
 while [[ $# -gt 0 ]]; do
   case $1 in
     -a|--application)
@@ -48,6 +51,12 @@ while [[ $# -gt 0 ]]; do
       ;;
     -t|--tag)
       tag="$2"
+      INPUT_TYPE="TAG"
+      shift 2
+      ;;
+    -s|--snapshot)
+      snapshot="$2"
+      INPUT_TYPE="SNAPSHOT"
       shift 2
       ;;
     -b|--branch)
@@ -81,8 +90,23 @@ while [[ $# -gt 0 ]]; do
 done
 
 # Check required parameters
-if [ -z "$application" ] || [ -z "$tag" ]; then
-  echo "Error: Both application and tag parameters are required"
+if [ -z "$application" ]; then
+  echo "Error: Application parameter is required"
+  echo ""
+  show_help
+  exit 1
+fi
+
+# Check that either tag or snapshot is provided, but not both
+if [ -n "$tag" ] && [ -n "$snapshot" ]; then
+  echo "Error: Cannot use both --tag and --snapshot. Please specify only one."
+  echo ""
+  show_help
+  exit 1
+fi
+
+if [ -z "$tag" ] && [ -z "$snapshot" ]; then
+  echo "Error: Either --tag or --snapshot parameter is required"
   echo ""
   show_help
   exit 1
@@ -131,9 +155,11 @@ if [ -f "authorization.txt" ]; then
 	debug_echo "Authorization found. Applying to github API requests"
 fi
 
-catalog="quay.io/acm-d/$application_part-dev-catalog:$tag"
+if [ "$INPUT_TYPE" = "TAG" ]; then
+  catalog="quay.io/acm-d/$application_part-dev-catalog:$tag"
+fi
 
-if [ "$skip_opm_render" = false ]; then
+if [ "$skip_opm_render" = false ] && [ "$INPUT_TYPE" = "TAG" ]; then
   opm render $catalog -oyaml > $tag.cs.yaml
 fi
 
@@ -168,9 +194,17 @@ function get_revision_for_image {
   done
 }
 
-function get_revision_for_pr {
+function get_revision_for_snapshot {
+  local snapshot="$1"
+  local repo="$2"
+
+  local revision=$(oc get snapshot $snapshot -oyaml | yq ".spec.components[] | select(.source.git.url==\"$repo\") | .source.git.revision")
+  echo "$revision"
+}
+
+function get_revision_for_pr_with_tag {
   local pr_url="$1"
-  local repo=$(dirname $(dirname $pr_url))
+  local repo=$(echo "$pr_url" | cut -d'/' -f1-5)
   local org=$(echo "$pr_url" | cut -d'/' -f4)
   local repo_name=$(echo "$pr_url" | cut -d'/' -f5)
 
@@ -220,6 +254,25 @@ function get_revision_for_pr {
   echo "$revision_by_sha"
 }
 
+function get_revision_for_pr_with_snapshot {
+  local snapshot="$1"
+  local pr_url="$2"
+  local repo=$(echo "$pr_url" | cut -d'/' -f1-5)
+  local org=$(echo "$pr_url" | cut -d'/' -f4)
+  local repo_name=$(echo "$pr_url" | cut -d'/' -f5)
+
+  debug_echo "Application: $application_part"
+  debug_echo "Branch: $branch"
+  debug_echo "Channel: $channel"
+  debug_echo "PR: $pr_url"
+  debug_echo "Repo: $repo"
+  debug_echo "Org: $org"
+  debug_echo "Repo Name: $repo_name"
+
+  revision=$(get_revision_for_snapshot "$snapshot" "$repo")
+  echo "$revision"
+}
+
 function print_pr_testability {
 	local pr_url=$1
 	local number=$(basename $pr_url)
@@ -237,18 +290,18 @@ function print_pr_testability {
   debug_echo "Commits url: $commits"
 	debug_echo $org $repo $number
 
-	if [[ ! -v repo_commits["$repo"] ]]; then
-		# echo "adding commits for $repo"
-		repo_commits["$repo"]=$(curl -LsH "Accept: application/vnd.github+json" -H "X-GitHub-Api-Verion: 2022-11-28" -H "$authorization" $commits)
-	fi
+	# if [[ ! -v repo_commits["$repo"] ]]; then
+	# 	# echo "adding commits for $repo"
+	# 	repo_commits["$repo"]=$(curl -LsH "Accept: application/vnd.github+json" -H "X-GitHub-Api-Verion: 2022-11-28" -H "$authorization" $commits)
+	# fi
 
 	# echo -e "commits: ${repo_commits["$repo"]}"
 
 	debug_echo "attempting to pull sha for $repo"
-	debug_echo ${repo_commits["$repo"]}
-	local pr_sha=$(echo "${repo_commits["$repo"]}" | jq -r ".[]| select(.commit.message | split(\"\\n\")[0] | contains(\"#$number\")) | .sha")
-
-	# echo -e "pr: $pr_sha\npublished: $published_sha"
+	# debug_echo ${repo_commits["$repo"]}
+	# local pr_sha=$(echo "${repo_commits["$repo"]}" | jq -r ".[]| select(.commit.message | split(\"\\n\")[0] | contains(\"#$number\")) | .sha")
+  local pr_sha=$(curl -LsH "Accept: application/vnd.github+json" -H "X-GitHub-Api-Version: 2022-11-28" -H "$authorization" "https://api.github.com/repos/$org/$repo/pulls/$number" | jq -r '.merge_commit_sha')
+  # echo -e "pr: $pr_sha\npublished: $published_sha"
 
 	# echo "comparing $org/$repo/pull/$number"
   debug_echo "Published Sha: $published_sha"
@@ -284,9 +337,15 @@ for pr_url in "${pr_urls[@]}"; do
   debug_echo ""
   debug_echo "Processing PR: $pr_url"
 
-  revision=$(get_revision_for_pr "$pr_url")
+  revision=""
+  if [ "$INPUT_TYPE" = "TAG" ]; then
+    revision=$(get_revision_for_pr_with_tag "$pr_url")
+  else
+    revision=$(get_revision_for_pr_with_snapshot "$snapshot" "$pr_url")
+  fi
   if [ "$revision" = "CSV_ERROR" ]; then
     exit 1
   fi
+  debug_echo "Discovered Revision: $revision"
   print_pr_testability "$pr_url" "$revision" "$branch"
 done
