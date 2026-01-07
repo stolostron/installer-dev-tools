@@ -1412,17 +1412,72 @@ def addCRDs(repo, chart, outputDir):
             continue
 
         filepath = os.path.join(crdPath, filename)
+
+        # First check if it's a CRD using yaml parsing
         with open(filepath, 'r') as f:
             resourceFile = yaml.safe_load(f)
 
-        if resourceFile["kind"] == "CustomResourceDefinition":
-            # Process the CRD to template namespace references
-            process_crd_namespaces(resourceFile, filename)
+        if resourceFile and resourceFile.get("kind") == "CustomResourceDefinition":
+            # Read the file as text to preserve formatting
+            with open(filepath, 'r') as f:
+                content = f.read()
+
+            # Use string-based replacement to template namespaces (preserves formatting)
+            modified = False
+
+            # Template webhook service namespace
+            if 'conversion:' in content and 'namespace:' in content:
+                # Pattern: namespace: 'some-namespace' or namespace: some-namespace
+                import re
+                # Match namespace in webhook service config (not already templated)
+                pattern = r"(\s+namespace:\s+)(['\"]?)([a-z0-9-]+)(\2)(\s*#.*)?$"
+
+                def replace_namespace(match):
+                    nonlocal modified
+                    indent = match.group(1)
+                    quote = match.group(2) or "'"
+                    namespace = match.group(3)
+                    comment = match.group(5) or ""
+
+                    # Don't replace if already templated
+                    if '{{' in namespace:
+                        return match.group(0)
+
+                    modified = True
+                    templated = f'{indent}{quote}{{{{ default "{namespace}" .Values.global.namespace }}}}{quote}{comment}'
+                    logging.info(f"CRD '{filename}': Templated webhook service namespace '{namespace}'")
+                    return templated
+
+                content = re.sub(pattern, replace_namespace, content, flags=re.MULTILINE)
+
+            # Template cert-manager annotation
+            if 'cert-manager.io/inject-ca-from:' in content:
+                import re
+                # Pattern: cert-manager.io/inject-ca-from: namespace/cert-name
+                pattern = r"(cert-manager\.io/inject-ca-from:\s+)(['\"]?)([a-z0-9-]+)/([a-z0-9-]+)(\2)"
+
+                def replace_annotation(match):
+                    nonlocal modified
+                    prefix = match.group(1)
+                    quote = match.group(2) or "'"
+                    namespace = match.group(3)
+                    cert_name = match.group(4)
+
+                    # Don't replace if already templated
+                    if '{{' in namespace:
+                        return match.group(0)
+
+                    modified = True
+                    templated = f'{prefix}{quote}{{{{ default "{namespace}" .Values.global.namespace }}}}/{cert_name}{quote}'
+                    logging.info(f"CRD '{filename}': Templated cert-manager annotation")
+                    return templated
+
+                content = re.sub(pattern, replace_annotation, content)
 
             # Write the processed CRD to the destination
             targetPath = os.path.join(destinationCRDPath, filename)
             with open(targetPath, 'w') as f:
-                yaml.dump(resourceFile, f, width=float("inf"), default_flow_style=False, allow_unicode=True)
+                f.write(content)
             logging.info(f"Generated CRD file '{filename}'")
         else:
             logging.debug(f"Skipping file '{filename}' as it does not contain a CRD.")
