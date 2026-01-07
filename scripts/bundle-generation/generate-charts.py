@@ -840,7 +840,12 @@ def ensure_webhook_namespace(resource_data, resource_name, default_namespace):
         if service_namespace is None:
             # Use the default Helm namespace if not specified
             service_namespace = default_namespace
-
+        elif service_namespace == default_namespace:
+            # Already set to the plain template variable, leave as is
+            pass
+        elif '{{' in str(service_namespace) and 'default' in str(service_namespace):
+            # Already has the default template pattern, leave as is
+            pass
         else:
             # Update Helm templating to override existing namespace
             service_namespace = f"{{{{ default \"{service_namespace}\" .Values.global.namespace }}}}"
@@ -1072,7 +1077,12 @@ def update_helm_resources(chartName, helmChart, skip_rbac_overrides, exclusions,
                                 if subject_namespace is None:
                                     # If no namespace is found, use the default Helm namespace
                                     subject['namespace'] = target_namespace
-
+                                elif subject_namespace == default_namespace:
+                                    # Already set to the plain template variable, leave as is
+                                    target_namespace = subject_namespace
+                                elif '{{' in str(subject_namespace) and 'default' in str(subject_namespace):
+                                    # Already has the default template pattern, leave as is
+                                    target_namespace = subject_namespace
                                 else:
                                     # Update target_namespace to reflect the subject_namespace
                                     target_namespace = f"{{{{ default \"{subject_namespace}\" .Values.global.namespace }}}}"
