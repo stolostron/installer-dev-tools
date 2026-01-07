@@ -1091,7 +1091,14 @@ def update_helm_resources(chartName, helmChart, skip_rbac_overrides, exclusions,
                 resource_data = replace_default(resource_data, 'PLACEHOLDER_NAMESPACE', '{{ .Values.global.namespace }}')
 
                 with open(template_path, 'w') as f:
-                    yaml.dump(resource_data, f, width=float("inf"), default_flow_style=False, allow_unicode=True)
+                    yaml.dump(resource_data, f,
+                             width=float("inf"),
+                             default_flow_style=False,
+                             allow_unicode=True,
+                             sort_keys=False,
+                             explicit_start=False,
+                             explicit_end=False,
+                             default_style=None)
                     logging.info(f"Succesfully updated resource: {resource_name}\n")
 
             except Exception as e:
