@@ -567,10 +567,10 @@ def is_version_compatible(branch, min_release_version, min_backplane_version, mi
             logging.error("Version not found in branch: %s", branch)
             return False
 
-    if acm_release_version and acm_release_version >= min_release_version:
+    if acm_release_version and version.Version(acm_release_version) >= version.Version(min_release_version):
         return True
 
-    elif mce_release_version and mce_release_version >= min_backplane_version:
+    elif mce_release_version and version.Version(mce_release_version) >= version.Version(min_backplane_version):
         return True
 
     else:
@@ -840,7 +840,12 @@ def ensure_webhook_namespace(resource_data, resource_name, default_namespace):
         if service_namespace is None:
             # Use the default Helm namespace if not specified
             service_namespace = default_namespace
-
+        elif service_namespace == default_namespace:
+            # Already set to the plain template variable, leave as is
+            pass
+        elif '{{' in str(service_namespace) and 'default' in str(service_namespace):
+            # Already has the default template pattern, leave as is
+            pass
         else:
             # Update Helm templating to override existing namespace
             service_namespace = f"{{{{ default \"{service_namespace}\" .Values.global.namespace }}}}"
@@ -852,6 +857,64 @@ def ensure_webhook_namespace(resource_data, resource_name, default_namespace):
         logging.info(f"  Name: {service_name}")
         logging.info(f"  Namespace: {service_namespace}")
         logging.info(f"  Path: {service_path}\n")
+
+def ensure_certificate_namespace_references(resource_data, resource_name, resource_namespace):
+    """
+    Ensures that namespace references in Certificate spec fields (commonName, dnsNames)
+    use the same templated namespace as metadata.namespace.
+
+    Args:
+        resource_data (dict): The Certificate resource data.
+        resource_name (str): The name of the Certificate resource.
+        resource_namespace (str): The templated namespace string to use for replacements.
+
+    Returns:
+        None: Modifies resource_data in place.
+    """
+    if 'spec' not in resource_data:
+        return
+
+    spec = resource_data['spec']
+
+    # Extract the actual namespace value from the templated string if it exists
+    # E.g., "{{ default "multicluster-engine" .Values.global.namespace }}" -> "multicluster-engine"
+    import re
+    namespace_match = re.search(r'default\s+"([^"]+)"', resource_namespace)
+    if namespace_match:
+        hardcoded_namespace = namespace_match.group(1)
+    else:
+        # If no default found, try to extract plain namespace
+        namespace_match = re.search(r'([a-z0-9-]+)', resource_namespace)
+        if namespace_match:
+            hardcoded_namespace = namespace_match.group(1)
+        else:
+            logging.warning(f"Could not extract namespace from: {resource_namespace}")
+            return
+
+    # Update commonName if it contains the hardcoded namespace
+    if 'commonName' in spec:
+        common_name = spec['commonName']
+        if hardcoded_namespace in common_name:
+            # Replace hardcoded namespace with templated version
+            templated_common_name = common_name.replace(
+                f".{hardcoded_namespace}.",
+                f".{{{{ default \"{hardcoded_namespace}\" .Values.global.namespace }}}}."
+            )
+            spec['commonName'] = templated_common_name
+            logging.info(f"Certificate '{resource_name}' commonName updated to: {templated_common_name}")
+
+    # Update dnsNames entries that contain the hardcoded namespace
+    if 'dnsNames' in spec:
+        dns_names = spec['dnsNames']
+        for i, dns_name in enumerate(dns_names):
+            if hardcoded_namespace in dns_name:
+                # Replace hardcoded namespace with templated version
+                templated_dns_name = dns_name.replace(
+                    f".{hardcoded_namespace}.",
+                    f".{{{{ default \"{hardcoded_namespace}\" .Values.global.namespace }}}}."
+                )
+                dns_names[i] = templated_dns_name
+                logging.info(f"Certificate '{resource_name}' dnsName[{i}] updated to: {templated_dns_name}")
 
 def replace_default(data, old, new):
     if isinstance(data, dict):
@@ -913,15 +976,26 @@ def update_helm_resources(chartName, helmChart, skip_rbac_overrides, exclusions,
                 if kind in namespace_scoped_kinds:
                     resource_namespace = resource_data['metadata'].get('namespace')
 
-                    if resource_namespace is None or resource_namespace == "PLACEHOLDER_NAMESPACE":
-                        # Use the default Helm namespace if not specified
+                    # Note: PLACEHOLDER_NAMESPACE has already been replaced with {{ .Values.global.namespace }} at line 960
+                    if resource_namespace is None or resource_namespace == "PLACEHOLDER_NAMESPACE" or resource_namespace == default_namespace:
+                        # Use the default Helm namespace if not specified or already set to plain template
                         resource_namespace = default_namespace
+                        logging.debug(f"Namespace for '{resource_name}' set to template variable: {resource_namespace}")
+                    elif '{{' in str(resource_namespace) and 'default' in str(resource_namespace):
+                        # Already has the default template pattern, leave as is
+                        logging.debug(f"Namespace for '{resource_name}' already has default template: {resource_namespace}")
                     else:
-                        # Allow Helm templating to override existing namespace
+                        # Transform hardcoded namespace to use default with fallback
                         resource_namespace = f"{{{{ default \"{resource_namespace}\" .Values.global.namespace }}}}"
+                        logging.debug(f"Namespace for '{resource_name}' transformed to: {resource_namespace}")
 
                     resource_data['metadata']['namespace'] = resource_namespace
                     logging.info(f"Namespace for '{resource_name}' set to: {resource_namespace}")
+
+                # Ensure Certificate resources have namespace references updated in spec fields
+                # (commonName and dnsNames) to match the metadata.namespace template
+                if kind == 'Certificate':
+                    ensure_certificate_namespace_references(resource_data, resource_name, resource_namespace)
 
                 # Ensure Mutating/Validating WebhookConfigurations has a service namespace set,
                 # defaulting to Helm values if not specified.
@@ -1003,7 +1077,12 @@ def update_helm_resources(chartName, helmChart, skip_rbac_overrides, exclusions,
                                 if subject_namespace is None:
                                     # If no namespace is found, use the default Helm namespace
                                     subject['namespace'] = target_namespace
-
+                                elif subject_namespace == default_namespace:
+                                    # Already set to the plain template variable, leave as is
+                                    target_namespace = subject_namespace
+                                elif '{{' in str(subject_namespace) and 'default' in str(subject_namespace):
+                                    # Already has the default template pattern, leave as is
+                                    target_namespace = subject_namespace
                                 else:
                                     # Update target_namespace to reflect the subject_namespace
                                     target_namespace = f"{{{{ default \"{subject_namespace}\" .Values.global.namespace }}}}"
