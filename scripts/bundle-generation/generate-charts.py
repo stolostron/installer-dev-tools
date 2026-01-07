@@ -861,7 +861,7 @@ def ensure_webhook_namespace(resource_data, resource_name, default_namespace):
 def ensure_certificate_namespace_references(resource_data, resource_name, resource_namespace):
     """
     Ensures that namespace references in Certificate spec fields (commonName, dnsNames)
-    use the same templated namespace as metadata.namespace.
+    use templated namespaces for all Kubernetes service DNS patterns.
 
     Args:
         resource_data (dict): The Certificate resource data.
@@ -876,45 +876,49 @@ def ensure_certificate_namespace_references(resource_data, resource_name, resour
 
     spec = resource_data['spec']
 
-    # Extract the actual namespace value from the templated string if it exists
+    # Extract the default namespace value from the templated string if it exists
     # E.g., "{{ default "multicluster-engine" .Values.global.namespace }}" -> "multicluster-engine"
     import re
     namespace_match = re.search(r'default\s+"([^"]+)"', resource_namespace)
     if namespace_match:
-        hardcoded_namespace = namespace_match.group(1)
+        default_namespace = namespace_match.group(1)
     else:
         # If no default found, try to extract plain namespace
         namespace_match = re.search(r'([a-z0-9-]+)', resource_namespace)
         if namespace_match:
-            hardcoded_namespace = namespace_match.group(1)
+            default_namespace = namespace_match.group(1)
         else:
             logging.warning(f"Could not extract namespace from: {resource_namespace}")
             return
 
-    # Update commonName if it contains the hardcoded namespace
+    # Regex pattern to match service DNS names with namespaces
+    # Matches patterns like: service-name.namespace.svc or service-name.namespace.svc.cluster.local
+    service_dns_pattern = r'([a-z0-9-]+)\.([a-z0-9-]+)\.(svc(?:\.cluster\.local)?)'
+
+    # Update commonName if it contains a service DNS pattern
     if 'commonName' in spec:
         common_name = spec['commonName']
-        if hardcoded_namespace in common_name:
-            # Replace hardcoded namespace with templated version
-            templated_common_name = common_name.replace(
-                f".{hardcoded_namespace}.",
-                f".{{{{ default \"{hardcoded_namespace}\" .Values.global.namespace }}}}."
-            )
-            spec['commonName'] = templated_common_name
-            logging.info(f"Certificate '{resource_name}' commonName updated to: {templated_common_name}")
+        match = re.search(service_dns_pattern, common_name)
+        if match:
+            service_name, namespace, suffix = match.groups()
+            # Check if already templated
+            if '{{' not in common_name:
+                templated_common_name = f"{service_name}.{{{{ default \"{default_namespace}\" .Values.global.namespace }}}}.{suffix}"
+                spec['commonName'] = templated_common_name
+                logging.info(f"Certificate '{resource_name}' commonName updated to: {templated_common_name}")
 
-    # Update dnsNames entries that contain the hardcoded namespace
+    # Update dnsNames entries that contain service DNS patterns
     if 'dnsNames' in spec:
         dns_names = spec['dnsNames']
         for i, dns_name in enumerate(dns_names):
-            if hardcoded_namespace in dns_name:
-                # Replace hardcoded namespace with templated version
-                templated_dns_name = dns_name.replace(
-                    f".{hardcoded_namespace}.",
-                    f".{{{{ default \"{hardcoded_namespace}\" .Values.global.namespace }}}}."
-                )
-                dns_names[i] = templated_dns_name
-                logging.info(f"Certificate '{resource_name}' dnsName[{i}] updated to: {templated_dns_name}")
+            match = re.search(service_dns_pattern, dns_name)
+            if match:
+                service_name, namespace, suffix = match.groups()
+                # Check if already templated
+                if '{{' not in dns_name:
+                    templated_dns_name = f"{service_name}.{{{{ default \"{default_namespace}\" .Values.global.namespace }}}}.{suffix}"
+                    dns_names[i] = templated_dns_name
+                    logging.info(f"Certificate '{resource_name}' dnsName[{i}] updated from '{dns_name}' to: {templated_dns_name}")
 
 def replace_default(data, old, new):
     if isinstance(data, dict):
