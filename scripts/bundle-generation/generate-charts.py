@@ -971,12 +971,18 @@ def update_helm_resources(chartName, helmChart, skip_rbac_overrides, exclusions,
                 if kind in namespace_scoped_kinds:
                     resource_namespace = resource_data['metadata'].get('namespace')
 
-                    if resource_namespace is None or resource_namespace == "PLACEHOLDER_NAMESPACE":
-                        # Use the default Helm namespace if not specified
+                    # Note: PLACEHOLDER_NAMESPACE has already been replaced with {{ .Values.global.namespace }} at line 960
+                    if resource_namespace is None or resource_namespace == "PLACEHOLDER_NAMESPACE" or resource_namespace == default_namespace:
+                        # Use the default Helm namespace if not specified or already set to plain template
                         resource_namespace = default_namespace
+                        logging.debug(f"Namespace for '{resource_name}' set to template variable: {resource_namespace}")
+                    elif '{{' in str(resource_namespace) and 'default' in str(resource_namespace):
+                        # Already has the default template pattern, leave as is
+                        logging.debug(f"Namespace for '{resource_name}' already has default template: {resource_namespace}")
                     else:
-                        # Allow Helm templating to override existing namespace
+                        # Transform hardcoded namespace to use default with fallback
                         resource_namespace = f"{{{{ default \"{resource_namespace}\" .Values.global.namespace }}}}"
+                        logging.debug(f"Namespace for '{resource_name}' transformed to: {resource_namespace}")
 
                     resource_data['metadata']['namespace'] = resource_namespace
                     logging.info(f"Namespace for '{resource_name}' set to: {resource_namespace}")
