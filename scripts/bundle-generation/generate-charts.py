@@ -1337,10 +1337,52 @@ def split_at(the_str, the_delim, favor_right=True):
 
    return (left_part, right_part)
 
+def process_crd_namespaces(crd_data, crd_name):
+    """
+    Process CRD to template namespace references in webhook service configs and annotations.
+
+    Args:
+        crd_data (dict): The CRD resource data
+        crd_name (str): The name of the CRD file
+
+    Returns:
+        None: Modifies crd_data in place
+    """
+    # Process webhook conversion service namespace
+    if 'spec' in crd_data and 'conversion' in crd_data['spec']:
+        conversion = crd_data['spec']['conversion']
+        if conversion.get('strategy') == 'Webhook' and 'webhook' in conversion:
+            webhook = conversion['webhook']
+            if 'clientConfig' in webhook and 'service' in webhook['clientConfig']:
+                service = webhook['clientConfig']['service']
+                service_namespace = service.get('namespace')
+
+                if service_namespace and '{{' not in str(service_namespace):
+                    # Template the namespace
+                    templated_namespace = f"{{{{ default \"{service_namespace}\" .Values.global.namespace }}}}"
+                    service['namespace'] = templated_namespace
+                    logging.info(f"CRD '{crd_name}': Templated webhook service namespace from '{service_namespace}' to '{templated_namespace}'")
+
+    # Process cert-manager annotation namespace references
+    if 'metadata' in crd_data and 'annotations' in crd_data['metadata']:
+        annotations = crd_data['metadata']['annotations']
+        cert_annotation_key = 'cert-manager.io/inject-ca-from'
+
+        if cert_annotation_key in annotations:
+            annotation_value = annotations[cert_annotation_key]
+            # Format is typically: namespace/certificate-name
+            if '/' in annotation_value and '{{' not in annotation_value:
+                parts = annotation_value.split('/', 1)
+                if len(parts) == 2:
+                    namespace_part, cert_name = parts
+                    templated_annotation = f"{{{{ default \"{namespace_part}\" .Values.global.namespace }}}}/{cert_name}"
+                    annotations[cert_annotation_key] = templated_annotation
+                    logging.info(f"CRD '{crd_name}': Templated cert-manager annotation from '{annotation_value}' to '{templated_annotation}'")
+
 def addCRDs(repo, chart, outputDir):
     if not 'chart-path' in chart:
         logging.critical(f"Chart path missing in the provided chart configuration: {chart}")
-        exit(1) 
+        exit(1)
 
     chartPath = os.path.join(os.path.dirname(os.path.realpath(__file__)), "tmp", repo, chart["chart-path"])
     logging.debug(f"Chart path resolved to: '{chartPath}'")
@@ -1348,12 +1390,12 @@ def addCRDs(repo, chart, outputDir):
     if not os.path.exists(chartPath):
         logging.critical(f"Chart path not found at: {chartPath}")
         exit(1)
-        
+
     crdPath = os.path.join(chartPath, "crds")
     if not os.path.exists(crdPath):
         logging.info(f"No CRDs for repo: {repo}")
         return
-    
+
     destinationCRDPath = os.path.join(outputDir, "crds", chart['name'])
     logging.debug(f"Destination chart path: '{destinationCRDPath}'")
 
@@ -1365,7 +1407,7 @@ def addCRDs(repo, chart, outputDir):
     logging.info(f"Created destination path for CRDs: {destinationCRDPath}")
 
     for filename in os.listdir(crdPath):
-        if not filename.endswith(".yaml"): 
+        if not filename.endswith(".yaml"):
             logging.debug(f"File '{filename}' is not a YAML file. Skipping processing.")
             continue
 
@@ -1374,8 +1416,13 @@ def addCRDs(repo, chart, outputDir):
             resourceFile = yaml.safe_load(f)
 
         if resourceFile["kind"] == "CustomResourceDefinition":
+            # Process the CRD to template namespace references
+            process_crd_namespaces(resourceFile, filename)
+
+            # Write the processed CRD to the destination
             targetPath = os.path.join(destinationCRDPath, filename)
-            shutil.copyfile(filepath, targetPath)
+            with open(targetPath, 'w') as f:
+                yaml.dump(resourceFile, f, width=float("inf"), default_flow_style=False, allow_unicode=True)
             logging.info(f"Generated CRD file '{filename}'")
         else:
             logging.debug(f"Skipping file '{filename}' as it does not contain a CRD.")
