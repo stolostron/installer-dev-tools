@@ -853,6 +853,64 @@ def ensure_webhook_namespace(resource_data, resource_name, default_namespace):
         logging.info(f"  Namespace: {service_namespace}")
         logging.info(f"  Path: {service_path}\n")
 
+def ensure_certificate_namespace_references(resource_data, resource_name, resource_namespace):
+    """
+    Ensures that namespace references in Certificate spec fields (commonName, dnsNames)
+    use the same templated namespace as metadata.namespace.
+
+    Args:
+        resource_data (dict): The Certificate resource data.
+        resource_name (str): The name of the Certificate resource.
+        resource_namespace (str): The templated namespace string to use for replacements.
+
+    Returns:
+        None: Modifies resource_data in place.
+    """
+    if 'spec' not in resource_data:
+        return
+
+    spec = resource_data['spec']
+
+    # Extract the actual namespace value from the templated string if it exists
+    # E.g., "{{ default "multicluster-engine" .Values.global.namespace }}" -> "multicluster-engine"
+    import re
+    namespace_match = re.search(r'default\s+"([^"]+)"', resource_namespace)
+    if namespace_match:
+        hardcoded_namespace = namespace_match.group(1)
+    else:
+        # If no default found, try to extract plain namespace
+        namespace_match = re.search(r'([a-z0-9-]+)', resource_namespace)
+        if namespace_match:
+            hardcoded_namespace = namespace_match.group(1)
+        else:
+            logging.warning(f"Could not extract namespace from: {resource_namespace}")
+            return
+
+    # Update commonName if it contains the hardcoded namespace
+    if 'commonName' in spec:
+        common_name = spec['commonName']
+        if hardcoded_namespace in common_name:
+            # Replace hardcoded namespace with templated version
+            templated_common_name = common_name.replace(
+                f".{hardcoded_namespace}.",
+                f".{{{{ default \"{hardcoded_namespace}\" .Values.global.namespace }}}}."
+            )
+            spec['commonName'] = templated_common_name
+            logging.info(f"Certificate '{resource_name}' commonName updated to: {templated_common_name}")
+
+    # Update dnsNames entries that contain the hardcoded namespace
+    if 'dnsNames' in spec:
+        dns_names = spec['dnsNames']
+        for i, dns_name in enumerate(dns_names):
+            if hardcoded_namespace in dns_name:
+                # Replace hardcoded namespace with templated version
+                templated_dns_name = dns_name.replace(
+                    f".{hardcoded_namespace}.",
+                    f".{{{{ default \"{hardcoded_namespace}\" .Values.global.namespace }}}}."
+                )
+                dns_names[i] = templated_dns_name
+                logging.info(f"Certificate '{resource_name}' dnsName[{i}] updated to: {templated_dns_name}")
+
 def replace_default(data, old, new):
     if isinstance(data, dict):
         for key, value in data.items():
@@ -922,6 +980,11 @@ def update_helm_resources(chartName, helmChart, skip_rbac_overrides, exclusions,
 
                     resource_data['metadata']['namespace'] = resource_namespace
                     logging.info(f"Namespace for '{resource_name}' set to: {resource_namespace}")
+
+                # Ensure Certificate resources have namespace references updated in spec fields
+                # (commonName and dnsNames) to match the metadata.namespace template
+                if kind == 'Certificate':
+                    ensure_certificate_namespace_references(resource_data, resource_name, resource_namespace)
 
                 # Ensure Mutating/Validating WebhookConfigurations has a service namespace set,
                 # defaulting to Helm values if not specified.
