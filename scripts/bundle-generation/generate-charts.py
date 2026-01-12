@@ -932,14 +932,14 @@ def update_helm_resources(chartName, helmChart, skip_rbac_overrides, exclusions,
     logging.info(f"Updating resources chart: {chartName}")
 
     resource_kinds = [
-        "AddOnTemplate", "ClusterManagementAddOn", "ClusterRole", "ClusterRoleBinding", "ConfigMap", "Deployment", "ManagedClusterSetBinding", "MutatingWebhookConfiguration",
-        "NetworkPolicy", "PersistentVolumeClaim", "Placement", "RoleBinding", "Role", "Route", "Secret", "Service", "StatefulSet",
-        "ValidatingWebhookConfiguration", "Job", "ConsolePlugin", "Certificate", "Issuer"
+        "AddOnTemplate", "Certificate", "ClusterManagementAddOn", "ClusterRole", "ClusterRoleBinding", "ConfigMap", "ConsolePlugin", "Deployment", "Issuer", "Job",
+        "ManagedClusterSetBinding", "MutatingWebhookConfiguration", "NetworkPolicy", "PersistentVolumeClaim", "Placement", "PodDisruptionBudget", "Role", "RoleBinding",
+        "Route", "Secret", "Service", "StatefulSet", "ValidatingWebhookConfiguration",
     ]
 
     namespace_scoped_kinds = [
-        "ConfigMap", "Deployment", "ManagedClusterSetBinding", "NetworkPolicy", "PersistentVolumeClaim", "Placement", "RoleBinding", "Role", "Route",
-        "Secret", "Service", "StatefulSet", "Job", "Certificate", "Issuer"
+        "Certificate", "ConfigMap", "Deployment", "Issuer", "Job", "ManagedClusterSetBinding", "NetworkPolicy", "PersistentVolumeClaim", "Placement",
+        "PodDisruptionBudget", "Role", "RoleBinding", "Route", "Secret", "Service", "StatefulSet"
     ]
 
     for kind in resource_kinds:
