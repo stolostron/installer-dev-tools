@@ -608,7 +608,7 @@ def injectHelmFlowControl(deployment, branch):
 """
 
 
-        if line.strip() == "env:" or line.strip() == "env: {}" or line.strip() == "env: []":
+        if line.strip() == "env:" or line.strip() == "- env:" or line.strip() == "env: {}" or line.strip() == "env: []":
             lines[i] = """        env:
 {{- if .Values.hubconfig.proxyConfigs }}
         - name: HTTP_PROXY
@@ -642,7 +642,7 @@ def addPullSecretOverride(deployment):
     deploy = open(deployment, "r")
     lines = deploy.readlines()
     for i, line in enumerate(lines):
-        if line.strip() == "env:" or line.strip() == "env: {}":
+        if line.strip() == "env:" or line.strip() == "- env:" or line.strip() == "env: {}":
             logging.info("Adding image pull secret environment variable to managed-serviceaccount deployment")
             lines[i] = """        env:
 {{- if .Values.global.pullSecret }}
