@@ -491,11 +491,7 @@ def fixImageReferences(helmChart, imageKeyMapping):
                             refreshed_args.append(arg)
                         else:
                             refreshed_args.append("--agent-image-name="+"{{ .Values.global.imageOverrides." + image_key + " }}")
-
-                    # Only set args if non-empty to avoid creating empty args: [] fields
-                    # that break YAML container list structure when removed later
-                    if refreshed_args:
-                        container['args'] = refreshed_args
+                    container['args'] = refreshed_args
 
             with open(template_path, 'w') as f:
                 yaml.dump(resource_data, f, width=float("inf"))
