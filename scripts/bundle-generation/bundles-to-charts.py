@@ -17,13 +17,16 @@ import os
 import shutil
 import logging
 import re
+import subprocess
 import sys
 import coloredlogs
+import requests
 import yaml
 
-from git import Repo
+from git import Repo, Git
 from packaging import version
 from validate_csv import *
+from utils.git_sha_fetcher import fetch_sha_from_git_remote
 
 # Configure logging with coloredlogs
 coloredlogs.install(level='DEBUG')  # Set the logging level as needed
@@ -1571,12 +1574,17 @@ def main():
 
         elif "gen_command" in repo:
             try:
-                # repo.brnach specifies the branch or SHA the tool should use for input.
+                # repo.branch specifies the branch or SHA the tool should use for input.
                 # repo.bundlePath specifies the directory into which the bundle manifest
                 # should be generated, and where they are fetched from for chartifying.
 
-                sha = repo["sha"]
                 bundlePath = repo["bundlePath"]
+
+                # Check if we should fetch SHA dynamically from git remote
+                if "git_remote" in repo:
+                    sha = fetch_sha_from_git_remote(repo["git_remote"], branch)
+                else:
+                    sha = repo["sha"]
 
             except KeyError:
                 logging.critical("branch and bundlePath are required for tool-generated bundles")
