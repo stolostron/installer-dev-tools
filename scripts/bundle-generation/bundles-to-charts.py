@@ -17,10 +17,8 @@ import os
 import shutil
 import logging
 import re
-import subprocess
 import sys
 import coloredlogs
-import requests
 import yaml
 
 from git import Repo, Git
