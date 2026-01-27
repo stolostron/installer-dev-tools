@@ -11,6 +11,7 @@ This toolkit serves as a centralized hub for:
 - **Quality Engineering** - Build notifications and PR status tracking
 - **Pod Security Compliance** - Validate and enforce OpenShift pod security standards
 - **Cloud Infrastructure** - Azure AKS cluster provisioning for testing
+- **Jira Integration** - Automated progress summaries and issue tracking from merged PRs
 
 ## Quick Start
 
@@ -196,6 +197,48 @@ cd scripts/aks
 ./delete-aks.sh my-resource-group
 ```
 
+### Jira Integration (`/jira-pr-cli/`)
+
+CLI tool for automatically generating and posting progress summaries to Jira from merged pull requests.
+
+**Features:**
+- 🤖 AI-powered summaries using local Ollama (free and private)
+- 📝 Manual summaries for work without PRs
+- 🔄 Automatic status transitions (New → In Progress, Merged → Review)
+- 🧪 QE test case generation with QE-NotApplicable detection
+- 💾 Smart caching to prevent duplicate posts
+- 🌍 Works from any directory with auto-repo detection
+
+**Installation:**
+
+```bash
+cd jira-pr-cli
+pip install -e .
+
+# First-time setup
+jira-pr-summary --setup
+```
+
+**Example Usage:**
+
+```bash
+# Process a specific PR
+jira-pr-summary --pr 3369
+
+# Use AI for summaries (requires Ollama)
+jira-pr-summary --pr 3369 --ai
+
+# Process all PRs for an issue
+jira-pr-summary --issue ACM-28712
+
+# Manual summary (no PR required)
+jira-pr-summary --manual ACM-28592
+```
+
+**Documentation:**
+- [README.md](jira-pr-cli/README.md) - Full documentation
+- [INSTALL.md](jira-pr-cli/INSTALL.md) - Installation guide
+
 ### Tools & Utils
 
 - `/scripts/tools/` - Utility scripts (image validation, etc.)
@@ -263,6 +306,19 @@ podman push quay.io/user/operator:tag
 cd scripts/konflux
 ./konflux-snapshot-difftool.sh -v acm-2.15.0 -s baseline -s current
 ./analyze-diffs.sh --mode code-lockdown --format csv
+```
+
+### Post PR Progress to Jira
+
+```bash
+# One-time setup
+cd jira-pr-cli
+pip install -e .
+jira-pr-summary --setup
+
+# After merging a PR
+cd ~/any-repo
+jira-pr-summary --pr 3369 --ai
 ```
 
 ## Technology Stack
