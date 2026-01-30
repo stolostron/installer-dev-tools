@@ -67,16 +67,18 @@ def copyHelmChart(destinationChartPath, repo, chart):
 def addCRDs(repo, chart, outputDir):
     if not 'chart-path' in chart:
         logging.critical("Could not validate chart path in given chart: " + chart)
-        exit(1) 
+        exit(1)
 
     chartPath = os.path.join(os.path.dirname(os.path.realpath(__file__)), "tmp", repo, chart["chart-path"])
     if not os.path.exists(chartPath):
         logging.critical("Could not validate chartPath at given path: " + chartPath)
         exit(1)
-    
-    crdPath = os.path.join(chartPath, "crds")
+
+    # Use custom crd-path if specified in chart config, otherwise default to "crds"
+    crdSubPath = chart.get("crd-path", "crds")
+    crdPath = os.path.join(chartPath, crdSubPath)
     if not os.path.exists(crdPath):
-        logging.info(f"No CRDs for repo: {repo}")
+        logging.info(f"No CRDs for repo: {repo} at path: {crdPath}")
         return
 
     destinationPath = os.path.join(outputDir, "crds", chart['name'])
