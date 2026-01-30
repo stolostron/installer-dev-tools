@@ -76,6 +76,7 @@ def addCRDs(repo, chart, outputDir):
 
     # Use custom crd-path if specified in chart config, otherwise default to "crds"
     crdSubPath = chart.get("crd-path", "crds")
+    logging.info(f"CRDs found at {crdSubPath}")
     crdPath = os.path.join(chartPath, crdSubPath)
     if not os.path.exists(crdPath):
         logging.info(f"No CRDs for repo: {repo} at path: {crdPath}")
