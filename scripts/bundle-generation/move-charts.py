@@ -74,10 +74,14 @@ def addCRDs(repo, chart, outputDir):
         logging.critical("Could not validate chartPath at given path: " + chartPath)
         exit(1)
 
-    # Use custom crd-path if specified in chart config, otherwise default to "crds"
-    crdSubPath = chart.get("crd-path", "crds")
-    logging.info(f"CRDs found at {crdSubPath}")
-    crdPath = os.path.join(chartPath, crdSubPath)
+    # Use custom crd-path if specified (from repo root), otherwise default to chart-path/crds
+    repoPath = os.path.join(os.path.dirname(os.path.realpath(__file__)), "tmp", repo)
+    if "crd-path" in chart:
+        crdPath = os.path.join(repoPath, chart["crd-path"])
+        logging.info(f"Using custom CRD path: {chart['crd-path']}")
+    else:
+        crdPath = os.path.join(chartPath, "crds")
+
     if not os.path.exists(crdPath):
         logging.info(f"No CRDs for repo: {repo} at path: {crdPath}")
         return
