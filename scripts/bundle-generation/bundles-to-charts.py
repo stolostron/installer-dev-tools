@@ -1407,7 +1407,7 @@ def fixImageReferencesForAddonTemplate(helmChart, imageKeyMapping):
             manifests = workload['manifests']
             imageKeys = []
             for manifest in manifests:
-                if manifest['kind'] == 'Deployment':
+                if manifest['kind'] in ['Deployment', 'Job']:
                     containers = manifest['spec']['template']['spec']['containers']
                     for container in containers:
                         image_key = parse_image_ref(container['image'])["repository"]
