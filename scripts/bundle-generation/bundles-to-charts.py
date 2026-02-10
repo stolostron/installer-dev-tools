@@ -1352,13 +1352,16 @@ def get_csv_path(repo, operator):
 
         file_path = os.path.join(manifests_path, file_name)
         with open(file_path, 'r', encoding='utf-8') as f:
-            resource_file = yaml.safe_load(f)
+            # Handle both single and multi-document YAML files
+            docs = list(yaml.safe_load_all(f))
 
-        if resource_file and resource_file.get("kind") == "ClusterServiceVersion":
-            logging.info("CSV file found: %s", file_path)
-            return file_path
+        # Check if any document in the file is a ClusterServiceVersion
+        for doc in docs:
+            if doc and doc.get("kind") == "ClusterServiceVersion":
+                logging.info("CSV file found: %s", file_path)
+                return file_path
 
-    logging.warning("No CSV file found in directory: %s", resource_file)
+    logging.warning("No CSV file found in directory: %s", manifests_path)
     return None
 
 # injectAnnotationsForAddonTemplate injects following annotations for deployments in the AddonTemplate:
