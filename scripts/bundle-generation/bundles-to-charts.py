@@ -1267,16 +1267,20 @@ def addCRDs(repo, operator, outputDir, preservedFiles=None, overwrite=False):
 
         filepath = os.path.join(manifestsPath, filename)
         with open(filepath, 'r', encoding='utf-8') as f:
-            resourceFile = yaml.safe_load(f)
+            # Handle both single and multi-document YAML files
+            docs = list(yaml.safe_load_all(f))
 
-        if "kind" not in resourceFile:
-            continue
+        # Check each document for CRDs
+        for doc in docs:
+            if not doc or "kind" not in doc:
+                continue
 
-        elif resourceFile["kind"] == "CustomResourceDefinition":
-            dest_file_path = os.path.join(outputDir, "crds", operator['name'], filename)
-            if overwrite or not os.path.exists(dest_file_path):
-                shutil.copyfile(filepath, dest_file_path)
-                logging.info("CRD file copied: %s", filename)
+            if doc["kind"] == "CustomResourceDefinition":
+                dest_file_path = os.path.join(outputDir, "crds", operator['name'], filename)
+                if overwrite or not os.path.exists(dest_file_path):
+                    shutil.copyfile(filepath, dest_file_path)
+                    logging.info("CRD file copied: %s", filename)
+                break  # Only copy the file once even if it has multiple CRDs
 
     logging.info("CRDs added successfully for operator: %s", operator['name'])
 
