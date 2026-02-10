@@ -696,9 +696,15 @@ def find_templates_of_type(helmChart, kind):
         if filename.endswith(".yaml") or filename.endswith(".yml"):
             filePath = os.path.join(helmChart, "templates", filename)
             with open(filePath, 'r', encoding='utf-8') as f:
-                fileYml = yaml.safe_load(f)
-            if fileYml['kind'] == kind:
-                resources.append(filePath)
+                # Handle both single and multi-document YAML files
+                try:
+                    docs = list(yaml.safe_load_all(f))
+                    for doc in docs:
+                        if doc and 'kind' in doc and doc['kind'] == kind:
+                            resources.append(filePath)
+                            break  # File matches, no need to check other docs
+                except yaml.YAMLError:
+                    continue
             continue
         else:
             continue
@@ -1356,15 +1362,20 @@ def injectAnnotationsForAddonTemplate(helmChart):
 
     addonTemplates = find_templates_of_type(helmChart, 'AddOnTemplate')
     for addonTemplate in addonTemplates:
-        injected = False
         with open(addonTemplate, 'r', encoding='utf-8') as f:
-            templateContent = yaml.safe_load(f)
-            agentSpec = templateContent['spec']['agentSpec']
+            docs = list(yaml.safe_load_all(f))
+
+        modified = False
+        for templateContent in docs:
+            if not templateContent or templateContent.get('kind') != 'AddOnTemplate':
+                continue
+
+            agentSpec = templateContent.get('spec', {}).get('agentSpec', {})
             if 'workload' not in agentSpec:
-                return
+                continue
             workload = agentSpec['workload']
             if 'manifests' not in workload:
-                return
+                continue
             manifests = workload['manifests']
             for manifest in manifests:
                 if manifest['kind'] == 'Deployment':
@@ -1373,10 +1384,11 @@ def injectAnnotationsForAddonTemplate(helmChart):
                         metadata['annotations'] = {}
                     if 'target.workload.openshift.io/management' not in metadata['annotations']:
                         metadata['annotations']['target.workload.openshift.io/management'] = '{"effect": "PreferredDuringScheduling"}'
-                        injected = True
-        if injected:
+                        modified = True
+
+        if modified:
             with open(addonTemplate, 'w', encoding='utf-8') as f:
-                yaml.dump(templateContent, f, width=float("inf"))
+                yaml.dump_all(docs, f, width=float("inf"))
                 logging.info("Annotations injected successfully. \n")
 
 # fixImageReferencesForAddonTemplate identify the image references for every deployment in addontemplates, if any exist
@@ -1393,19 +1405,24 @@ def fixImageReferencesForAddonTemplate(helmChart, imageKeyMapping):
     logging.info("Fixing image references in addon templates and values.yaml ...")
 
     addonTemplates = find_templates_of_type(helmChart, 'AddOnTemplate')
-    imageKeys = []
-    temp = "" ## temporarily read image ref
+    all_imageKeys = []
+
     for addonTemplate in addonTemplates:
         with open(addonTemplate, 'r', encoding='utf-8') as f:
-            templateContent = yaml.safe_load(f)
-            agentSpec = templateContent['spec']['agentSpec']
+            docs = list(yaml.safe_load_all(f))
+
+        for templateContent in docs:
+            if not templateContent or templateContent.get('kind') != 'AddOnTemplate':
+                continue
+
+            agentSpec = templateContent.get('spec', {}).get('agentSpec', {})
             if 'workload' not in agentSpec:
-                return
+                continue
             workload = agentSpec['workload']
             if 'manifests' not in workload:
-                return
+                continue
             manifests = workload['manifests']
-            imageKeys = []
+
             for manifest in manifests:
                 if manifest['kind'] in ['Deployment', 'Job']:
                     containers = manifest['spec']['template']['spec']['containers']
@@ -1416,21 +1433,22 @@ def fixImageReferencesForAddonTemplate(helmChart, imageKeyMapping):
                         except KeyError:
                             logging.critical("No image key mapping provided for imageKey: %s", image_key)
                             sys.exit(1)
-                        imageKeys.append(image_key)
+                        all_imageKeys.append(image_key)
                         container['image'] = "{{ .Values.global.imageOverrides." + image_key + " }}"
                         # container['imagePullPolicy'] = "{{ .Values.global.pullPolicy }}"
+
         with open(addonTemplate, 'w', encoding='utf-8') as f:
-            yaml.dump(templateContent, f, width=float("inf"))
+            yaml.dump_all(docs, f, width=float("inf"))
             logging.info("AddOnTemplate updated with image override successfully. \n")
 
-    if len(imageKeys) == 0:
+    if len(all_imageKeys) == 0:
         return
     valuesYaml = os.path.join(helmChart, "values.yaml")
     with open(valuesYaml, 'r', encoding='utf-8') as f:
         values = yaml.safe_load(f)
     if 'imageOverride' in values['global']['imageOverrides']:
         del values['global']['imageOverrides']['imageOverride']
-    for imageKey in imageKeys:
+    for imageKey in all_imageKeys:
         values['global']['imageOverrides'][imageKey] = "" # set to temp to debug
     with open(valuesYaml, 'w', encoding='utf-8') as f:
         yaml.dump(values, f, width=float("inf"))
