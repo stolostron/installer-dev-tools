@@ -471,38 +471,49 @@ def copy_additional_resources(helmChart, csvPath):
             filePath = os.path.join(dirPath, filename)
             try:
                 with open(filePath, 'r', encoding='utf-8') as f:
-                    fileYml = yaml.safe_load(f)
+                    # Handle both single and multi-document YAML files
+                    docs = list(yaml.safe_load_all(f))
             except Exception as e:
                 logging.error("Unexpected error occured while processing file '%s': %s", filePath, e)
                 continue
 
-            # Extract the 'kind' of the resource from the YAML file
-            resourceKind = fileYml.get("kind", None)
-            if resourceKind is None:
-                logging.warning("Skipping file '%s' as it does not define a 'kind' attribute.", filename)
-                continue
+            # Process each document in the file
+            file_copied = False
+            for doc in docs:
+                if not doc:
+                    continue
 
-            # Skip ignored or excluded resource types
-            if resourceKind in ignored_or_excluded_bundle_resource_types:
-                logging.warning("Skipping ignored/excluded resource type '%s' from file '%s'.", resourceKind, filename)
-                continue
+                # Extract the 'kind' of the resource from the YAML document
+                resourceKind = doc.get("kind", None)
+                if resourceKind is None:
+                    logging.warning("Skipping document in file '%s' as it does not define a 'kind' attribute.", filename)
+                    continue
 
-            # Handle white-listed resources (allowed but not handled by the OLM bundle)
-            elif resourceKind in allowed_bundle_resource_types:
-                logging.info("Copying white listed resource '%s' from file '%s' to Helm chart.", resourceKind, filename)
-                shutil.copyfile(filePath, os.path.join(helmChart, "templates", os.path.basename(filePath)))
-                continue
+                # Skip ignored or excluded resource types
+                if resourceKind in ignored_or_excluded_bundle_resource_types:
+                    logging.warning("Skipping ignored/excluded resource type '%s' from file '%s'.", resourceKind, filename)
+                    continue
 
-            # Handle expected resources (both required and optional)
-            elif resourceKind in expected_bundle_resource_types:
-                logging.info("Copying expected resource type '%s' from file '%s' to Helm chart.", resourceKind, filename)
-                shutil.copyfile(filePath, os.path.join(helmChart, "templates", os.path.basename(filePath)))
-                continue
+                # Handle white-listed resources (allowed but not handled by the OLM bundle)
+                elif resourceKind in allowed_bundle_resource_types:
+                    if not file_copied:
+                        logging.info("Copying white listed resource '%s' from file '%s' to Helm chart.", resourceKind, filename)
+                        shutil.copyfile(filePath, os.path.join(helmChart, "templates", os.path.basename(filePath)))
+                        file_copied = True
+                    continue
 
-            # Log unsupported resources
-            else:
-                logging.warning("Unsupported resource type '%s' found in file '%s'.", resourceKind, filename)
-                unsupported_resources.append(resourceKind)
+                # Handle expected resources (both required and optional)
+                elif resourceKind in expected_bundle_resource_types:
+                    if not file_copied:
+                        logging.info("Copying expected resource type '%s' from file '%s' to Helm chart.", resourceKind, filename)
+                        shutil.copyfile(filePath, os.path.join(helmChart, "templates", os.path.basename(filePath)))
+                        file_copied = True
+                    continue
+
+                # Log unsupported resources
+                else:
+                    logging.warning("Unsupported resource type '%s' found in file '%s'.", resourceKind, filename)
+                    unsupported_resources.append(resourceKind)
 
     if unsupported_resources:
         logging.error("Found unsupported resources in the bundle manifest: %s. Terminating process.",
