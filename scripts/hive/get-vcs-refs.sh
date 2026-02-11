@@ -1,12 +1,41 @@
 #!/bin/bash
 set -euo pipefail
 
+# Display help message
+show_help() {
+    cat << EOF
+Usage: $(basename "$0") [OCP_VERSION]
+
+Get VCS refs for Hive images from multicluster-engine operator catalog.
+
+Arguments:
+    OCP_VERSION     OpenShift version (default: v4.21)
+
+Options:
+    -h, --help      Show this help message
+
+Examples:
+    $(basename "$0")        # Use default version (v4.21)
+    $(basename "$0") v4.20  # Specify OCP version
+
+Requirements:
+    - Logged into registry.redhat.io (run: podman login registry.redhat.io)
+    - podman, jq, and skopeo must be installed
+EOF
+    exit 0
+}
+
+# Check for help flag
+if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
+    show_help
+fi
+
 # Get script directory
 SCRIPT_DIR="$(dirname "$(realpath "${BASH_SOURCE[0]}")")"
 
 # Parse arguments
 OCP_VERSION=${1:-v4.21}
-OPERATOR_NAME=${2:-multicluster-engine}
+OPERATOR_NAME="multicluster-engine"
 
 # Cleanup tmp directory on exit
 trap 'rm -rf "${SCRIPT_DIR}/tmp"' EXIT
