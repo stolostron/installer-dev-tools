@@ -2,7 +2,7 @@
 
 # Show help if no arguments or -h/--help flag
 if [[ $# -eq 0 || "$1" == "-h" || "$1" == "--help" ]]; then
-    echo "Usage: $0 [-oyaml] \"<application> <version>\""
+    echo "Usage: $0 \"<application> <version>\" [-oyaml]"
     echo ""
     echo "Options:"
     echo "  -oyaml    Output only YAML, suppressing debug information"
@@ -11,6 +11,7 @@ if [[ $# -eq 0 || "$1" == "-h" || "$1" == "--help" ]]; then
     echo "  $0 \"acm 2.14.2\""
     echo "  $0 \"mce 2.8.4\""
     echo "  $0 -oyaml \"acm 2.14.2\""
+    echo "  $0 \"acm 2.14.2\" -oyaml"
     exit 0
 fi
 
@@ -65,7 +66,7 @@ if [[ "$yaml_only" == false ]]; then
     echo "Image Repo: $imagerepo"
 fi
 
-issues=$(jira issue list -q "project = 'Red Hat Advanced Cluster Management' AND issuetype in ('Weakness', 'Vulnerability') AND fixVersion = '$version' and status in (closed)" --raw)
+issues=$(jira issue list -q "project = \"Red Hat Advanced Cluster Management\" and issuetype in (Weakness, Vulnerability) and fixVersion = \"$version\" and resolution not in (\"Can't Do\", \"Cannot Reproduce\",Duplicate,MirrorOrphan,\"Not a Bug\",Obsolete,Unresolved,\"Won't Do\") and status not in (open, backlog)" --raw)
 echo "$issues" | jq -s \
     --slurpfile config <(curl -s "https://raw.githubusercontent.com/stolostron/$bundle/refs/heads/$branch/config/$config") \
     '
