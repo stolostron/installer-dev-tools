@@ -376,14 +376,15 @@ def check_unsupported_csv_resources(csv_path, csv_data, supported_config_types):
 
     return False
 
-def escape_template_variables(helmChart, variables):
+def escape_template_variables(helmChart, variables, branch):
     """_summary_
 
     Args:
         helmChart (_type_): _description_
         variables (_type_): _description_
+        branch (_type_): _description_
     """
-    addonTemplates = find_templates_of_type(helmChart, 'AddOnTemplate')
+    addonTemplates = find_templates_of_type(helmChart, 'AddOnTemplate', branch)
     for addonTemplate in addonTemplates:
         for variable in variables:
             logging.info("Start to escape vriable %s", variable)
@@ -662,7 +663,7 @@ def update_helm_resources(chartName, helmChart, skip_rbac_overrides, exclusions,
     ]
 
     for kind in resource_kinds:
-        resource_templates = find_templates_of_type(helmChart, kind)
+        resource_templates = find_templates_of_type(helmChart, kind, branch)
         if not resource_templates:
             logging.info("------------------------------------------")
             logging.warning(f"No {kind} templates found in the Helm chart [Skipping]")
@@ -754,18 +755,19 @@ def find_templates_of_type(helmChart, kind, branch):
 
 # For each deployment, identify the image references if any exist in the environment variable fields, insert helm flow control code to reference it, and add image-key to the values.yaml file.
 # If the image-key referenced in the deployment does not exist in `imageMappings` in the Config.yaml, this will fail. Images must be explicitly defined
-def fixEnvVarImageReferences(helmChart, imageKeyMapping):
+def fixEnvVarImageReferences(helmChart, imageKeyMapping, branch):
     """_summary_
 
     Args:
         helmChart (_type_): _description_
         imageKeyMapping (_type_): _description_
+        branch (_type_): _description_
     """
     logging.info("Fixing image references in container 'env' section in deployments and values.yaml ...")
     valuesYaml = os.path.join(helmChart, "values.yaml")
     with open(valuesYaml, 'r', encoding='utf-8') as f:
         values = yaml.safe_load(f)
-    deployments = find_templates_of_type(helmChart, 'Deployment')
+    deployments = find_templates_of_type(helmChart, 'Deployment', branch)
 
     imageKeys = []
     for deployment in deployments:
@@ -800,19 +802,20 @@ def fixEnvVarImageReferences(helmChart, imageKeyMapping):
 
 # For each deployment, identify the image references if any exist in the image field, insert helm flow control code to reference it, and add image-key to the values.yaml file.
 # If the image-key referenced in the deployment does not exist in `imageMappings` in the Config.yaml, this will fail. Images must be explicitly defined
-def fixImageReferences(helmChart, imageKeyMapping):
+def fixImageReferences(helmChart, imageKeyMapping, branch):
     """_summary_
 
     Args:
         helmChart (_type_): _description_
         imageKeyMapping (_type_): _description_
+        branch (_type_): _description_
     """
     logging.info("Fixing image and pull policy references in deployments and values.yaml ...")
     valuesYaml = os.path.join(helmChart, "values.yaml")
     with open(valuesYaml, 'r', encoding='utf-8') as f:
         values = yaml.safe_load(f)
 
-    deployments = find_templates_of_type(helmChart, 'Deployment')
+    deployments = find_templates_of_type(helmChart, 'Deployment', branch)
     imageKeys = []
     temp = "" ## temporarily read image ref
     for deployment in deployments:
@@ -1095,17 +1098,18 @@ def updateDeployments(helmChart, operator, exclusions, sizes, branch):
         injectHelmFlowControl(deployment, sizes, branch)
 
 # updateRBAC adds standard configuration to the RBAC resources (clusterroles, roles, clusterrolebindings, and rolebindings)
-def updateRBAC(helmChart):
+def updateRBAC(helmChart, branch):
     """_summary_
 
     Args:
         helmChart (_type_): _description_
+        branch (_type_): _description_
     """
     logging.info("Updating clusterroles, roles, clusterrolebindings, and rolebindings ...")
-    clusterroles = find_templates_of_type(helmChart, 'ClusterRole')
-    roles = find_templates_of_type(helmChart, 'Role')
-    clusterrolebindings = find_templates_of_type(helmChart, 'ClusterRoleBinding')
-    rolebindings = find_templates_of_type(helmChart, 'RoleBinding')
+    clusterroles = find_templates_of_type(helmChart, 'ClusterRole', branch)
+    roles = find_templates_of_type(helmChart, 'Role', branch)
+    clusterrolebindings = find_templates_of_type(helmChart, 'ClusterRoleBinding', branch)
+    rolebindings = find_templates_of_type(helmChart, 'RoleBinding', branch)
 
     for rbacFile in clusterroles + roles + clusterrolebindings + rolebindings:
         with open(rbacFile, 'r', encoding='utf-8') as f:
@@ -1172,17 +1176,18 @@ def inject_security_context_constraints(resource, constraints_override):
         logging.info(f"Container '{container_name}' security context: {container_security_context}\n")
         
 
-def update_security_contexts(template_chart_path, constraints_override):
+def update_security_contexts(template_chart_path, constraints_override, branch):
     """_summary_
 
     Args:
         template_chart_path (_type_): _description_
         constraints (list, optional): _description_. Defaults to [].
+        branch (_type_): _description_
     """
     log_header("Injecting security context constraints...")
 
     for kind in ["Deployment", "Job", "StatefulSet"]:
-        resource_templates = find_templates_of_type(template_chart_path, kind)
+        resource_templates = find_templates_of_type(template_chart_path, kind, branch)
         if not resource_templates:
             continue
     
@@ -1230,20 +1235,20 @@ def injectRequirements(helm_chart_path, operator, sizes, branch):
     preserved_files = operator.get("preserve_files", [])
 
     # Fixes image references in the Helm chart.
-    fixImageReferences(helm_chart_path, image_key_mapping)
-    fixEnvVarImageReferences(helm_chart_path, image_key_mapping)
+    fixImageReferences(helm_chart_path, image_key_mapping, branch)
+    fixEnvVarImageReferences(helm_chart_path, image_key_mapping, branch)
 
     fixImageReferencesForAddonTemplate(helm_chart_path, image_key_mapping, branch)
     injectAnnotationsForAddonTemplate(helm_chart_path, branch)
 
     if is_version_compatible(branch, '2.10', '2.5', '2.10'):
-        update_security_contexts(helm_chart_path, security_context_constraints)
+        update_security_contexts(helm_chart_path, security_context_constraints, branch)
 
     if is_version_compatible(branch, '2.13', '2.7', '2.13'):
         update_helm_resources(operator_name, helm_chart_path, skip_rbac_overrides, exclusions, inclusions, branch, preserved_files)
 
     # Updates RBAC and deployment configuration in the Helm chart.
-    updateRBAC(helm_chart_path)
+    updateRBAC(helm_chart_path, branch)
     updateDeployments(helm_chart_path, operator, exclusions, sizes, branch)
 
     logging.info("Updated Chart '%s' successfully\n", helm_chart_path)
@@ -1780,7 +1785,7 @@ def main():
                 for path in webhook_paths:
                     copy_webhook_configuration_manifests(helmChart, os.path.join(SCRIPT_DIR, "tmp", repo_name, path))
 
-            escape_template_variables(helmChart, escaped_variables)
+            escape_template_variables(helmChart, escaped_variables, branch)
             logging.info("Resources added from CSV successfully.\n")
 
             if not skipOverrides:
