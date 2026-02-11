@@ -471,28 +471,29 @@ def copy_additional_resources(helmChart, csvPath, branch):
     for filename in os.listdir(dirPath):
         if filename.endswith(".yaml") or filename.endswith(".yml"):
             filePath = os.path.join(dirPath, filename)
+
+            # Try to load all documents to check if it's multi-document
             try:
                 with open(filePath, 'r', encoding='utf-8') as f:
-                    # Handle multi-document YAML files for ACM 2.16+, MCE 2.11+
-                    if is_version_compatible(branch, '2.16', '2.11', '2.16'):
-                        docs = list(yaml.safe_load_all(f))
-                    else:
-                        # Fallback to single-document for older versions
-                        single_doc = yaml.safe_load(f)
-                        docs = [single_doc] if single_doc else []
+                    docs = list(yaml.safe_load_all(f))
             except Exception as e:
                 logging.error("Unexpected error occured while processing file '%s': %s", filePath, e)
                 continue
 
-            # Process each document in the file
-            for doc in docs:
-                if not doc:
+            # Check if this is a multi-document file AND version supports splitting
+            is_multi_document = len(docs) > 1
+            should_split = is_multi_document and is_version_compatible(branch, '2.16', '2.11', '2.16')
+
+            # If not splitting (single document OR old version), just copy the file as-is
+            if not should_split:
+                # Use original single-document logic - just copy the file
+                fileYml = docs[0] if docs else None
+                if not fileYml:
                     continue
 
-                # Extract the 'kind' of the resource from the YAML document
-                resourceKind = doc.get("kind", None)
+                resourceKind = fileYml.get("kind", None)
                 if resourceKind is None:
-                    logging.warning("Skipping document in file '%s' as it does not define a 'kind' attribute.", filename)
+                    logging.warning("Skipping file '%s' as it does not define a 'kind' attribute.", filename)
                     continue
 
                 # Skip ignored or excluded resource types
@@ -500,46 +501,80 @@ def copy_additional_resources(helmChart, csvPath, branch):
                     logging.warning("Skipping ignored/excluded resource type '%s' from file '%s'.", resourceKind, filename)
                     continue
 
-                # Handle white-listed resources (allowed but not handled by the OLM bundle)
+                # Handle white-listed resources
                 elif resourceKind in allowed_bundle_resource_types:
-                    resource_name = doc.get('metadata', {}).get('name')
-                    if not resource_name:
-                        logging.warning("Skipping resource in file '%s' as it does not have a metadata.name field.", filename)
-                        continue
-
-                    # Generate filename based on resource name and kind (matching webhook pattern)
-                    new_filename = f"{resource_name.lower()}-{resourceKind.lower()}.yaml"
-                    dest_file_path = os.path.join(helmChart, "templates", new_filename)
-
-                    logging.info("Copying white listed resource '%s/%s' from file '%s' to Helm chart as '%s'.",
-                                 resourceKind, resource_name, filename, new_filename)
-
-                    with open(dest_file_path, 'w', encoding='utf-8') as f:
-                        yaml.dump(doc, f, width=float("inf"), default_flow_style=False, allow_unicode=True)
+                    logging.info("Copying white listed resource '%s' from file '%s' to Helm chart.", resourceKind, filename)
+                    shutil.copyfile(filePath, os.path.join(helmChart, "templates", os.path.basename(filePath)))
                     continue
 
-                # Handle expected resources (both required and optional)
+                # Handle expected resources
                 elif resourceKind in expected_bundle_resource_types:
-                    resource_name = doc.get('metadata', {}).get('name')
-                    if not resource_name:
-                        logging.warning("Skipping resource in file '%s' as it does not have a metadata.name field.", filename)
-                        continue
-
-                    # Generate filename based on resource name and kind (matching webhook pattern)
-                    new_filename = f"{resource_name.lower()}-{resourceKind.lower()}.yaml"
-                    dest_file_path = os.path.join(helmChart, "templates", new_filename)
-
-                    logging.info("Copying expected resource type '%s/%s' from file '%s' to Helm chart as '%s'.",
-                                 resourceKind, resource_name, filename, new_filename)
-
-                    with open(dest_file_path, 'w', encoding='utf-8') as f:
-                        yaml.dump(doc, f, width=float("inf"), default_flow_style=False, allow_unicode=True)
+                    logging.info("Copying expected resource type '%s' from file '%s' to Helm chart.", resourceKind, filename)
+                    shutil.copyfile(filePath, os.path.join(helmChart, "templates", os.path.basename(filePath)))
                     continue
 
                 # Log unsupported resources
                 else:
                     logging.warning("Unsupported resource type '%s' found in file '%s'.", resourceKind, filename)
                     unsupported_resources.append(resourceKind)
+
+            else:
+                # Multi-document file on 2.16+ - split and rename each document
+                for doc in docs:
+                    if not doc:
+                        continue
+
+                    # Extract the 'kind' of the resource from the YAML document
+                    resourceKind = doc.get("kind", None)
+                    if resourceKind is None:
+                        logging.warning("Skipping document in file '%s' as it does not define a 'kind' attribute.", filename)
+                        continue
+
+                    # Skip ignored or excluded resource types
+                    if resourceKind in ignored_or_excluded_bundle_resource_types:
+                        logging.warning("Skipping ignored/excluded resource type '%s' from file '%s'.", resourceKind, filename)
+                        continue
+
+                    # Handle white-listed resources (allowed but not handled by the OLM bundle)
+                    elif resourceKind in allowed_bundle_resource_types:
+                        resource_name = doc.get('metadata', {}).get('name')
+                        if not resource_name:
+                            logging.warning("Skipping resource in file '%s' as it does not have a metadata.name field.", filename)
+                            continue
+
+                        # Generate filename based on resource name and kind (matching webhook pattern)
+                        new_filename = f"{resource_name.lower()}-{resourceKind.lower()}.yaml"
+                        dest_file_path = os.path.join(helmChart, "templates", new_filename)
+
+                        logging.info("Copying white listed resource '%s/%s' from file '%s' to Helm chart as '%s'.",
+                                     resourceKind, resource_name, filename, new_filename)
+
+                        with open(dest_file_path, 'w', encoding='utf-8') as f:
+                            yaml.dump(doc, f, width=float("inf"), default_flow_style=False, allow_unicode=True)
+                        continue
+
+                    # Handle expected resources (both required and optional)
+                    elif resourceKind in expected_bundle_resource_types:
+                        resource_name = doc.get('metadata', {}).get('name')
+                        if not resource_name:
+                            logging.warning("Skipping resource in file '%s' as it does not have a metadata.name field.", filename)
+                            continue
+
+                        # Generate filename based on resource name and kind (matching webhook pattern)
+                        new_filename = f"{resource_name.lower()}-{resourceKind.lower()}.yaml"
+                        dest_file_path = os.path.join(helmChart, "templates", new_filename)
+
+                        logging.info("Copying expected resource type '%s/%s' from file '%s' to Helm chart as '%s'.",
+                                     resourceKind, resource_name, filename, new_filename)
+
+                        with open(dest_file_path, 'w', encoding='utf-8') as f:
+                            yaml.dump(doc, f, width=float("inf"), default_flow_style=False, allow_unicode=True)
+                        continue
+
+                    # Log unsupported resources
+                    else:
+                        logging.warning("Unsupported resource type '%s' found in file '%s'.", resourceKind, filename)
+                        unsupported_resources.append(resourceKind)
 
     if unsupported_resources:
         logging.error("Found unsupported resources in the bundle manifest: %s. Terminating process.",
