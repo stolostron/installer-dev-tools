@@ -434,12 +434,13 @@ def extract_csv_resources(helm_chart, csv_path):
         sys.exit(1)
 
 # Copies additional resources from the CSV directory to the Helm chart
-def copy_additional_resources(helmChart, csvPath):
+def copy_additional_resources(helmChart, csvPath, branch):
     """_summary_
 
     Args:
         helmChart (_type_): _description_
         csvPath (_type_): _description_
+        branch (_type_): _description_
     """
     logging.info("Copying additional resources from the bundle manifests if present ...")
 
@@ -471,8 +472,13 @@ def copy_additional_resources(helmChart, csvPath):
             filePath = os.path.join(dirPath, filename)
             try:
                 with open(filePath, 'r', encoding='utf-8') as f:
-                    # Handle both single and multi-document YAML files
-                    docs = list(yaml.safe_load_all(f))
+                    # Handle multi-document YAML files for ACM 2.16+, MCE 2.11+
+                    if is_version_compatible(branch, '2.16', '2.11', '2.16'):
+                        docs = list(yaml.safe_load_all(f))
+                    else:
+                        # Fallback to single-document for older versions
+                        single_doc = yaml.safe_load(f)
+                        docs = [single_doc] if single_doc else []
             except Exception as e:
                 logging.error("Unexpected error occured while processing file '%s': %s", filePath, e)
                 continue
@@ -711,12 +717,13 @@ def update_helm_resources(chartName, helmChart, skip_rbac_overrides, exclusions,
     logging.info("Resource updating process completed.")
 
 # Given a resource Kind, return all filepaths of that resource type in a chart directory
-def find_templates_of_type(helmChart, kind):
+def find_templates_of_type(helmChart, kind, branch):
     """_summary_
 
     Args:
         helmChart (_type_): _description_
         kind (_type_): _description_
+        branch (_type_): _description_
 
     Returns:
         _type_: _description_
@@ -726,9 +733,14 @@ def find_templates_of_type(helmChart, kind):
         if filename.endswith(".yaml") or filename.endswith(".yml"):
             filePath = os.path.join(helmChart, "templates", filename)
             with open(filePath, 'r', encoding='utf-8') as f:
-                # Handle both single and multi-document YAML files
+                # Handle multi-document YAML files for ACM 2.16+, MCE 2.11+
                 try:
-                    docs = list(yaml.safe_load_all(f))
+                    if is_version_compatible(branch, '2.16', '2.11', '2.16'):
+                        docs = list(yaml.safe_load_all(f))
+                    else:
+                        # Fallback to single-document for older versions
+                        single_doc = yaml.safe_load(f)
+                        docs = [single_doc] if single_doc else []
                     for doc in docs:
                         if doc and 'kind' in doc and doc['kind'] == kind:
                             resources.append(filePath)
@@ -1221,8 +1233,8 @@ def injectRequirements(helm_chart_path, operator, sizes, branch):
     fixImageReferences(helm_chart_path, image_key_mapping)
     fixEnvVarImageReferences(helm_chart_path, image_key_mapping)
 
-    fixImageReferencesForAddonTemplate(helm_chart_path, image_key_mapping)
-    injectAnnotationsForAddonTemplate(helm_chart_path)
+    fixImageReferencesForAddonTemplate(helm_chart_path, image_key_mapping, branch)
+    injectAnnotationsForAddonTemplate(helm_chart_path, branch)
 
     if is_version_compatible(branch, '2.10', '2.5', '2.10'):
         update_security_contexts(helm_chart_path, security_context_constraints)
@@ -1236,7 +1248,7 @@ def injectRequirements(helm_chart_path, operator, sizes, branch):
 
     logging.info("Updated Chart '%s' successfully\n", helm_chart_path)
 
-def addCRDs(repo, operator, outputDir, preservedFiles=None, overwrite=False):
+def addCRDs(repo, operator, outputDir, branch, preservedFiles=None, overwrite=False):
     """
     Add Custom Resource Definitions (CRDs) to the specified output directory.
 
@@ -1244,6 +1256,7 @@ def addCRDs(repo, operator, outputDir, preservedFiles=None, overwrite=False):
         repo (str): The name of the repository.
         operator (dict): The configuration of the operator.
         outputDir (str): The directory where CRDs will be added.
+        branch (str): The branch being processed for version compatibility checks.
         preservedFiles (list, optional): List of files to preserve. Defaults to None.
         overwrite (bool, optional): Whether to overwrite existing files. Defaults to False.
 
@@ -1286,8 +1299,13 @@ def addCRDs(repo, operator, outputDir, preservedFiles=None, overwrite=False):
 
         filepath = os.path.join(manifestsPath, filename)
         with open(filepath, 'r', encoding='utf-8') as f:
-            # Handle both single and multi-document YAML files
-            docs = list(yaml.safe_load_all(f))
+            # Handle multi-document YAML files for ACM 2.16+, MCE 2.11+
+            if is_version_compatible(branch, '2.16', '2.11', '2.16'):
+                docs = list(yaml.safe_load_all(f))
+            else:
+                # Fallback to single-document for older versions
+                single_doc = yaml.safe_load(f)
+                docs = [single_doc] if single_doc else []
 
         # Check each document for CRDs
         for doc in docs:
@@ -1345,12 +1363,13 @@ def getBundleManifestsPath(repo, operator):
     latest_bundle_path = os.path.join(bundles_directory, latest_bundle_version)
     return latest_bundle_path
 
-def get_csv_path(repo, operator):
+def get_csv_path(repo, operator, branch):
     """_summary_
 
     Args:
         repo (_type_): _description_
         operator (_type_): _description_
+        branch (_type_): _description_
 
     Returns:
         _type_: _description_
@@ -1375,8 +1394,13 @@ def get_csv_path(repo, operator):
 
         file_path = os.path.join(manifests_path, file_name)
         with open(file_path, 'r', encoding='utf-8') as f:
-            # Handle both single and multi-document YAML files
-            docs = list(yaml.safe_load_all(f))
+            # Handle multi-document YAML files for ACM 2.16+, MCE 2.11+
+            if is_version_compatible(branch, '2.16', '2.11', '2.16'):
+                docs = list(yaml.safe_load_all(f))
+            else:
+                # Fallback to single-document for older versions
+                single_doc = yaml.safe_load(f)
+                docs = [single_doc] if single_doc else []
 
         # Check if any document in the file is a ClusterServiceVersion
         for doc in docs:
@@ -1389,18 +1413,25 @@ def get_csv_path(repo, operator):
 
 # injectAnnotationsForAddonTemplate injects following annotations for deployments in the AddonTemplate:
 # - target.workload.openshift.io/management: '{"effect": "PreferredDuringScheduling"}'
-def injectAnnotationsForAddonTemplate(helmChart):
+def injectAnnotationsForAddonTemplate(helmChart, branch):
     """_summary_
 
     Args:
         helmChart (_type_): _description_
+        branch (_type_): _description_
     """
     logging.info("Injecting Annotations for deployments in the AddonTemplate ...")
 
-    addonTemplates = find_templates_of_type(helmChart, 'AddOnTemplate')
+    addonTemplates = find_templates_of_type(helmChart, 'AddOnTemplate', branch)
     for addonTemplate in addonTemplates:
         with open(addonTemplate, 'r', encoding='utf-8') as f:
-            docs = list(yaml.safe_load_all(f))
+            # Handle multi-document YAML files for ACM 2.16+, MCE 2.11+
+            if is_version_compatible(branch, '2.16', '2.11', '2.16'):
+                docs = list(yaml.safe_load_all(f))
+            else:
+                # Fallback to single-document for older versions
+                single_doc = yaml.safe_load(f)
+                docs = [single_doc] if single_doc else []
 
         modified = False
         for templateContent in docs:
@@ -1432,21 +1463,28 @@ def injectAnnotationsForAddonTemplate(helmChart):
 # in the image field, insert helm flow control code to reference it, and add image-key to the values.yaml file.
 # If the image-key referenced in the addon template deployment does not exist in `imageMappings` in the Config.yaml,
 # this will fail. Images must be explicitly defined
-def fixImageReferencesForAddonTemplate(helmChart, imageKeyMapping):
+def fixImageReferencesForAddonTemplate(helmChart, imageKeyMapping, branch):
     """_summary_
 
     Args:
         helmChart (_type_): _description_
         imageKeyMapping (_type_): _description_
+        branch (_type_): _description_
     """
     logging.info("Fixing image references in addon templates and values.yaml ...")
 
-    addonTemplates = find_templates_of_type(helmChart, 'AddOnTemplate')
+    addonTemplates = find_templates_of_type(helmChart, 'AddOnTemplate', branch)
     all_imageKeys = []
 
     for addonTemplate in addonTemplates:
         with open(addonTemplate, 'r', encoding='utf-8') as f:
-            docs = list(yaml.safe_load_all(f))
+            # Handle multi-document YAML files for ACM 2.16+, MCE 2.11+
+            if is_version_compatible(branch, '2.16', '2.11', '2.16'):
+                docs = list(yaml.safe_load_all(f))
+            else:
+                # Fallback to single-document for older versions
+                single_doc = yaml.safe_load(f)
+                docs = [single_doc] if single_doc else []
 
         for templateContent in docs:
             if not templateContent or templateContent.get('kind') != 'AddOnTemplate':
@@ -1676,7 +1714,7 @@ def main():
             bundlepath = getBundleManifestsPath(repo["repo_name"], operator)
             logging.info("The latest bundle path for channel is %s", bundlepath)
 
-            csvPath = get_csv_path(repo["repo_name"], operator)
+            csvPath = get_csv_path(repo["repo_name"], operator, branch)
             if csvPath == "":
                 # Validate the bundlePath exists in config.yaml
                 logging.error("Unable to find given channel: %s", operator.get("channel", "Channel not specified"))
@@ -1708,7 +1746,7 @@ def main():
                 logging.info("Preserving files for operator '%s': %s", operator["name"], str(preservedFiles))
 
             # Copy over all CRDs to the destination directory from the manifest folder
-            addCRDs(repo["repo_name"], operator, destination, preservedFiles)
+            addCRDs(repo["repo_name"], operator, destination, branch, preservedFiles)
 
             # If name is empty, fail
             helmChart = operator["name"]
@@ -1733,7 +1771,7 @@ def main():
             # Add all basic resources to the helm chart from the CSV
             logging.info("Adding Resources from CSV to helm chart '%s' ...", operator["name"])
             extract_csv_resources(helmChart, csvPath)
-            copy_additional_resources(helmChart, csvPath)
+            copy_additional_resources(helmChart, csvPath, branch)
 
             # In ACM 2.12+ we need to handle webhooks for components, so it's necessary to verify if any webhook paths
             # are available and include manifest files for processing.
