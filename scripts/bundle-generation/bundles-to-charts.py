@@ -917,10 +917,10 @@ def is_version_compatible(branch, min_release_version, min_backplane_version, mi
             logging.error("Version not found in branch: %s", branch)
             return False
         
-    if acm_release_version and acm_release_version >= min_release_version:
+    if acm_release_version and version.Version(acm_release_version) >= version.Version(min_release_version):
         return True
 
-    elif mce_release_version and mce_release_version >= min_backplane_version:
+    elif mce_release_version and version.Version(mce_release_version) >= version.Version(min_backplane_version):
         return True
 
     else:
