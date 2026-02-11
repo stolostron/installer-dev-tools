@@ -1052,7 +1052,7 @@ def updateDeployments(helmChart, operator, exclusions, sizes, branch):
     deploySpecYaml = os.path.join(os.path.dirname(os.path.realpath(__file__)), "chart-templates/templates/deploymentspec.yaml")
     with open(deploySpecYaml, 'r', encoding='utf-8') as f:
         deploySpec = yaml.safe_load(f)
-    deployments = find_templates_of_type(helmChart, 'Deployment')
+    deployments = find_templates_of_type(helmChart, 'Deployment', branch)
     for deployment in deployments:
         with open(deployment, 'r', encoding='utf-8') as f:
             deploy = yaml.safe_load(f)
