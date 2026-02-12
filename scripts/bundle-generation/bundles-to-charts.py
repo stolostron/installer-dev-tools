@@ -376,14 +376,15 @@ def check_unsupported_csv_resources(csv_path, csv_data, supported_config_types):
 
     return False
 
-def escape_template_variables(helmChart, variables):
+def escape_template_variables(helmChart, variables, branch):
     """_summary_
 
     Args:
         helmChart (_type_): _description_
         variables (_type_): _description_
+        branch (_type_): _description_
     """
-    addonTemplates = find_templates_of_type(helmChart, 'AddOnTemplate')
+    addonTemplates = find_templates_of_type(helmChart, 'AddOnTemplate', branch)
     for addonTemplate in addonTemplates:
         for variable in variables:
             logging.info("Start to escape vriable %s", variable)
@@ -434,12 +435,13 @@ def extract_csv_resources(helm_chart, csv_path):
         sys.exit(1)
 
 # Copies additional resources from the CSV directory to the Helm chart
-def copy_additional_resources(helmChart, csvPath):
+def copy_additional_resources(helmChart, csvPath, branch):
     """_summary_
 
     Args:
         helmChart (_type_): _description_
         csvPath (_type_): _description_
+        branch (_type_): _description_
     """
     logging.info("Copying additional resources from the bundle manifests if present ...")
 
@@ -469,40 +471,110 @@ def copy_additional_resources(helmChart, csvPath):
     for filename in os.listdir(dirPath):
         if filename.endswith(".yaml") or filename.endswith(".yml"):
             filePath = os.path.join(dirPath, filename)
+
+            # Try to load all documents to check if it's multi-document
             try:
                 with open(filePath, 'r', encoding='utf-8') as f:
-                    fileYml = yaml.safe_load(f)
+                    docs = list(yaml.safe_load_all(f))
             except Exception as e:
                 logging.error("Unexpected error occured while processing file '%s': %s", filePath, e)
                 continue
 
-            # Extract the 'kind' of the resource from the YAML file
-            resourceKind = fileYml.get("kind", None)
-            if resourceKind is None:
-                logging.warning("Skipping file '%s' as it does not define a 'kind' attribute.", filename)
-                continue
+            # Check if this is a multi-document file AND version supports splitting
+            is_multi_document = len(docs) > 1
+            should_split = is_multi_document and is_version_compatible(branch, '2.16', '2.11', '2.16')
 
-            # Skip ignored or excluded resource types
-            if resourceKind in ignored_or_excluded_bundle_resource_types:
-                logging.warning("Skipping ignored/excluded resource type '%s' from file '%s'.", resourceKind, filename)
-                continue
+            # If not splitting (single document OR old version), just copy the file as-is
+            if not should_split:
+                # Use original single-document logic - just copy the file
+                fileYml = docs[0] if docs else None
+                if not fileYml:
+                    continue
 
-            # Handle white-listed resources (allowed but not handled by the OLM bundle)
-            elif resourceKind in allowed_bundle_resource_types:
-                logging.info("Copying white listed resource '%s' from file '%s' to Helm chart.", resourceKind, filename)
-                shutil.copyfile(filePath, os.path.join(helmChart, "templates", os.path.basename(filePath)))
-                continue
+                resourceKind = fileYml.get("kind", None)
+                if resourceKind is None:
+                    logging.warning("Skipping file '%s' as it does not define a 'kind' attribute.", filename)
+                    continue
 
-            # Handle expected resources (both required and optional)
-            elif resourceKind in expected_bundle_resource_types:
-                logging.info("Copying expected resource type '%s' from file '%s' to Helm chart.", resourceKind, filename)
-                shutil.copyfile(filePath, os.path.join(helmChart, "templates", os.path.basename(filePath)))
-                continue
+                # Skip ignored or excluded resource types
+                if resourceKind in ignored_or_excluded_bundle_resource_types:
+                    logging.warning("Skipping ignored/excluded resource type '%s' from file '%s'.", resourceKind, filename)
+                    continue
 
-            # Log unsupported resources
+                # Handle white-listed resources
+                elif resourceKind in allowed_bundle_resource_types:
+                    logging.info("Copying white listed resource '%s' from file '%s' to Helm chart.", resourceKind, filename)
+                    shutil.copyfile(filePath, os.path.join(helmChart, "templates", os.path.basename(filePath)))
+                    continue
+
+                # Handle expected resources
+                elif resourceKind in expected_bundle_resource_types:
+                    logging.info("Copying expected resource type '%s' from file '%s' to Helm chart.", resourceKind, filename)
+                    shutil.copyfile(filePath, os.path.join(helmChart, "templates", os.path.basename(filePath)))
+                    continue
+
+                # Log unsupported resources
+                else:
+                    logging.warning("Unsupported resource type '%s' found in file '%s'.", resourceKind, filename)
+                    unsupported_resources.append(resourceKind)
+
             else:
-                logging.warning("Unsupported resource type '%s' found in file '%s'.", resourceKind, filename)
-                unsupported_resources.append(resourceKind)
+                # Multi-document file on 2.16+ - split and rename each document
+                for doc in docs:
+                    if not doc:
+                        continue
+
+                    # Extract the 'kind' of the resource from the YAML document
+                    resourceKind = doc.get("kind", None)
+                    if resourceKind is None:
+                        logging.warning("Skipping document in file '%s' as it does not define a 'kind' attribute.", filename)
+                        continue
+
+                    # Skip ignored or excluded resource types
+                    if resourceKind in ignored_or_excluded_bundle_resource_types:
+                        logging.warning("Skipping ignored/excluded resource type '%s' from file '%s'.", resourceKind, filename)
+                        continue
+
+                    # Handle white-listed resources (allowed but not handled by the OLM bundle)
+                    elif resourceKind in allowed_bundle_resource_types:
+                        resource_name = doc.get('metadata', {}).get('name')
+                        if not resource_name:
+                            logging.warning("Skipping resource in file '%s' as it does not have a metadata.name field.", filename)
+                            continue
+
+                        # Generate filename based on resource name and kind (matching webhook pattern)
+                        new_filename = f"{resource_name.lower()}-{resourceKind.lower()}.yaml"
+                        dest_file_path = os.path.join(helmChart, "templates", new_filename)
+
+                        logging.info("Copying white listed resource '%s/%s' from file '%s' to Helm chart as '%s'.",
+                                     resourceKind, resource_name, filename, new_filename)
+
+                        with open(dest_file_path, 'w', encoding='utf-8') as f:
+                            yaml.dump(doc, f, width=float("inf"), default_flow_style=False, allow_unicode=True)
+                        continue
+
+                    # Handle expected resources (both required and optional)
+                    elif resourceKind in expected_bundle_resource_types:
+                        resource_name = doc.get('metadata', {}).get('name')
+                        if not resource_name:
+                            logging.warning("Skipping resource in file '%s' as it does not have a metadata.name field.", filename)
+                            continue
+
+                        # Generate filename based on resource name and kind (matching webhook pattern)
+                        new_filename = f"{resource_name.lower()}-{resourceKind.lower()}.yaml"
+                        dest_file_path = os.path.join(helmChart, "templates", new_filename)
+
+                        logging.info("Copying expected resource type '%s/%s' from file '%s' to Helm chart as '%s'.",
+                                     resourceKind, resource_name, filename, new_filename)
+
+                        with open(dest_file_path, 'w', encoding='utf-8') as f:
+                            yaml.dump(doc, f, width=float("inf"), default_flow_style=False, allow_unicode=True)
+                        continue
+
+                    # Log unsupported resources
+                    else:
+                        logging.warning("Unsupported resource type '%s' found in file '%s'.", resourceKind, filename)
+                        unsupported_resources.append(resourceKind)
 
     if unsupported_resources:
         logging.error("Found unsupported resources in the bundle manifest: %s. Terminating process.",
@@ -626,7 +698,7 @@ def update_helm_resources(chartName, helmChart, skip_rbac_overrides, exclusions,
     ]
 
     for kind in resource_kinds:
-        resource_templates = find_templates_of_type(helmChart, kind)
+        resource_templates = find_templates_of_type(helmChart, kind, branch)
         if not resource_templates:
             logging.info("------------------------------------------")
             logging.warning(f"No {kind} templates found in the Helm chart [Skipping]")
@@ -681,12 +753,13 @@ def update_helm_resources(chartName, helmChart, skip_rbac_overrides, exclusions,
     logging.info("Resource updating process completed.")
 
 # Given a resource Kind, return all filepaths of that resource type in a chart directory
-def find_templates_of_type(helmChart, kind):
+def find_templates_of_type(helmChart, kind, branch):
     """_summary_
 
     Args:
         helmChart (_type_): _description_
         kind (_type_): _description_
+        branch (_type_): _description_
 
     Returns:
         _type_: _description_
@@ -696,9 +769,20 @@ def find_templates_of_type(helmChart, kind):
         if filename.endswith(".yaml") or filename.endswith(".yml"):
             filePath = os.path.join(helmChart, "templates", filename)
             with open(filePath, 'r', encoding='utf-8') as f:
-                fileYml = yaml.safe_load(f)
-            if fileYml['kind'] == kind:
-                resources.append(filePath)
+                # Handle multi-document YAML files for ACM 2.16+, MCE 2.11+
+                try:
+                    if is_version_compatible(branch, '2.16', '2.11', '2.16'):
+                        docs = list(yaml.safe_load_all(f))
+                    else:
+                        # Fallback to single-document for older versions
+                        single_doc = yaml.safe_load(f)
+                        docs = [single_doc] if single_doc else []
+                    for doc in docs:
+                        if doc and 'kind' in doc and doc['kind'] == kind:
+                            resources.append(filePath)
+                            break  # File matches, no need to check other docs
+                except yaml.YAMLError:
+                    continue
             continue
         else:
             continue
@@ -706,18 +790,19 @@ def find_templates_of_type(helmChart, kind):
 
 # For each deployment, identify the image references if any exist in the environment variable fields, insert helm flow control code to reference it, and add image-key to the values.yaml file.
 # If the image-key referenced in the deployment does not exist in `imageMappings` in the Config.yaml, this will fail. Images must be explicitly defined
-def fixEnvVarImageReferences(helmChart, imageKeyMapping):
+def fixEnvVarImageReferences(helmChart, imageKeyMapping, branch):
     """_summary_
 
     Args:
         helmChart (_type_): _description_
         imageKeyMapping (_type_): _description_
+        branch (_type_): _description_
     """
     logging.info("Fixing image references in container 'env' section in deployments and values.yaml ...")
     valuesYaml = os.path.join(helmChart, "values.yaml")
     with open(valuesYaml, 'r', encoding='utf-8') as f:
         values = yaml.safe_load(f)
-    deployments = find_templates_of_type(helmChart, 'Deployment')
+    deployments = find_templates_of_type(helmChart, 'Deployment', branch)
 
     imageKeys = []
     for deployment in deployments:
@@ -752,19 +837,20 @@ def fixEnvVarImageReferences(helmChart, imageKeyMapping):
 
 # For each deployment, identify the image references if any exist in the image field, insert helm flow control code to reference it, and add image-key to the values.yaml file.
 # If the image-key referenced in the deployment does not exist in `imageMappings` in the Config.yaml, this will fail. Images must be explicitly defined
-def fixImageReferences(helmChart, imageKeyMapping):
+def fixImageReferences(helmChart, imageKeyMapping, branch):
     """_summary_
 
     Args:
         helmChart (_type_): _description_
         imageKeyMapping (_type_): _description_
+        branch (_type_): _description_
     """
     logging.info("Fixing image and pull policy references in deployments and values.yaml ...")
     valuesYaml = os.path.join(helmChart, "values.yaml")
     with open(valuesYaml, 'r', encoding='utf-8') as f:
         values = yaml.safe_load(f)
 
-    deployments = find_templates_of_type(helmChart, 'Deployment')
+    deployments = find_templates_of_type(helmChart, 'Deployment', branch)
     imageKeys = []
     temp = "" ## temporarily read image ref
     for deployment in deployments:
@@ -866,10 +952,10 @@ def is_version_compatible(branch, min_release_version, min_backplane_version, mi
             logging.error("Version not found in branch: %s", branch)
             return False
         
-    if acm_release_version and acm_release_version >= min_release_version:
+    if acm_release_version and version.Version(acm_release_version) >= version.Version(min_release_version):
         return True
 
-    elif mce_release_version and mce_release_version >= min_backplane_version:
+    elif mce_release_version and version.Version(mce_release_version) >= version.Version(min_backplane_version):
         return True
 
     else:
@@ -1001,7 +1087,7 @@ def updateDeployments(helmChart, operator, exclusions, sizes, branch):
     deploySpecYaml = os.path.join(os.path.dirname(os.path.realpath(__file__)), "chart-templates/templates/deploymentspec.yaml")
     with open(deploySpecYaml, 'r', encoding='utf-8') as f:
         deploySpec = yaml.safe_load(f)
-    deployments = find_templates_of_type(helmChart, 'Deployment')
+    deployments = find_templates_of_type(helmChart, 'Deployment', branch)
     for deployment in deployments:
         with open(deployment, 'r', encoding='utf-8') as f:
             deploy = yaml.safe_load(f)
@@ -1047,17 +1133,18 @@ def updateDeployments(helmChart, operator, exclusions, sizes, branch):
         injectHelmFlowControl(deployment, sizes, branch)
 
 # updateRBAC adds standard configuration to the RBAC resources (clusterroles, roles, clusterrolebindings, and rolebindings)
-def updateRBAC(helmChart):
+def updateRBAC(helmChart, branch):
     """_summary_
 
     Args:
         helmChart (_type_): _description_
+        branch (_type_): _description_
     """
     logging.info("Updating clusterroles, roles, clusterrolebindings, and rolebindings ...")
-    clusterroles = find_templates_of_type(helmChart, 'ClusterRole')
-    roles = find_templates_of_type(helmChart, 'Role')
-    clusterrolebindings = find_templates_of_type(helmChart, 'ClusterRoleBinding')
-    rolebindings = find_templates_of_type(helmChart, 'RoleBinding')
+    clusterroles = find_templates_of_type(helmChart, 'ClusterRole', branch)
+    roles = find_templates_of_type(helmChart, 'Role', branch)
+    clusterrolebindings = find_templates_of_type(helmChart, 'ClusterRoleBinding', branch)
+    rolebindings = find_templates_of_type(helmChart, 'RoleBinding', branch)
 
     for rbacFile in clusterroles + roles + clusterrolebindings + rolebindings:
         with open(rbacFile, 'r', encoding='utf-8') as f:
@@ -1124,17 +1211,18 @@ def inject_security_context_constraints(resource, constraints_override):
         logging.info(f"Container '{container_name}' security context: {container_security_context}\n")
         
 
-def update_security_contexts(template_chart_path, constraints_override):
+def update_security_contexts(template_chart_path, constraints_override, branch):
     """_summary_
 
     Args:
         template_chart_path (_type_): _description_
         constraints (list, optional): _description_. Defaults to [].
+        branch (_type_): _description_
     """
     log_header("Injecting security context constraints...")
 
     for kind in ["Deployment", "Job", "StatefulSet"]:
-        resource_templates = find_templates_of_type(template_chart_path, kind)
+        resource_templates = find_templates_of_type(template_chart_path, kind, branch)
         if not resource_templates:
             continue
     
@@ -1182,25 +1270,25 @@ def injectRequirements(helm_chart_path, operator, sizes, branch):
     preserved_files = operator.get("preserve_files", [])
 
     # Fixes image references in the Helm chart.
-    fixImageReferences(helm_chart_path, image_key_mapping)
-    fixEnvVarImageReferences(helm_chart_path, image_key_mapping)
+    fixImageReferences(helm_chart_path, image_key_mapping, branch)
+    fixEnvVarImageReferences(helm_chart_path, image_key_mapping, branch)
 
-    fixImageReferencesForAddonTemplate(helm_chart_path, image_key_mapping)
-    injectAnnotationsForAddonTemplate(helm_chart_path)
+    fixImageReferencesForAddonTemplate(helm_chart_path, image_key_mapping, branch)
+    injectAnnotationsForAddonTemplate(helm_chart_path, branch)
 
     if is_version_compatible(branch, '2.10', '2.5', '2.10'):
-        update_security_contexts(helm_chart_path, security_context_constraints)
+        update_security_contexts(helm_chart_path, security_context_constraints, branch)
 
     if is_version_compatible(branch, '2.13', '2.7', '2.13'):
         update_helm_resources(operator_name, helm_chart_path, skip_rbac_overrides, exclusions, inclusions, branch, preserved_files)
 
     # Updates RBAC and deployment configuration in the Helm chart.
-    updateRBAC(helm_chart_path)
+    updateRBAC(helm_chart_path, branch)
     updateDeployments(helm_chart_path, operator, exclusions, sizes, branch)
 
     logging.info("Updated Chart '%s' successfully\n", helm_chart_path)
 
-def addCRDs(repo, operator, outputDir, preservedFiles=None, overwrite=False):
+def addCRDs(repo, operator, outputDir, branch, preservedFiles=None, overwrite=False):
     """
     Add Custom Resource Definitions (CRDs) to the specified output directory.
 
@@ -1208,6 +1296,7 @@ def addCRDs(repo, operator, outputDir, preservedFiles=None, overwrite=False):
         repo (str): The name of the repository.
         operator (dict): The configuration of the operator.
         outputDir (str): The directory where CRDs will be added.
+        branch (str): The branch being processed for version compatibility checks.
         preservedFiles (list, optional): List of files to preserve. Defaults to None.
         overwrite (bool, optional): Whether to overwrite existing files. Defaults to False.
 
@@ -1250,16 +1339,25 @@ def addCRDs(repo, operator, outputDir, preservedFiles=None, overwrite=False):
 
         filepath = os.path.join(manifestsPath, filename)
         with open(filepath, 'r', encoding='utf-8') as f:
-            resourceFile = yaml.safe_load(f)
+            # Handle multi-document YAML files for ACM 2.16+, MCE 2.11+
+            if is_version_compatible(branch, '2.16', '2.11', '2.16'):
+                docs = list(yaml.safe_load_all(f))
+            else:
+                # Fallback to single-document for older versions
+                single_doc = yaml.safe_load(f)
+                docs = [single_doc] if single_doc else []
 
-        if "kind" not in resourceFile:
-            continue
+        # Check each document for CRDs
+        for doc in docs:
+            if not doc or "kind" not in doc:
+                continue
 
-        elif resourceFile["kind"] == "CustomResourceDefinition":
-            dest_file_path = os.path.join(outputDir, "crds", operator['name'], filename)
-            if overwrite or not os.path.exists(dest_file_path):
-                shutil.copyfile(filepath, dest_file_path)
-                logging.info("CRD file copied: %s", filename)
+            if doc["kind"] == "CustomResourceDefinition":
+                dest_file_path = os.path.join(outputDir, "crds", operator['name'], filename)
+                if overwrite or not os.path.exists(dest_file_path):
+                    shutil.copyfile(filepath, dest_file_path)
+                    logging.info("CRD file copied: %s", filename)
+                break  # Only copy the file once even if it has multiple CRDs
 
     logging.info("CRDs added successfully for operator: %s", operator['name'])
 
@@ -1305,12 +1403,13 @@ def getBundleManifestsPath(repo, operator):
     latest_bundle_path = os.path.join(bundles_directory, latest_bundle_version)
     return latest_bundle_path
 
-def get_csv_path(repo, operator):
+def get_csv_path(repo, operator, branch):
     """_summary_
 
     Args:
         repo (_type_): _description_
         operator (_type_): _description_
+        branch (_type_): _description_
 
     Returns:
         _type_: _description_
@@ -1335,36 +1434,56 @@ def get_csv_path(repo, operator):
 
         file_path = os.path.join(manifests_path, file_name)
         with open(file_path, 'r', encoding='utf-8') as f:
-            resource_file = yaml.safe_load(f)
+            # Handle multi-document YAML files for ACM 2.16+, MCE 2.11+
+            if is_version_compatible(branch, '2.16', '2.11', '2.16'):
+                docs = list(yaml.safe_load_all(f))
+            else:
+                # Fallback to single-document for older versions
+                single_doc = yaml.safe_load(f)
+                docs = [single_doc] if single_doc else []
 
-        if resource_file and resource_file.get("kind") == "ClusterServiceVersion":
-            logging.info("CSV file found: %s", file_path)
-            return file_path
+        # Check if any document in the file is a ClusterServiceVersion
+        for doc in docs:
+            if doc and doc.get("kind") == "ClusterServiceVersion":
+                logging.info("CSV file found: %s", file_path)
+                return file_path
 
-    logging.warning("No CSV file found in directory: %s", resource_file)
+    logging.warning("No CSV file found in directory: %s", manifests_path)
     return None
 
 # injectAnnotationsForAddonTemplate injects following annotations for deployments in the AddonTemplate:
 # - target.workload.openshift.io/management: '{"effect": "PreferredDuringScheduling"}'
-def injectAnnotationsForAddonTemplate(helmChart):
+def injectAnnotationsForAddonTemplate(helmChart, branch):
     """_summary_
 
     Args:
         helmChart (_type_): _description_
+        branch (_type_): _description_
     """
     logging.info("Injecting Annotations for deployments in the AddonTemplate ...")
 
-    addonTemplates = find_templates_of_type(helmChart, 'AddOnTemplate')
+    addonTemplates = find_templates_of_type(helmChart, 'AddOnTemplate', branch)
     for addonTemplate in addonTemplates:
-        injected = False
         with open(addonTemplate, 'r', encoding='utf-8') as f:
-            templateContent = yaml.safe_load(f)
-            agentSpec = templateContent['spec']['agentSpec']
+            # Handle multi-document YAML files for ACM 2.16+, MCE 2.11+
+            if is_version_compatible(branch, '2.16', '2.11', '2.16'):
+                docs = list(yaml.safe_load_all(f))
+            else:
+                # Fallback to single-document for older versions
+                single_doc = yaml.safe_load(f)
+                docs = [single_doc] if single_doc else []
+
+        modified = False
+        for templateContent in docs:
+            if not templateContent or templateContent.get('kind') != 'AddOnTemplate':
+                continue
+
+            agentSpec = templateContent.get('spec', {}).get('agentSpec', {})
             if 'workload' not in agentSpec:
-                return
+                continue
             workload = agentSpec['workload']
             if 'manifests' not in workload:
-                return
+                continue
             manifests = workload['manifests']
             for manifest in manifests:
                 if manifest['kind'] == 'Deployment':
@@ -1373,39 +1492,52 @@ def injectAnnotationsForAddonTemplate(helmChart):
                         metadata['annotations'] = {}
                     if 'target.workload.openshift.io/management' not in metadata['annotations']:
                         metadata['annotations']['target.workload.openshift.io/management'] = '{"effect": "PreferredDuringScheduling"}'
-                        injected = True
-        if injected:
+                        modified = True
+
+        if modified:
             with open(addonTemplate, 'w', encoding='utf-8') as f:
-                yaml.dump(templateContent, f, width=float("inf"))
+                yaml.dump_all(docs, f, width=float("inf"))
                 logging.info("Annotations injected successfully. \n")
 
 # fixImageReferencesForAddonTemplate identify the image references for every deployment in addontemplates, if any exist
 # in the image field, insert helm flow control code to reference it, and add image-key to the values.yaml file.
 # If the image-key referenced in the addon template deployment does not exist in `imageMappings` in the Config.yaml,
 # this will fail. Images must be explicitly defined
-def fixImageReferencesForAddonTemplate(helmChart, imageKeyMapping):
+def fixImageReferencesForAddonTemplate(helmChart, imageKeyMapping, branch):
     """_summary_
 
     Args:
         helmChart (_type_): _description_
         imageKeyMapping (_type_): _description_
+        branch (_type_): _description_
     """
     logging.info("Fixing image references in addon templates and values.yaml ...")
 
-    addonTemplates = find_templates_of_type(helmChart, 'AddOnTemplate')
-    imageKeys = []
-    temp = "" ## temporarily read image ref
+    addonTemplates = find_templates_of_type(helmChart, 'AddOnTemplate', branch)
+    all_imageKeys = []
+
     for addonTemplate in addonTemplates:
         with open(addonTemplate, 'r', encoding='utf-8') as f:
-            templateContent = yaml.safe_load(f)
-            agentSpec = templateContent['spec']['agentSpec']
+            # Handle multi-document YAML files for ACM 2.16+, MCE 2.11+
+            if is_version_compatible(branch, '2.16', '2.11', '2.16'):
+                docs = list(yaml.safe_load_all(f))
+            else:
+                # Fallback to single-document for older versions
+                single_doc = yaml.safe_load(f)
+                docs = [single_doc] if single_doc else []
+
+        for templateContent in docs:
+            if not templateContent or templateContent.get('kind') != 'AddOnTemplate':
+                continue
+
+            agentSpec = templateContent.get('spec', {}).get('agentSpec', {})
             if 'workload' not in agentSpec:
-                return
+                continue
             workload = agentSpec['workload']
             if 'manifests' not in workload:
-                return
+                continue
             manifests = workload['manifests']
-            imageKeys = []
+
             for manifest in manifests:
                 if manifest['kind'] in ['Deployment', 'Job']:
                     containers = manifest['spec']['template']['spec']['containers']
@@ -1416,21 +1548,22 @@ def fixImageReferencesForAddonTemplate(helmChart, imageKeyMapping):
                         except KeyError:
                             logging.critical("No image key mapping provided for imageKey: %s", image_key)
                             sys.exit(1)
-                        imageKeys.append(image_key)
+                        all_imageKeys.append(image_key)
                         container['image'] = "{{ .Values.global.imageOverrides." + image_key + " }}"
                         # container['imagePullPolicy'] = "{{ .Values.global.pullPolicy }}"
+
         with open(addonTemplate, 'w', encoding='utf-8') as f:
-            yaml.dump(templateContent, f, width=float("inf"))
+            yaml.dump_all(docs, f, width=float("inf"))
             logging.info("AddOnTemplate updated with image override successfully. \n")
 
-    if len(imageKeys) == 0:
+    if len(all_imageKeys) == 0:
         return
     valuesYaml = os.path.join(helmChart, "values.yaml")
     with open(valuesYaml, 'r', encoding='utf-8') as f:
         values = yaml.safe_load(f)
     if 'imageOverride' in values['global']['imageOverrides']:
         del values['global']['imageOverrides']['imageOverride']
-    for imageKey in imageKeys:
+    for imageKey in all_imageKeys:
         values['global']['imageOverrides'][imageKey] = "" # set to temp to debug
     with open(valuesYaml, 'w', encoding='utf-8') as f:
         yaml.dump(values, f, width=float("inf"))
@@ -1621,7 +1754,7 @@ def main():
             bundlepath = getBundleManifestsPath(repo["repo_name"], operator)
             logging.info("The latest bundle path for channel is %s", bundlepath)
 
-            csvPath = get_csv_path(repo["repo_name"], operator)
+            csvPath = get_csv_path(repo["repo_name"], operator, branch)
             if csvPath == "":
                 # Validate the bundlePath exists in config.yaml
                 logging.error("Unable to find given channel: %s", operator.get("channel", "Channel not specified"))
@@ -1653,7 +1786,7 @@ def main():
                 logging.info("Preserving files for operator '%s': %s", operator["name"], str(preservedFiles))
 
             # Copy over all CRDs to the destination directory from the manifest folder
-            addCRDs(repo["repo_name"], operator, destination, preservedFiles)
+            addCRDs(repo["repo_name"], operator, destination, branch, preservedFiles)
 
             # If name is empty, fail
             helmChart = operator["name"]
@@ -1678,7 +1811,7 @@ def main():
             # Add all basic resources to the helm chart from the CSV
             logging.info("Adding Resources from CSV to helm chart '%s' ...", operator["name"])
             extract_csv_resources(helmChart, csvPath)
-            copy_additional_resources(helmChart, csvPath)
+            copy_additional_resources(helmChart, csvPath, branch)
 
             # In ACM 2.12+ we need to handle webhooks for components, so it's necessary to verify if any webhook paths
             # are available and include manifest files for processing.
@@ -1687,7 +1820,7 @@ def main():
                 for path in webhook_paths:
                     copy_webhook_configuration_manifests(helmChart, os.path.join(SCRIPT_DIR, "tmp", repo_name, path))
 
-            escape_template_variables(helmChart, escaped_variables)
+            escape_template_variables(helmChart, escaped_variables, branch)
             logging.info("Resources added from CSV successfully.\n")
 
             if not skipOverrides:
