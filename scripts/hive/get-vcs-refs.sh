@@ -74,6 +74,19 @@ TMP_DIR=$(mktemp -d)
 # Cleanup tmp directory on exit
 trap 'rm -rf "${TMP_DIR}"' EXIT
 
+# Check yq version (must be v4+)
+if ! command -v yq &>/dev/null; then
+    echo -e "${RED}❌ Error: yq is not installed${RESET}" >&2
+    exit 1
+fi
+
+yq_version=$(yq --version 2>&1 | grep -oP 'version\s+v?\K[0-9]+' | head -1)
+if [[ -z "$yq_version" ]] || [[ "$yq_version" -lt 4 ]]; then
+    echo -e "${RED}❌ Error: yq version 4 or higher is required${RESET}" >&2
+    echo -e "${YELLOW}💡 Current version: $(yq --version 2>&1)${RESET}" >&2
+    exit 1
+fi
+
 # Check if logged into registry.redhat.io
 if ! podman login --get-login registry.redhat.io &>/dev/null; then
     log "${RED}❌ Error: Not logged into registry.redhat.io${RESET}"
