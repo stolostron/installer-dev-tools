@@ -1,0 +1,12 @@
+# 3. Create the Subscription
+apiVersion: operators.coreos.com/v1alpha1
+kind: Subscription
+metadata:
+  name: advanced-cluster-management
+  namespace: open-cluster-management
+spec:
+  channel:
+  installPlanApproval: Automatic
+  name: advanced-cluster-management
+  source: acm-dev-catalog-custom
+  sourceNamespace: openshift-marketplace

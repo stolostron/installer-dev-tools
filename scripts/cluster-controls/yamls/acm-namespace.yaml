@@ -1,0 +1,5 @@
+# 1. Create the Namespace
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: open-cluster-management
