@@ -123,7 +123,8 @@ catalog-build-and-push VERSION BUNDLE_IMG CATALOG_IMG:
     just catalog-build "{{VERSION}}" "{{BUNDLE_IMG}}" "{{CATALOG_IMG}}"
     just catalog-push "{{CATALOG_IMG}}"
 
-e2e-catalog USERNAME="rh_ee_ngraham" VERSION="release-2.16" UPSTREAM_TAG="latest-2.16" TAG="justfile-test-v2":
+# End-to-end build operator, bundle, and catalog (USERNAME: quay.io username, VERSION: bundle branch e.g. release-2.16, UPSTREAM_TAG: base catalog tag e.g. latest-2.16, TAG: custom tag for all images)
+e2e-catalog USERNAME VERSION UPSTREAM_TAG TAG:
     #!/usr/bin/env bash
     OPERATOR_IMAGE="quay.io/{{USERNAME}}/multiclusterhub-operator:{{TAG}}"
     just operator-build-and-push "$OPERATOR_IMAGE"
