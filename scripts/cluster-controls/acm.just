@@ -29,7 +29,7 @@ toggle-mce-component COMPONENT STATE:
 
 # Apply pull secret for registry access
 apply-pull-secret:
-    #!/bin/bash
+    #!/usr/bin/env bash
     set -euo pipefail
 
     # Try to find podman/docker auth file in standard locations
@@ -59,7 +59,7 @@ apply-pull-secret:
     # Decode to get username:password format for oc registry login
     QUAY_CREDS=$(echo "$QUAY_AUTH" | base64 -d)
 
-    oc get secret/pull-secret -n openshift-config --template='{{{{index .data ".dockerconfigjson" | base64decode}}}}' >pull_secret.yaml
+    oc get secret/pull-secret -n openshift-config --template='{{{{index .data ".dockerconfigjson" | base64decode}}' >pull_secret.yaml
     oc registry login --registry="quay.io:443" --auth-basic="$QUAY_CREDS" --to=pull_secret.yaml
     oc set data secret/pull-secret -n openshift-config --from-file=.dockerconfigjson=pull_secret.yaml
     rm pull_secret.yaml
