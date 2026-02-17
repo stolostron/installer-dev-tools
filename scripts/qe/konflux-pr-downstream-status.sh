@@ -148,11 +148,46 @@ fi
 latest_snapshot_url="https://raw.githubusercontent.com/stolostron/$application_part-operator-bundle/refs/heads/$snapshot_branch/latest-snapshot.yaml"
 gen_config_url="https://raw.githubusercontent.com/stolostron/$application_part-operator-bundle/refs/heads/$snapshot_branch/config/$application_part-manifest-gen-config.json"
 
-debug_echo "Checking for Github auth token"
+auth_check_failures=0
+
 authorization=""
 if [ -f "authorization.txt" ]; then
 	authorization="Authorization: Bearer $(cat "authorization.txt")"
-	debug_echo "Authorization found. Applying to github API requests"
+	echo "🛈 Authorization found. Applying to github API requests"
+else
+    echo "Error: authorization.txt not found"
+    echo "Please create authorization.txt with your GitHub token"
+    echo "github.com > settings > developer settings > personal access tokens > fine-grained personal access tokens"
+    ((auth_check_failures++))
+fi
+
+# Check that we're in the correct OpenShift project (only needed for snapshot mode)
+if [ "$INPUT_TYPE" = "SNAPSHOT" ]; then
+    echo "Checking OpenShift project..."
+    oc_project_output=$(oc project 2>&1)
+    if [[ ! "$oc_project_output" == *"Using project \"crt-redhat-acm-tenant\""* ]]; then
+        echo "Error: Not in the correct OpenShift project."
+        echo "Expected: Using project \"crt-redhat-acm-tenant\""
+        echo "Got: $oc_project_output"
+        ((auth_check_failures++))
+    else
+        echo "Verified: Correct OpenShift project selected (crt-redhat-acm-tenant)"
+    fi
+fi
+
+# Check that we're logged into quay.io
+echo "Checking quay.io login..."
+if ! podman login --get-login quay.io &>/dev/null; then
+    echo "Error: Not logged into quay.io"
+    echo "Please run: podman login quay.io"
+    ((auth_check_failures++))
+else
+    echo "Verified: Logged into quay.io"
+fi
+
+# Exit if any auth checks failed
+if [ $auth_check_failures -ne 0 ]; then
+    exit 1
 fi
 
 if [ "$INPUT_TYPE" = "TAG" ]; then
