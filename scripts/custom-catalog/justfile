@@ -46,7 +46,7 @@ operator-build-and-push IMG:
     @just operator-push {{IMG}}
 
 # Build bundle image
-bundle-build OPERATOR_IMAGE BUNDLE_IMAGE BRANCH="release-2.15" DISPLAY_NAME="Custom ACM Catalog":
+bundle-build OPERATOR_IMAGE BUNDLE_IMAGE BRANCH="release-2.16" DISPLAY_NAME="Custom ACM Catalog":
     #!/usr/bin/env bash
 
     # temp dir

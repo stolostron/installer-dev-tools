@@ -155,7 +155,8 @@ podman login quay.io
 **Missing tools:**
 ```bash
 # Install just
-cargo install just  # or use your package manager
+brew install just # or use your package manager
+# See: https://github.com/casey/just?tab=readme-ov-file#packages
 
 # Install operator-sdk
 # See: https://sdk.operatorframework.io/docs/installation/

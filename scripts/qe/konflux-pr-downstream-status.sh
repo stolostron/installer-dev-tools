@@ -163,37 +163,6 @@ if [ "$skip_opm_render" = false ] && [ "$INPUT_TYPE" = "TAG" ]; then
   opm render $catalog -oyaml > $tag.cs.yaml
 fi
 
-function get_revision_for_image {
-  local image="$1"
-  local repo_owner="stolostron"
-  local repo_name="$application_part-operator-bundle"
-
-  debug_echo "Looking up revision for image: $image"
-
-  # Get commit history for latest-snapshot.yaml
-  local commits_url="https://api.github.com/repos/$repo_owner/$repo_name/commits?path=latest-snapshot.yaml&sha=$snapshot_branch"
-  local commits=$(curl -LsH "Accept: application/vnd.github+json" -H "X-GitHub-Api-Version: 2022-11-28" -H "$authorization" "$commits_url")
-
-  # debug_echo "Commits:"
-  # debug_echo "$commits"
-  # Check each commit until we find the image
-  echo "$commits" | jq -r '.[].sha' | while read commit_sha; do
-    debug_echo "Checking commit: $commit_sha"
-
-    # Get file content at this commit
-    local file_url="https://api.github.com/repos/$repo_owner/$repo_name/contents/latest-snapshot.yaml?ref=$commit_sha"
-    local file_content=$(curl -LsH "Accept: application/vnd.github+json" -H "X-GitHub-Api-Version: 2022-11-28" -H "$authorization" "$file_url" | jq -r '.content' | base64 -d)
-
-    # Check if image exists in this version
-    local found_revision=$(echo "$file_content" | yq ".spec.components[] | select(.containerImage | contains(\"$image\")) | .source.git.revision")
-
-    if [ -n "$found_revision" ] && [ "$found_revision" != "null" ]; then
-      echo "$found_revision"
-      return
-    fi
-  done
-}
-
 function get_revision_for_snapshot {
   local snapshot="$1"
   local repo="$2"
@@ -216,6 +185,7 @@ function get_revision_for_pr_with_tag {
   debug_echo "Repo: $repo"
   debug_echo "Org: $org"
   debug_echo "Repo Name: $repo_name"
+  debug_echo "Config URL: $gen_config_url"
 
   local csv=$(cat $tag.cs.yaml | yq "select(.schema == \"olm.channel\" and .name == \"$channel\") | .entries[-1].name")
   debug_echo "CSV: $csv"
@@ -231,15 +201,13 @@ function get_revision_for_pr_with_tag {
 
   local published_image=$(cat $tag.cs.yaml | yq "select(.schema == \"olm.bundle\" and .name == \"$csv\") | .relatedImages[] | select(.image==\"*$publish_name*\") | .image")
   debug_echo "Published Image: $published_image"
-  local published_image_sha=$(basename $published_image | cut -d'@' -f2)
-  debug_echo "Published Image SHA: $published_image_sha"
 
-  local component="$repo_name-$application"
+  # Transform registry.redhat.io/xxxx/image to quay.io/acm-d/image
+  local quay_image=$(echo "$published_image" | sed 's|registry\.redhat\.io/[^/]*/|quay.io/acm-d/|')
+  debug_echo "Quay Image: $quay_image"
 
-  local calculated_image="$component@$published_image_sha"
-  debug_echo "Calculated Image: $calculated_image"
-
-  local revision_by_sha=$(get_revision_for_image "$calculated_image")
+  # Get revision from image labels using skopeo
+  local revision_by_sha=$(skopeo inspect --no-tags --format '{{json .Labels}}' "docker://$quay_image" | jq -r '."vcs-ref"')
   debug_echo "Revision by SHA: $revision_by_sha"
 
   local revision_by_repo=$(curl -Ls "$latest_snapshot_url" | yq ".spec.components[] | select(.source.git.url == \"$repo\") | .source.git.revision")
