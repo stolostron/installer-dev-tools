@@ -199,6 +199,12 @@ function get_revision_for_pr_with_tag {
   local publish_name=$(curl -Ls "$gen_config_url" | yq -p=json ".product-images.image-list[] | select(.konflux-component-name == \"$repo_name\") | .publish-name")
   debug_echo "Image Name: $publish_name"
 
+  if [ -z "$publish_name" ] || [ "$publish_name" = "null" ]; then
+    echo "⚠️  Error: No publish name found for component '$repo_name'. Check if the component exists in the manifest config." >&2
+    echo "PUBLISH_NAME_ERROR"
+    return 1
+  fi
+
   local published_image=$(cat $tag.cs.yaml | yq "select(.schema == \"olm.bundle\" and .name == \"$csv\") | .relatedImages[] | select(.image==\"*$publish_name*\") | .image")
   debug_echo "Published Image: $published_image"
 
@@ -311,7 +317,7 @@ for pr_url in "${pr_urls[@]}"; do
   else
     revision=$(get_revision_for_pr_with_snapshot "$snapshot" "$pr_url")
   fi
-  if [ "$revision" = "CSV_ERROR" ]; then
+  if [ "$revision" = "CSV_ERROR" ] || [ "$revision" = "PUBLISH_NAME_ERROR" ]; then
     exit 1
   fi
   debug_echo "Discovered Revision: $revision"
