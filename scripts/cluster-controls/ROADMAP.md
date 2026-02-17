@@ -77,3 +77,7 @@ If we decide to switch to modules:
 - Add recipes for troubleshooting common issues
 - Support for additional registries beyond quay.io
 - Configuration presets for different environments (dev, staging, prod)
+
+
+## Hotswap Image in CSV
+- Add a recipe to edit the current cluster's MCH CSV to hot-swap the image reference
