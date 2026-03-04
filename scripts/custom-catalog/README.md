@@ -28,7 +28,7 @@ just e2e-catalog <USERNAME> <VERSION> <UPSTREAM_TAG> <TAG>
 
 **Example:**
 ```bash
-just e2e-catalog rh_ee_ngraham release-2.16 latest-2.16 my-test-v1
+just e2e-catalog myusername release-2.16 latest-2.16 my-test-v1
 ```
 
 This will:
