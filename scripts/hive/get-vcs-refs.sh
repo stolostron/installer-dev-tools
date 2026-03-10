@@ -29,7 +29,7 @@ Examples:
     $(basename "$0")            # Use default bundle tag (v2.10) with colored output
     $(basename "$0") v2.11      # Specify bundle tag
     $(basename "$0") -oyaml     # YAML output only, no colors or progress
-    $(basename "$0") -oyaml v2.10  # YAML only with specific bundle tag
+    $(basename "$0") -oyaml v2.10.1  # YAML only with specific bundle tag
 
 Requirements:
     - Logged into registry.redhat.io (run: podman login registry.redhat.io)
