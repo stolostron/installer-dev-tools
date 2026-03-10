@@ -33,7 +33,8 @@ Examples:
 
 Requirements:
     - Logged into registry.redhat.io (run: podman login registry.redhat.io)
-    - podman, yq, and skopeo must be installed
+    - podman, yq v4, and skopeo must be installed
+    - You may override your default yq by setting the \$YQ env var
 EOF
     exit 0
 }
@@ -75,15 +76,16 @@ TMP_DIR=$(mktemp -d)
 trap 'rm -rf "${TMP_DIR}"' EXIT
 
 # Check yq version (must be v4+)
-if ! command -v yq &>/dev/null; then
+YQ=${YQ:-yq}
+if ! command -v -- "$YQ" &>/dev/null; then
     echo -e "${RED}❌ Error: yq is not installed${RESET}" >&2
     exit 1
 fi
 
-yq_version=$(yq --version 2>&1 | grep -oP 'version\s+v?\K[0-9]+' | head -1)
+yq_version=$("$YQ" --version 2>&1 | grep -oP 'version\s+v?\K[0-9]+' | head -1)
 if [[ -z "$yq_version" ]] || [[ "$yq_version" -lt 4 ]]; then
     echo -e "${RED}❌ Error: yq version 4 or higher is required${RESET}" >&2
-    echo -e "${YELLOW}💡 Current version: $(yq --version 2>&1)${RESET}" >&2
+    echo -e "${YELLOW}💡 Current version: $("$YQ" --version 2>&1)${RESET}" >&2
     exit 1
 fi
 
@@ -117,7 +119,7 @@ if [[ ! -f "$csv_file" ]]; then
 fi
 
 # Extract the hive image from the CSV
-image=$(yq '.spec.relatedImages[] | select(.name == "openshift_hive") | .image' "$csv_file" 2>/dev/null)
+image=$("$YQ" '.spec.relatedImages[] | select(.name == "openshift_hive") | .image' "$csv_file" 2>/dev/null)
 
 if [[ -z "$image" ]]; then
     log "${RED}❌ No hive image found in bundle${RESET}"
