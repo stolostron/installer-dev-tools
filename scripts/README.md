@@ -508,31 +508,30 @@ Common utility functions for bundle generation scripts.
 Validates that all image keys required by operator charts exist in the corresponding bundle extras file. This prevents installation failures caused by missing image override keys in the bundle's CSV environment variables.
 
 ```bash
-# Validate MCE
-./validate-image-keys.py \
-  --operator ~/stolostron/backplane-operator \
-  --bundle ~/stolostron/mce-operator-bundle \
-  --version 2.17.0
+# Validate MCE (run from operator repo, auto-detects version)
+cd ~/stolostron/backplane-operator
+./validate-image-keys.py --bundle ~/stolostron/mce-operator-bundle
 
-# Validate ACM
-./validate-image-keys.py \
-  --operator ~/stolostron/multiclusterhub-operator \
-  --bundle ~/stolostron/acm-operator-bundle \
-  --version 2.13.6
+# Validate ACM (run from operator repo, auto-detects version)
+cd ~/stolostron/multiclusterhub-operator
+./validate-image-keys.py --bundle ~/stolostron/acm-operator-bundle
 
 # Use environment variables
-export OPERATOR_PATH=~/stolostron/backplane-operator
 export BUNDLE_PATH=~/stolostron/mce-operator-bundle
-./validate-image-keys.py --version 2.17.0
+cd ~/stolostron/backplane-operator
+./validate-image-keys.py
 
 # Enable debug logging
-./validate-image-keys.py --operator ... --bundle ... --version ... --debug
+./validate-image-keys.py --bundle ~/stolostron/mce-operator-bundle --debug
 ```
 
 **Features:**
 - Validates image keys between operator and bundle repos
 - Works for both MCE (backplane-operator) and ACM (multiclusterhub-operator)
+- Auto-detects bundle version from extras directory
+- Defaults to current directory as operator path
 - Clear error messages showing missing keys and affected components
+- Detects placeholder digests (sha256:0000...0000)
 - Exit code 0 on success, 1 on validation failure
 
 **Use Cases:**

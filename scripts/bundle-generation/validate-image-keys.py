@@ -64,6 +64,37 @@ def extract_required_image_keys(operator_path):
     return required_keys
 
 
+def auto_detect_version(bundle_path):
+    """
+    Auto-detect version from bundle extras directory
+
+    Args:
+        bundle_path: Path to the bundle repo
+
+    Returns:
+        str: Detected version (e.g., "2.17.0") or None if not found
+    """
+    extras_dir = Path(bundle_path) / "extras"
+    if not extras_dir.exists():
+        return None
+
+    # Find all JSON files matching version pattern (x.y.z.json)
+    import re
+    version_pattern = re.compile(r'^(\d+\.\d+\.\d+)\.json$')
+
+    versions = []
+    for file in extras_dir.glob('*.json'):
+        match = version_pattern.match(file.name)
+        if match:
+            versions.append(match.group(1))
+
+    if not versions:
+        return None
+
+    # Return the latest version (sorted)
+    return sorted(versions, reverse=True)[0]
+
+
 def get_bundle_image_keys(bundle_path, version):
     """
     Get all image-key entries from bundle extras JSON
@@ -127,7 +158,7 @@ def validate(operator_path, bundle_path, version):
     operator_name = Path(operator_path).name
     bundle_name = Path(bundle_path).name
 
-    logging.info(f"Validating image keys:")
+    logging.info("Validating image keys:")
     logging.info(f"  Operator: {operator_name} ({operator_path})")
     logging.info(f"  Bundle:   {bundle_name} ({bundle_path})")
     logging.info(f"  Version:  {version}\n")
@@ -136,8 +167,8 @@ def validate(operator_path, bundle_path, version):
     available, placeholder_keys = get_bundle_image_keys(bundle_path, version)
 
     if not required:
-        logging.warning("No image keys found in operator charts")
-        return True
+        logging.error("No image keys found in operator charts")
+        return False
 
     if not available and not placeholder_keys:
         logging.error("No image keys found in bundle extras")
@@ -171,16 +202,16 @@ def validate(operator_path, bundle_path, version):
             img_info = placeholder_keys[key]
             logging.error(f"  - {key} (used by: {components})")
             logging.error(f"    Image: {img_info['image-remote']}/{img_info['image-name']}")
-            logging.error(f"    Digest: sha256:0000...0000 (PLACEHOLDER)")
+            logging.error("    Digest: sha256:0000...0000 (PLACEHOLDER)")
 
     if has_errors:
         logging.error("\nTo fix this issue:")
         if missing_keys:
             logging.error(f"  1. Add the missing image entries to {bundle_name}/extras/{version}.json")
         if required_placeholders:
-            logging.error(f"  2. Build and publish the placeholder images")
+            logging.error("  2. Build and publish the placeholder images")
             logging.error(f"  3. Update {bundle_name}/extras/{version}.json with real image digests")
-        logging.error(f"  4. Ensure the CSV includes OPERAND_IMAGE_* or RELATED_IMAGE_* environment variables")
+        logging.error("  4. Ensure the CSV includes OPERAND_IMAGE_* or RELATED_IMAGE_* environment variables")
         logging.error("\nSee: https://redhat.atlassian.net/browse/ACM-31185")
         return False
 
@@ -200,37 +231,39 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog='''
 Examples:
-  # Validate MCE
-  %(prog)s --operator ~/stolostron/backplane-operator \\
-           --bundle ~/stolostron/mce-operator-bundle \\
-           --version 2.17.0
+  # Validate from operator repo (auto-detects version)
+  cd ~/stolostron/backplane-operator
+  %(prog)s --bundle ~/stolostron/mce-operator-bundle
 
   # Validate ACM
-  %(prog)s --operator ~/stolostron/multiclusterhub-operator \\
-           --bundle ~/stolostron/acm-operator-bundle \\
-           --version 2.13.0
+  cd ~/stolostron/multiclusterhub-operator
+  %(prog)s --bundle ~/stolostron/acm-operator-bundle
+
+  # Specify custom operator path
+  %(prog)s --operator ~/stolostron/backplane-operator \\
+           --bundle ~/stolostron/mce-operator-bundle
 
   # Use environment variables
-  export OPERATOR_PATH=~/stolostron/backplane-operator
   export BUNDLE_PATH=~/stolostron/mce-operator-bundle
-  %(prog)s --version 2.17.0
+  %(prog)s
         '''
     )
 
     parser.add_argument(
         '--operator',
-        help='Path to operator repo (backplane-operator or multiclusterhub-operator)',
-        default=os.environ.get('OPERATOR_PATH')
+        help='Path to operator repo (default: current directory)',
+        default=os.environ.get('OPERATOR_PATH', '.')
     )
     parser.add_argument(
         '--bundle',
         help='Path to bundle repo (mce-operator-bundle or acm-operator-bundle)',
-        default=os.environ.get('BUNDLE_PATH')
+        default=os.environ.get('BUNDLE_PATH'),
+        required=True
     )
     parser.add_argument(
         '--version',
-        help='Version to validate against (e.g., 2.17.0)',
-        required=True
+        help='Version to validate against (default: auto-detect from bundle)',
+        default=None
     )
     parser.add_argument(
         '--debug',
@@ -243,14 +276,6 @@ Examples:
     if args.debug:
         logging.getLogger().setLevel(logging.DEBUG)
 
-    if not args.operator:
-        logging.error("--operator is required (or set OPERATOR_PATH environment variable)")
-        sys.exit(1)
-
-    if not args.bundle:
-        logging.error("--bundle is required (or set BUNDLE_PATH environment variable)")
-        sys.exit(1)
-
     operator_path = Path(args.operator).expanduser()
     bundle_path = Path(args.bundle).expanduser()
 
@@ -262,7 +287,17 @@ Examples:
         logging.error(f"Bundle path does not exist: {bundle_path}")
         sys.exit(1)
 
-    success = validate(operator_path, bundle_path, args.version)
+    # Auto-detect version if not provided
+    version = args.version
+    if not version:
+        version = auto_detect_version(bundle_path)
+        if not version:
+            logging.error(f"Could not auto-detect version from {bundle_path}/extras/")
+            logging.error("Please specify --version explicitly")
+            sys.exit(1)
+        logging.info(f"Auto-detected bundle version: {version}")
+
+    success = validate(operator_path, bundle_path, version)
     sys.exit(0 if success else 1)
 
 
