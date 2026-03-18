@@ -260,7 +260,7 @@ Examples:
            --bundle ~/stolostron/mce-operator-bundle
 
   # Use environment variables
-  export BUNDLE_PATH=~/stolostron/mce-operator-bundle
+  export BUNDLE=~/stolostron/mce-operator-bundle
   %(prog)s
         '''
     )
