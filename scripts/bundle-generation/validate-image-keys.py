@@ -55,11 +55,13 @@ def extract_required_image_keys(operator_path):
         with open(values_file) as f:
             data = yaml.safe_load(f)
             if 'global' in data and 'imageOverrides' in data['global']:
-                for key in data['global']['imageOverrides'].keys():
-                    if key:  # Skip empty keys
-                        if key not in required_keys:
-                            required_keys[key] = []
-                        required_keys[key].append(component)
+                image_overrides = data['global']['imageOverrides']
+                if image_overrides:  # Check if not None
+                    for key in image_overrides.keys():
+                        if key:  # Skip empty keys
+                            if key not in required_keys:
+                                required_keys[key] = []
+                            required_keys[key].append(component)
 
     return required_keys
 
