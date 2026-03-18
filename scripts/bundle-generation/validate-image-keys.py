@@ -16,6 +16,7 @@ See: https://redhat.atlassian.net/browse/ACM-31185
 import argparse
 import json
 import os
+import re
 import sys
 import logging
 import yaml
@@ -48,16 +49,23 @@ def extract_required_image_keys(operator_path):
         component = Path(values_file).parent.name
         logging.debug(f"Processing chart: {component}")
 
-        with open(values_file) as f:
-            data = yaml.safe_load(f)
-            if 'global' in data and 'imageOverrides' in data['global']:
-                image_overrides = data['global']['imageOverrides']
-                if image_overrides:  # Check if not None
-                    for key in image_overrides.keys():
-                        if key:  # Skip empty keys
-                            if key not in required_keys:
-                                required_keys[key] = []
-                            required_keys[key].append(component)
+        try:
+            with open(values_file, encoding='utf-8') as f:
+                data = yaml.safe_load(f)
+                if 'global' in data and 'imageOverrides' in data['global']:
+                    image_overrides = data['global']['imageOverrides']
+                    if image_overrides:  # Check if not None
+                        for key in image_overrides.keys():
+                            if key:  # Skip empty keys
+                                if key not in required_keys:
+                                    required_keys[key] = []
+                                required_keys[key].append(component)
+        except (UnicodeDecodeError, yaml.YAMLError) as e:
+            logging.error(f"Failed to read or parse YAML file {values_file}: {e}")
+            sys.exit(1)
+        except Exception as e:
+            logging.error(f"Unexpected error reading {values_file}: {e}")
+            sys.exit(1)
 
     return required_keys
 
@@ -77,20 +85,23 @@ def auto_detect_version(bundle_path):
         return None
 
     # Find all JSON files matching version pattern (x.y.z.json)
-    import re
-    version_pattern = re.compile(r'^(\d+\.\d+\.\d+)\.json$')
+    version_pattern = re.compile(r'^(\d+)\.(\d+)\.(\d+)\.json$')
 
     versions = []
     for file in extras_dir.glob('*.json'):
         match = version_pattern.match(file.name)
         if match:
-            versions.append(match.group(1))
+            # Store as tuple of integers for proper semantic version sorting
+            version_tuple = (int(match.group(1)), int(match.group(2)), int(match.group(3)))
+            version_str = f"{match.group(1)}.{match.group(2)}.{match.group(3)}"
+            versions.append((version_tuple, version_str))
 
     if not versions:
         return None
 
-    # Return the latest version (sorted)
-    return sorted(versions, reverse=True)[0]
+    # Sort by semantic version (tuple comparison) and return the latest
+    versions.sort(reverse=True, key=lambda x: x[0])
+    return versions[0][1]
 
 
 def get_bundle_image_keys(bundle_path, version):
@@ -114,31 +125,38 @@ def get_bundle_image_keys(bundle_path, version):
 
     logging.debug(f"Reading bundle extras from: {extras_file}")
 
-    with open(extras_file) as f:
-        data = json.load(f)
-        valid_keys = set()
-        placeholder_keys = {}
+    try:
+        with open(extras_file, encoding='utf-8') as f:
+            data = json.load(f)
+            valid_keys = set()
+            placeholder_keys = {}
 
-        for img in data:
-            key = img.get('image-key')
-            digest = img.get('image-digest', '')
+            for img in data:
+                key = img.get('image-key')
+                digest = img.get('image-digest', '')
 
-            if key:
-                if digest == placeholder_digest:
-                    # Track placeholder entries
-                    placeholder_keys[key] = {
-                        'image-name': img.get('image-name', 'unknown'),
-                        'image-remote': img.get('image-remote', 'unknown')
-                    }
-                else:
-                    # Only count as valid if it has a real digest
-                    valid_keys.add(key)
+                if key:
+                    if digest == placeholder_digest:
+                        # Track placeholder entries
+                        placeholder_keys[key] = {
+                            'image-name': img.get('image-name', 'unknown'),
+                            'image-remote': img.get('image-remote', 'unknown')
+                        }
+                    else:
+                        # Only count as valid if it has a real digest
+                        valid_keys.add(key)
 
-        logging.debug(f"Found {len(valid_keys)} valid image keys in bundle")
-        if placeholder_keys:
-            logging.debug(f"Found {len(placeholder_keys)} placeholder entries")
+            logging.debug(f"Found {len(valid_keys)} valid image keys in bundle")
+            if placeholder_keys:
+                logging.debug(f"Found {len(placeholder_keys)} placeholder entries")
 
-        return valid_keys, placeholder_keys
+            return valid_keys, placeholder_keys
+    except (json.JSONDecodeError, UnicodeDecodeError) as e:
+        logging.error(f"Failed to read or parse JSON file {extras_file}: {e}")
+        sys.exit(1)
+    except Exception as e:
+        logging.error(f"Unexpected error reading {extras_file}: {e}")
+        sys.exit(1)
 
 
 def validate(operator_path, bundle_path, version):
