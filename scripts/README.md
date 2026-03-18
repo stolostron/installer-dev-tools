@@ -517,7 +517,7 @@ cd ~/stolostron/multiclusterhub-operator
 ./validate-image-keys.py --bundle ~/stolostron/acm-operator-bundle
 
 # Use environment variables
-export BUNDLE_PATH=~/stolostron/mce-operator-bundle
+export BUNDLE=~/stolostron/mce-operator-bundle
 cd ~/stolostron/backplane-operator
 ./validate-image-keys.py
 

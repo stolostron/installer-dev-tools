@@ -257,7 +257,7 @@ Examples:
     parser.add_argument(
         '--bundle',
         help='Path to bundle repo (mce-operator-bundle or acm-operator-bundle)',
-        default=os.environ.get('BUNDLE_PATH'),
+        default=os.environ.get('BUNDLE'),
         required=True
     )
     parser.add_argument(
