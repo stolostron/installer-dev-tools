@@ -52,7 +52,7 @@ def extract_required_image_keys(operator_path):
         try:
             with open(values_file, encoding='utf-8') as f:
                 data = yaml.safe_load(f)
-                if 'global' in data and 'imageOverrides' in data['global']:
+                if data and 'global' in data and 'imageOverrides' in data['global']:
                     image_overrides = data['global']['imageOverrides']
                     if image_overrides:  # Check if not None
                         for key in image_overrides.keys():
