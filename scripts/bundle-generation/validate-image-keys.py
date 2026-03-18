@@ -259,8 +259,7 @@ Examples:
     parser.add_argument(
         '--bundle',
         help='Path to bundle repo (mce-operator-bundle or acm-operator-bundle)',
-        default=os.environ.get('BUNDLE'),
-        required=True
+        default=os.environ.get('BUNDLE')
     )
     parser.add_argument(
         '--version',
@@ -277,6 +276,10 @@ Examples:
 
     if args.debug:
         logging.getLogger().setLevel(logging.DEBUG)
+
+    if not args.bundle:
+        logging.error("--bundle is required (or set BUNDLE environment variable)")
+        sys.exit(1)
 
     operator_path = Path(args.operator).expanduser()
     bundle_path = Path(args.bundle).expanduser()
