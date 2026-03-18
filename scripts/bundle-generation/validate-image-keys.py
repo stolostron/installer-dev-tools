@@ -28,10 +28,6 @@ try:
 except ImportError:
     logging.basicConfig(level=logging.INFO)
 
-# Config Constants
-SCRIPT_DIR = os.path.join(os.path.dirname(os.path.realpath(__file__)))
-ROOT_DIR = os.path.abspath(os.path.join(SCRIPT_DIR, "..", ".."))
-
 
 def extract_required_image_keys(operator_path):
     """
