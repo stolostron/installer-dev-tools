@@ -503,6 +503,45 @@ Moves generated charts to appropriate directories.
 
 Common utility functions for bundle generation scripts.
 
+### validate-image-keys.py
+
+Validates that all image keys required by operator charts exist in the corresponding bundle extras file. This prevents installation failures caused by missing image override keys in the bundle's CSV environment variables.
+
+```bash
+# Validate MCE (run from operator repo, auto-detects version)
+cd ~/stolostron/backplane-operator
+./validate-image-keys.py --bundle ~/stolostron/mce-operator-bundle
+
+# Validate ACM (run from operator repo, auto-detects version)
+cd ~/stolostron/multiclusterhub-operator
+./validate-image-keys.py --bundle ~/stolostron/acm-operator-bundle
+
+# Use environment variables
+export BUNDLE=~/stolostron/mce-operator-bundle
+cd ~/stolostron/backplane-operator
+./validate-image-keys.py
+
+# Enable debug logging
+./validate-image-keys.py --bundle ~/stolostron/mce-operator-bundle --debug
+```
+
+**Features:**
+- Validates image keys between operator and bundle repos
+- Works for both MCE (backplane-operator) and ACM (multiclusterhub-operator)
+- Auto-detects bundle version from extras directory
+- Defaults to current directory as operator path
+- Clear error messages showing missing keys and affected components
+- Detects placeholder digests (sha256:0000...0000)
+- Exit code 0 on success, 1 on validation failure
+
+**Use Cases:**
+- CI/CD validation in PR pipelines
+- Pre-merge checks when onboarding new components
+- Troubleshooting installation failures
+
+**Related Issues:**
+- https://redhat.atlassian.net/browse/ACM-31185
+
 ---
 
 ## Release Scripts
