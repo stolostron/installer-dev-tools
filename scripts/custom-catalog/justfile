@@ -1,5 +1,21 @@
 # Copyright Contributors to the Open Cluster Management project
 
+# Directory where multiclusterhub-operator repo will be cloned
+MCH_REPO_DIR := "multiclusterhub-operator"
+
+# Clone multiclusterhub-operator repository
+clone-mch-operator BRANCH="main":
+    #!/usr/bin/env bash
+    if [ -d "{{MCH_REPO_DIR}}" ]; then
+        echo "Repository already exists at {{MCH_REPO_DIR}}"
+        echo "Updating repository..."
+        cd {{MCH_REPO_DIR}} && git fetch origin && git checkout {{BRANCH}} && git pull
+    else
+        echo "Cloning multiclusterhub-operator repository..."
+        git clone -b {{BRANCH}} https://github.com/stolostron/multiclusterhub-operator.git {{MCH_REPO_DIR}}
+    fi
+    echo "✓ Repository ready at {{MCH_REPO_DIR}}"
+
 # Check if logged into quay.io with podman
 _check-quay-login:
     #!/usr/bin/env bash
@@ -14,14 +30,27 @@ _install-requirements:
     .venv/bin/pip install -r hack/bundle-automation/requirements.txt
 
 # Regenerates charts, processing them through the Installer Chart Automation
-regenerate-charts ORG="stolostron" REPO="installer-dev-tools" BRANCH="main" PIPELINE_REPO="pipeline" PIPELINE_BRANCH="2.17-integration": _install-requirements
-    source .venv/bin/activate && python3 ./hack/bundle-automation/generate-shell.py \
+# COMPONENT_BRANCHES: Optional component branch overrides in format "component1:branch1 component2:branch2"
+regenerate-charts ORG="stolostron" REPO="installer-dev-tools" BRANCH="main" PIPELINE_REPO="pipeline" PIPELINE_BRANCH="2.17-integration" COMPONENT_BRANCHES="": _install-requirements
+    #!/usr/bin/env bash
+    source .venv/bin/activate
+
+    # Build component-branch arguments
+    COMPONENT_ARGS=""
+    if [ -n "{{COMPONENT_BRANCHES}}" ]; then
+        for override in {{COMPONENT_BRANCHES}}; do
+            COMPONENT_ARGS="$COMPONENT_ARGS --component-branch $override"
+        done
+    fi
+
+    python3 ./hack/bundle-automation/generate-shell.py \
         --update-charts \
         --org {{ORG}} \
         --repo {{REPO}} \
         --branch {{BRANCH}} \
         --pipeline-repo {{PIPELINE_REPO}} \
-        --pipeline-branch {{PIPELINE_BRANCH}}
+        --pipeline-branch {{PIPELINE_BRANCH}} \
+        $COMPONENT_ARGS
 
 
 # Copy existing Helm charts to pkg/templates/
@@ -33,16 +62,16 @@ copy-charts ORG="stolostron" REPO="installer-dev-tools" BRANCH="main": _install-
         --branch "{{BRANCH}}"
 
 # Build Operator image
-operator-build IMG:
-    podman build --no-cache -t {{IMG}} .
+operator-build IMG BRANCH="main": (clone-mch-operator BRANCH)
+    podman build --no-cache -t {{IMG}} {{MCH_REPO_DIR}}
 
 # Push Operator image
 operator-push IMG:
     podman push {{IMG}}
 
 # Build and Push Operator image
-operator-build-and-push IMG:
-    @just operator-build {{IMG}}
+operator-build-and-push IMG BRANCH="main":
+    @just operator-build {{IMG}} {{BRANCH}}
     @just operator-push {{IMG}}
 
 # Build bundle image
@@ -123,14 +152,90 @@ catalog-build-and-push VERSION BUNDLE_IMG CATALOG_IMG:
     just catalog-build "{{VERSION}}" "{{BUNDLE_IMG}}" "{{CATALOG_IMG}}"
     just catalog-push "{{CATALOG_IMG}}"
 
-# End-to-end build operator, bundle, and catalog (USERNAME: quay.io username, VERSION: bundle branch e.g. release-2.16, UPSTREAM_TAG: base catalog tag e.g. latest-2.16, TAG: custom tag for all images)
-e2e-catalog USERNAME VERSION UPSTREAM_TAG TAG:
+# End-to-end build operator, bundle, and catalog (USERNAME: quay.io username, VERSION: bundle branch e.g. release-2.16, UPSTREAM_TAG: base catalog tag e.g. latest-2.16, TAG: custom tag for all images, MCH_BRANCH: multiclusterhub-operator branch)
+e2e-catalog USERNAME VERSION UPSTREAM_TAG TAG MCH_BRANCH="main":
     #!/usr/bin/env bash
     OPERATOR_IMAGE="quay.io/{{USERNAME}}/multiclusterhub-operator:{{TAG}}"
-    just operator-build-and-push "$OPERATOR_IMAGE"
+    just operator-build-and-push "$OPERATOR_IMAGE" "{{MCH_BRANCH}}"
 
     BUNDLE_IMAGE="quay.io/{{USERNAME}}/acm-operator-bundle:{{TAG}}"
     just bundle-build-and-push "$OPERATOR_IMAGE" "$BUNDLE_IMAGE" "{{VERSION}}"
 
     CATALOG_IMAGE="quay.io/{{USERNAME}}/acm-dev-catalog:{{TAG}}"
     just catalog-build-and-push "{{UPSTREAM_TAG}}" "$BUNDLE_IMAGE" "$CATALOG_IMAGE"
+
+# Dev workflow: Regenerate charts with component branch overrides, then build full e2e catalog
+# COMPONENT_BRANCHES: Space-separated component branch overrides, e.g. "search-operator:my-branch observability:feature-x"
+dev-branch-e2e USERNAME VERSION UPSTREAM_TAG TAG MCH_BRANCH="main" COMPONENT_BRANCHES="" ORG="stolostron" REPO="installer-dev-tools" BRANCH="main" PIPELINE_REPO="pipeline" PIPELINE_BRANCH="2.17-integration": (clone-mch-operator MCH_BRANCH)
+    #!/usr/bin/env bash
+    set -e
+
+    echo "========================================="
+    echo "Step 1: Regenerating charts with component branch overrides"
+    echo "========================================="
+
+    # Navigate to MCH operator repo
+    cd {{MCH_REPO_DIR}}
+
+    # Install Python requirements if needed
+    if [ ! -d .venv ]; then
+        python3 -m venv .venv
+    fi
+    .venv/bin/pip install -q -r hack/bundle-automation/requirements.txt 2>/dev/null || true
+
+    # Build component-branch arguments
+    COMPONENT_ARGS=""
+    if [ -n "{{COMPONENT_BRANCHES}}" ]; then
+        echo "Component branch overrides: {{COMPONENT_BRANCHES}}"
+        for override in {{COMPONENT_BRANCHES}}; do
+            COMPONENT_ARGS="$COMPONENT_ARGS --component-branch $override"
+        done
+    fi
+
+    # Run the chart generation
+    source .venv/bin/activate && python3 ./hack/bundle-automation/generate-shell.py \
+        --update-charts \
+        --org {{ORG}} \
+        --repo {{REPO}} \
+        --branch {{BRANCH}} \
+        --pipeline-repo {{PIPELINE_REPO}} \
+        --pipeline-branch {{PIPELINE_BRANCH}} \
+        $COMPONENT_ARGS
+
+    # Return to original directory
+    cd "$OLDPWD"
+
+    echo ""
+    echo "========================================="
+    echo "Step 2: Building and pushing operator image"
+    echo "========================================="
+
+    # Build and push the operator
+    OPERATOR_IMAGE="quay.io/{{USERNAME}}/multiclusterhub-operator:{{TAG}}"
+    just operator-build-and-push "$OPERATOR_IMAGE" "{{MCH_BRANCH}}"
+
+    echo ""
+    echo "========================================="
+    echo "Step 3: Building and pushing bundle image"
+    echo "========================================="
+
+    # Build and push the bundle
+    BUNDLE_IMAGE="quay.io/{{USERNAME}}/acm-operator-bundle:{{TAG}}"
+    just bundle-build-and-push "$OPERATOR_IMAGE" "$BUNDLE_IMAGE" "{{VERSION}}"
+
+    echo ""
+    echo "========================================="
+    echo "Step 4: Building and pushing catalog image"
+    echo "========================================="
+
+    # Build and push the catalog
+    CATALOG_IMAGE="quay.io/{{USERNAME}}/acm-dev-catalog:{{TAG}}"
+    just catalog-build-and-push "{{UPSTREAM_TAG}}" "$BUNDLE_IMAGE" "$CATALOG_IMAGE"
+
+    echo ""
+    echo "========================================="
+    echo "✓ Dev branch e2e complete!"
+    echo "========================================="
+    echo "Operator: $OPERATOR_IMAGE"
+    echo "Bundle:   $BUNDLE_IMAGE"
+    echo "Catalog:  $CATALOG_IMAGE"

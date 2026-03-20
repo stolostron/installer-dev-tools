@@ -1449,6 +1449,7 @@ def main():
     parser.add_argument("--destination", dest="destination", type=str, required=False, help="Destination directory of the created helm chart")
     parser.add_argument("--skipOverrides", dest="skipOverrides", type=bool, help="If true, overrides such as helm flow control will not be applied")
     parser.add_argument("--lint", dest="lint", action='store_true', help="If true, bundles will only be linted to ensure they can be transformed successfully. Default is False.")
+    parser.add_argument("--component-branch", dest="component_branch", action='append', type=str, required=False, help="Override branch for a specific component. Format: component_name:branch_name. Can be specified multiple times.")
 
     parser.set_defaults(skipOverrides=False)
     parser.set_defaults(lint=False)
@@ -1459,6 +1460,17 @@ def main():
     destination = args.destination
     lint = args.lint
     skipOverrides = args.skipOverrides
+
+    # Parse component branch overrides into a dictionary
+    component_branch_overrides = {}
+    if args.component_branch:
+        for override in args.component_branch:
+            if ':' not in override:
+                logging.warning(f"Invalid component-branch format: '{override}'. Expected 'component_name:branch_name'. Skipping.")
+                continue
+            comp_name, branch_name = override.split(':', 1)
+            component_branch_overrides[comp_name] = branch_name
+            logging.info(f"Branch override configured: {comp_name} -> {branch_name}")
 
     if lint == False and not destination:
         logging.critical("Destination directory is required when not linting.")
@@ -1510,7 +1522,12 @@ def main():
             shutil.rmtree(repo_path)
         repository = Repo.clone_from(repo["github_ref"], repo_path) # Clone repo to above path
 
-        if 'branch' in repo:
+        # Check for branch override first, then use config branch, or default to empty string
+        if repo_name in component_branch_overrides:
+            branch = component_branch_overrides[repo_name]
+            logging.info(f"Using branch override for {repo_name}: {branch}")
+            repository.git.checkout(branch)
+        elif 'branch' in repo:
             branch = repo['branch']
             repository.git.checkout(branch) # If a branch is specified, checkout that branch
         else:
