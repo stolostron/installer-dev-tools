@@ -1450,6 +1450,7 @@ def main():
     parser.add_argument("--skipOverrides", dest="skipOverrides", type=bool, help="If true, overrides such as helm flow control will not be applied")
     parser.add_argument("--lint", dest="lint", action='store_true', help="If true, bundles will only be linted to ensure they can be transformed successfully. Default is False.")
     parser.add_argument("--component-branch", dest="component_branch", action='append', type=str, required=False, help="Override branch for a specific component. Format: component_name:branch_name. Can be specified multiple times.")
+    parser.add_argument("--component-fork", dest="component_fork", action='append', type=str, required=False, help="Override git repository URL for a specific component. Format: component_name:git_url. Can be specified multiple times.")
 
     parser.set_defaults(skipOverrides=False)
     parser.set_defaults(lint=False)
@@ -1471,6 +1472,17 @@ def main():
             comp_name, branch_name = override.split(':', 1)
             component_branch_overrides[comp_name] = branch_name
             logging.info(f"Branch override configured: {comp_name} -> {branch_name}")
+
+    # Parse component fork overrides into a dictionary
+    component_fork_overrides = {}
+    if args.component_fork:
+        for override in args.component_fork:
+            if ':' not in override:
+                logging.warning(f"Invalid component-fork format: '{override}'. Expected 'component_name:git_url'. Skipping.")
+                continue
+            comp_name, git_url = override.split(':', 1)
+            component_fork_overrides[comp_name] = git_url
+            logging.info(f"Fork override configured: {comp_name} -> {git_url}")
 
     if lint == False and not destination:
         logging.critical("Destination directory is required when not linting.")
@@ -1520,7 +1532,14 @@ def main():
 
         if os.path.exists(repo_path): # If path exists, remove and re-clone
             shutil.rmtree(repo_path)
-        repository = Repo.clone_from(repo["github_ref"], repo_path) # Clone repo to above path
+
+        # Check for fork override first, then use config github_ref
+        if repo_name in component_fork_overrides:
+            git_url = component_fork_overrides[repo_name]
+            logging.info(f"Using fork override for {repo_name}: {git_url}")
+            repository = Repo.clone_from(git_url, repo_path)
+        else:
+            repository = Repo.clone_from(repo["github_ref"], repo_path) # Clone repo to above path
 
         # Check for branch override first, then use config branch, or default to empty string
         if repo_name in component_branch_overrides:
