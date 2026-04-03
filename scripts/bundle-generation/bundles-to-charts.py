@@ -13,6 +13,7 @@ Returns:
 """
 
 import argparse
+import copy
 import os
 import shutil
 import logging
@@ -1250,6 +1251,161 @@ def update_security_contexts(template_chart_path, constraints_override, branch):
 
     logging.info("Updated security context for '%s'\n", template_chart_path)
 
+def strategic_merge(base, patch):
+    """
+    Performs a strategic merge patch on a base YAML document using a patch document.
+
+    For lists of dicts that contain a 'name' key, merges by matching on 'name'
+    and appends new entries. For other values, the patch overwrites the base.
+
+    Args:
+        base (dict): The base YAML document to patch.
+        patch (dict): The patch document to apply.
+
+    Returns:
+        dict: The merged result.
+    """
+    if not isinstance(base, dict) or not isinstance(patch, dict):
+        return patch
+
+    result = copy.deepcopy(base)
+    for key, patch_value in patch.items():
+        if key not in result:
+            result[key] = copy.deepcopy(patch_value)
+        elif isinstance(result[key], dict) and isinstance(patch_value, dict):
+            result[key] = strategic_merge(result[key], patch_value)
+        elif isinstance(result[key], list) and isinstance(patch_value, list):
+            if (len(result[key]) > 0 and isinstance(result[key][0], dict)
+                    and 'name' in result[key][0]
+                    and len(patch_value) > 0 and isinstance(patch_value[0], dict)
+                    and 'name' in patch_value[0]):
+                existing_names = {
+                    item['name']: i for i, item in enumerate(result[key])
+                }
+                for patch_item in patch_value:
+                    if patch_item.get('name') in existing_names:
+                        # Skip items that only have 'name' — they serve
+                        # as merge anchors and should not overwrite the
+                        # existing item's fields.
+                        if len(patch_item) <= 1:
+                            continue
+                        idx = existing_names[patch_item['name']]
+                        result[key][idx] = strategic_merge(
+                            result[key][idx], patch_item
+                        )
+                    else:
+                        result[key].append(copy.deepcopy(patch_item))
+            else:
+                result[key] = copy.deepcopy(patch_value)
+        else:
+            result[key] = copy.deepcopy(patch_value)
+    return result
+
+
+def apply_patches(helm_chart_path, operator, config_dir):
+    """
+    Applies patches and copies additional templates defined in the operator config.
+
+    Supports two config fields:
+
+      'patches': list of patch entries with fields:
+        - target:  filename inside templates/
+        - path:    patch file path, relative to config_dir
+        - type:    patch strategy (see below)
+
+      'additional_templates': list of file paths (relative to config_dir)
+        to copy into the chart's templates/ directory.
+
+    Supported patch types:
+      - 'strategic-merge': YAML-aware merge for pure YAML files.
+        Merges lists of dicts by 'name' key. Patch items with only
+        a 'name' field are treated as anchors and do not overwrite
+        existing items.
+
+    Args:
+        helm_chart_path (str): Path to the helm chart directory.
+        operator (dict): The operator configuration from config.yaml.
+        config_dir (str): Directory containing config.yaml (for resolving
+            relative paths in 'path' and 'additional_templates').
+    """
+    patches = operator.get("patches", [])
+    additional_templates = operator.get("additional_templates", [])
+    templates_dir = os.path.join(helm_chart_path, "templates")
+
+    for patch in patches:
+        target_file = patch.get("target")
+        patch_path = patch.get("path")
+        patch_type = patch.get("type", "strategic-merge")
+
+        if not target_file or not patch_path:
+            logging.warning(
+                "Skipping patch with missing 'target' or 'path': %s", patch
+            )
+            continue
+
+        target_filepath = os.path.join(templates_dir, target_file)
+        patch_filepath = os.path.join(config_dir, patch_path)
+
+        if not os.path.isfile(target_filepath):
+            logging.error(
+                "Patch target file not found: '%s'", target_filepath
+            )
+            continue
+
+        if not os.path.isfile(patch_filepath):
+            logging.error("Patch file not found: '%s'", patch_filepath)
+            continue
+
+        logging.info(
+            "Applying %s patch '%s' to '%s' ...",
+            patch_type, patch_path, target_file
+        )
+
+        if patch_type == "strategic-merge":
+            with open(target_filepath, 'r') as f:
+                target_yaml = yaml.safe_load(f)
+            with open(patch_filepath, 'r') as f:
+                patch_yaml = yaml.safe_load(f)
+
+            if target_yaml is not None and patch_yaml is not None:
+                merged = strategic_merge(target_yaml, patch_yaml)
+                with open(target_filepath, 'w') as f:
+                    yaml.dump(
+                        merged, f,
+                        default_flow_style=False,
+                        width=float("inf")
+                    )
+                logging.info(
+                    "Applied strategic-merge patch to '%s'", target_file
+                )
+            else:
+                logging.warning(
+                    "Could not parse YAML for patch on '%s'", target_file
+                )
+
+        else:
+            logging.warning(
+                "Unsupported patch type '%s' for target '%s'",
+                patch_type, target_file
+            )
+
+    for template_path in additional_templates:
+        src_filepath = os.path.join(config_dir, template_path)
+        if not os.path.isfile(src_filepath):
+            logging.error(
+                "Additional template file not found: '%s'", src_filepath
+            )
+            continue
+
+        dest_filename = os.path.basename(src_filepath)
+        dest_filepath = os.path.join(templates_dir, dest_filename)
+        shutil.copyfile(src_filepath, dest_filepath)
+        logging.info(
+            "Copied additional template '%s' to '%s'",
+            template_path, dest_filepath
+        )
+
+
 def injectRequirements(helm_chart_path, operator, sizes, branch):
     """_summary_
 
@@ -1822,6 +1978,14 @@ def main():
 
             escape_template_variables(helmChart, escaped_variables, branch)
             logging.info("Resources added from CSV successfully.\n")
+
+            # Apply patches and copy additional templates before overrides.
+            # Patches operate on pure YAML (before Helm directives are added
+            # by injectRequirements), enabling reliable strategic-merge.
+            # Paths are relative to the config file's parent directory.
+            if operator.get("patches") or operator.get("additional_templates"):
+                config_base_dir = os.path.dirname(os.path.abspath(config_yaml))
+                apply_patches(helmChart, operator, config_base_dir)
 
             if not skipOverrides:
                 logging.info("Adding Overrides to helm chart '%s' (set --skipOverrides=true to skip) ...", operator["name"])
