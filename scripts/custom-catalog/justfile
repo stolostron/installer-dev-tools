@@ -31,8 +31,7 @@ clone-operator BRANCH="main":
         cd "$OPERATOR_PATH" && git fetch origin && git checkout {{BRANCH}} && git pull
     else
         echo "Cloning operator repository..."
-        # cd {{justfile_directory()}} && git clone -b {{BRANCH}} {{OPERATOR_REPO}} {{OPERATOR_DIR}}
-        cd {{justfile_directory()}} && git clone -b capi-changes {{OPERATOR_REPO}} {{OPERATOR_DIR}}
+        cd {{justfile_directory()}} && git clone -b {{BRANCH}} {{OPERATOR_REPO}} {{OPERATOR_DIR}}
     fi
     echo "✓ Repository ready at $OPERATOR_PATH"
 
