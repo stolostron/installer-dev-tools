@@ -10,7 +10,7 @@
 export MODE := env_var_or_default("MODE", "MCH")
 
 # Configuration based on MODE
-OPERATOR_REPO := if MODE == "MCE" { "https://github.com/cameronmwall/backplane-operator.git" } else { "https://github.com/stolostron/multiclusterhub-operator.git" }
+OPERATOR_REPO := if MODE == "MCE" { "https://github.com/stolostron/backplane-operator.git" } else { "https://github.com/stolostron/multiclusterhub-operator.git" }
 OPERATOR_DIR := if MODE == "MCE" { "backplane-operator" } else { "multiclusterhub-operator" }
 BUNDLE_REPO := if MODE == "MCE" { "https://github.com/stolostron/mce-operator-bundle.git" } else { "https://github.com/stolostron/acm-operator-bundle.git" }
 CATALOG_BASE := if MODE == "MCE" { "quay.io/acm-d/mce-dev-catalog" } else { "quay.io/acm-d/acm-dev-catalog" }
