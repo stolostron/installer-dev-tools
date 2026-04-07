@@ -29,6 +29,8 @@ from utils.git_sha_fetcher import fetch_sha_from_git_remote
 # Configure logging with coloredlogs
 coloredlogs.install(level='DEBUG')  # Set the logging level as needed
 
+# Removed literal_str class - using post-processing instead
+
 # Config Constants
 SCRIPT_DIR = os.path.join(os.path.dirname(os.path.realpath(__file__)))
 ROOT_DIR = os.path.abspath(os.path.join(SCRIPT_DIR, "..", ".."))
@@ -1072,6 +1074,53 @@ def injectHelmFlowControl(deployment, sizes, branch):
     a_file.close()
     logging.info("Added Helm flow control for NodeSelector, Proxy Overrides and SecCompProfile.\n")
 
+# add_probe_defaults adds explicit timeout and failure threshold values to probes (ACM 2.17+)
+def add_probe_defaults(deployment):
+    """
+    Adds default timeoutSeconds and failureThreshold to probes that don't have them.
+    Only applies to exec probes (like 'ls' commands) which are more susceptible to I/O delays.
+
+    This addresses ACM-29011 where customers on compact clusters or slow I/O systems
+    experience frequent probe timeouts with the Kubernetes default of 1 second.
+
+    Note: This function is only called for ACM 2.17+ and MCE 2.17+ releases.
+
+    Args:
+        deployment (dict): The deployment manifest to update
+    """
+    def update_single_probe(probe, probe_type, container_name, deployment_name):
+        """Helper to update a single probe with template defaults"""
+        # Only add defaults if it's an exec probe (not httpGet/tcpSocket)
+        if 'exec' not in probe:
+            return False
+
+        modified = False
+        if 'timeoutSeconds' not in probe:
+            probe['timeoutSeconds'] = '{{ .Values.hubconfig.probeTimeoutSeconds | default 10 }}'
+            logging.info(f"  Added timeoutSeconds template to {probe_type} in {deployment_name}/{container_name}")
+            modified = True
+        if 'failureThreshold' not in probe:
+            probe['failureThreshold'] = '{{ .Values.hubconfig.probeFailureThreshold | default 3 }}'
+            logging.info(f"  Added failureThreshold template to {probe_type} in {deployment_name}/{container_name}")
+            modified = True
+        return modified
+
+    deployment_name = deployment.get('metadata', {}).get('name', 'unknown')
+    containers = deployment.get('spec', {}).get('template', {}).get('spec', {}).get('containers', [])
+
+    modified = False
+    for container in containers:
+        container_name = container.get('name', 'unknown')
+
+        # Update all probe types (liveness, readiness, startup)
+        for probe_type in ['livenessProbe', 'readinessProbe', 'startupProbe']:
+            if probe_type in container:
+                if update_single_probe(container[probe_type], probe_type, container_name, deployment_name):
+                    modified = True
+
+    if modified:
+        logging.info(f"Applied probe defaults to deployment '{deployment_name}'")
+
 # updateDeployments adds standard configuration to the deployments (antiaffinity, security policies, and tolerations)
 def updateDeployments(helmChart, operator, exclusions, sizes, branch):
     """_summary_
@@ -1126,11 +1175,26 @@ def updateDeployments(helmChart, operator, exclusions, sizes, branch):
         pod_template_spec['nodeSelector'] = ""
         pod_template_spec['imagePullSecrets'] = ''
 
+        # Add probe defaults to exec probes that don't have explicit timeouts (ACM 2.17+)
+        if is_version_compatible(branch, '2.17', '2.17', '2.17'):
+            add_probe_defaults(deploy)
+
         with open(deployment, 'w', encoding='utf-8') as f:
-            yaml.dump(deploy, f)
+            yaml.dump(deploy, f, width=float("inf"))
+
         logging.info("Deployments updated with antiaffinity, security policies, and tolerations successfully. \n")
 
         injectHelmFlowControl(deployment, sizes, branch)
+
+        # Post-process to remove quotes from Helm template expressions for integer values
+        # This must be done AFTER injectHelmFlowControl since that function reads the YAML
+        with open(deployment, 'r', encoding='utf-8') as f:
+            content = f.read()
+        # Remove quotes around template expressions that should be integers (probeTimeoutSeconds, probeFailureThreshold)
+        content = content.replace("'{{ .Values.hubconfig.probeTimeoutSeconds | default 10 }}'", "{{ .Values.hubconfig.probeTimeoutSeconds | default 10 }}")
+        content = content.replace("'{{ .Values.hubconfig.probeFailureThreshold | default 3 }}'", "{{ .Values.hubconfig.probeFailureThreshold | default 3 }}")
+        with open(deployment, 'w', encoding='utf-8') as f:
+            f.write(content)
 
 # updateRBAC adds standard configuration to the RBAC resources (clusterroles, roles, clusterrolebindings, and rolebindings)
 def updateRBAC(helmChart, branch):
