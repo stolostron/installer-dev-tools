@@ -11,7 +11,7 @@ import logging
 import subprocess
 from git import Repo, exc
 
-from validate_csv import *
+from helper import sync_owners_file
 
 # Config Constants
 SCRIPT_DIR = os.path.join(os.path.dirname(os.path.realpath(__file__)))
@@ -62,6 +62,11 @@ def copyHelmChart(destinationChartPath, repo, chart):
         return
 
     shutil.copyfile(valuesYamlPath, os.path.join(destinationChartPath, "values.yaml"))
+
+    # Sync OWNERS file from upstream repository root (upstream is single source of truth)
+    repo_root = os.path.join(os.path.dirname(os.path.realpath(__file__)), "tmp", repo)
+    sync_owners_file(repo_root, destinationChartPath, chartName)
+
     logging.info("Chart copied.\n")
 
 def addCRDs(repo, chart, outputDir):
@@ -92,7 +97,7 @@ def addCRDs(repo, chart, outputDir):
         shutil.rmtree(destinationPath)
     os.makedirs(destinationPath)
     for filename in os.listdir(crdPath):
-        if not filename.endswith(".yaml"): 
+        if not filename.endswith(".yaml"):
             continue
         filepath = os.path.join(crdPath, filename)
         with open(filepath, 'r') as f:
@@ -100,6 +105,10 @@ def addCRDs(repo, chart, outputDir):
 
         if resourceFile["kind"] == "CustomResourceDefinition":
             shutil.copyfile(filepath, os.path.join(destinationPath, filename))
+
+    # Sync OWNERS file from upstream repository root for CRDs (upstream is single source of truth)
+    repo_root = os.path.join(os.path.dirname(os.path.realpath(__file__)), "tmp", repo)
+    sync_owners_file(repo_root, destinationPath, f"{chart['name']} CRDs")
 
 def chartConfigAcceptable(chart):
     helmChart = chart["name"]

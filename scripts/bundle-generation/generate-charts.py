@@ -14,7 +14,7 @@ import re
 from git import Repo, exc
 from packaging import version
 
-from validate_csv import *
+from helper import sync_owners_file
 
 # Configure logging with coloredlogs
 coloredlogs.install(level='DEBUG')  # Set the logging level as needed
@@ -363,6 +363,10 @@ def copyHelmChart(destinationChartPath, repo, chart, chartVersion, branch):
 
     shutil.copyfile(chartYamlPath, os.path.join(destinationChartPath, "Chart.yaml"))
     shutil.copyfile(os.path.join(chartPath, "values.yaml"), os.path.join(destinationChartPath, "values.yaml"))
+
+    # Sync OWNERS file from upstream repository root (upstream is single source of truth)
+    repo_root = os.path.join(os.path.dirname(os.path.realpath(__file__)), "tmp", repo)
+    sync_owners_file(repo_root, destinationChartPath, chartName)
 
     # Copying template values.yaml instead of values.yaml from chart
     shutil.copyfile(os.path.join(os.path.dirname(os.path.realpath(__file__)), "chart-templates", "values.yaml"), os.path.join(destinationChartPath, "values.yaml"))
@@ -1379,6 +1383,10 @@ def addCRDs(repo, chart, outputDir):
             logging.info(f"Generated CRD file '{filename}'")
         else:
             logging.debug(f"Skipping file '{filename}' as it does not contain a CRD.")
+
+    # Sync OWNERS file from upstream repository root for CRDs (upstream is single source of truth)
+    repo_root = os.path.join(os.path.dirname(os.path.realpath(__file__)), "tmp", repo)
+    sync_owners_file(repo_root, destinationCRDPath, f"{chart['name']} CRDs")
 
     logging.info(f"Finished processing CRDs for chart '{chart['name']}'\n")
 

@@ -23,8 +23,8 @@ import yaml
 
 from git import Repo, Git
 from packaging import version
-from validate_csv import *
 from utils.git_sha_fetcher import fetch_sha_from_git_remote
+from helper import sync_owners_file
 
 # Configure logging with coloredlogs
 coloredlogs.install(level='DEBUG')  # Set the logging level as needed
@@ -1359,6 +1359,10 @@ def addCRDs(repo, operator, outputDir, branch, preservedFiles=None, overwrite=Fa
                     logging.info("CRD file copied: %s", filename)
                 break  # Only copy the file once even if it has multiple CRDs
 
+    # Sync OWNERS file from upstream repository root for CRDs (upstream is single source of truth)
+    repo_path = os.path.join(SCRIPT_DIR, "tmp", repo)
+    sync_owners_file(repo_path, directoryPath, f"{operator['name']} CRDs")
+
     logging.info("CRDs added successfully for operator: %s", operator['name'])
 
 def getBundleManifestsPath(repo, operator):
@@ -1843,6 +1847,11 @@ def main():
 
             # Generate the Chart.yaml file based off of the CSV
             helmChart = os.path.join(destination, "charts", "toggle", operator["name"])
+
+            # Sync OWNERS file from upstream bundle repo (upstream is single source of truth)
+            repo_path = os.path.join(SCRIPT_DIR, "tmp", repo_name)
+            sync_owners_file(repo_path, helmChart, operator["name"])
+
             logging.info("Filling Chart.yaml for helm chart '%s' ...", operator["name"])
             fillChartYaml(helmChart, operator["name"], csvPath)
             logging.info("Chart.yaml filled successfully.\n")
