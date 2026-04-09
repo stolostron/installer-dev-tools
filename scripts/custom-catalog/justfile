@@ -1,17 +1,49 @@
 # Copyright Contributors to the Open Cluster Management project
 
-# Usage examples with flags:
-#   MCH (default): just e2e-catalog myuser release-2.16 latest-2.16 mytag
-#   MCE:           just e2e-catalog --mode MCE myuser backplane-2.17 latest-2.17 mytag
-#   Custom fork:   just e2e-catalog --mode MCE --operator-repo git@github.com:user/backplane-operator.git --operator-branch my-branch myuser backplane-2.17 latest-2.17 mytag
-#   HTTPS:         just e2e-catalog --use-https myuser release-2.16 latest-2.16 mytag
-#
-# Parameter meanings:
-#   USERNAME          - Your quay.io username (e.g., rh_ee_ngraham)
-#   BUNDLE_BRANCH     - Bundle repo git branch (e.g., release-2.16, backplane-2.17)
-#   BASE_CATALOG_TAG  - Base catalog image tag (e.g., latest-2.16, latest-2.17)
-#   IMAGE_TAG         - Tag for your custom images (e.g., mytag, test-01)
-#   OPERATOR_BRANCH   - Operator repo git branch (default: main)
+# Show help information
+[default]
+help:
+    @echo "Custom Catalog Build Tool"
+    @echo ""
+    @echo "Main Recipes:"
+    @echo "  e2e-catalog           - End-to-end build: operator, bundle, and catalog"
+    @echo "  dev-branch-e2e        - Dev workflow with chart regeneration and component overrides"
+    @echo "  clone-operator        - Clone operator repository (MCH or MCE)"
+    @echo "  operator-build        - Build operator image"
+    @echo "  operator-build-and-push - Build and push operator image"
+    @echo "  bundle-build          - Build bundle image"
+    @echo "  bundle-build-and-push - Build and push bundle image"
+    @echo "  catalog-build         - Build catalog image"
+    @echo "  catalog-build-and-push - Build and push catalog image"
+    @echo "  cleanup-operator      - Clean up cloned operator repository"
+    @echo "  info                  - Show current configuration"
+    @echo ""
+    @echo "Usage Examples:"
+    @echo "  MCH (default):"
+    @echo "    just e2e-catalog --username myuser --bundle-branch release-2.16 --base-catalog-tag latest-2.16 --image-tag mytag"
+    @echo ""
+    @echo "  MCE with custom fork:"
+    @echo "    just e2e-catalog --mode MCE --operator-repo git@github.com:user/backplane-operator.git \\"
+    @echo "      --operator-branch my-branch --username myuser --bundle-branch backplane-2.17 \\"
+    @echo "      --base-catalog-tag latest-2.17 --image-tag mytag"
+    @echo ""
+    @echo "  Use HTTPS instead of SSH:"
+    @echo "    just e2e-catalog --use-https --username myuser --bundle-branch release-2.16 \\"
+    @echo "      --base-catalog-tag latest-2.16 --image-tag mytag"
+    @echo ""
+    @echo "Parameters:"
+    @echo "  --mode                MODE (MCH or MCE, default: MCH)"
+    @echo "  --username            USERNAME (your quay.io username)"
+    @echo "  --bundle-branch       BUNDLE_BRANCH (bundle repo git branch, e.g., release-2.16)"
+    @echo "  --base-catalog-tag    BASE_CATALOG_TAG (base catalog image tag, e.g., latest-2.16)"
+    @echo "  --image-tag           IMAGE_TAG (tag for your custom images)"
+    @echo "  --operator-branch     OPERATOR_BRANCH (operator repo git branch, default: main)"
+    @echo "  --operator-repo       OPERATOR_REPO (custom operator fork URL)"
+    @echo "  --bundle-repo         BUNDLE_REPO (custom bundle fork URL)"
+    @echo "  --catalog-base        CATALOG_BASE (custom catalog base URL)"
+    @echo "  --use-https           Use HTTPS instead of SSH for git clones"
+    @echo ""
+    @echo "For more details, run 'just --list' to see all available recipes"
 
 # Clone operator repository (MCH or MCE based on mode)
 [arg("BRANCH", long="branch")]
