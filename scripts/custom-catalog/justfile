@@ -499,13 +499,8 @@ e2e-catalog USERNAME BUNDLE_BRANCH BASE_CATALOG_TAG IMAGE_TAG OPERATOR_BRANCH="m
     just bundle-build-and-push --operator-image "$OPERATOR_IMAGE" --bundle-image "$BUNDLE_IMAGE" --branch "{{BUNDLE_BRANCH}}" --mode {{mode}} --bundle-repo "{{bundle_repo}}" $HTTPS_FLAG
     just catalog-build-and-push --base-catalog-tag "{{BASE_CATALOG_TAG}}" --bundle-img "$BUNDLE_IMAGE" --catalog-img "$CATALOG_IMAGE" --mode {{mode}} --catalog-base "{{catalog_base}}"
 
-    echo ""
-    echo "========================================="
-    echo "Cleaning up cloned repositories"
-    echo "========================================="
-    cd {{justfile_directory()}}
-    # rm -rf "$OPERATOR_DIR"
-    echo "✓ Cleanup complete"
+    # Uncomment to clean up cloned repository after build:
+    # just cleanup-operator --mode {{mode}}
 
     echo ""
     echo "========================================="
@@ -633,13 +628,8 @@ dev-branch-e2e USERNAME BUNDLE_BRANCH BASE_CATALOG_TAG IMAGE_TAG OPERATOR_BRANCH
     # Build and push the catalog
     just catalog-build-and-push --base-catalog-tag "{{BASE_CATALOG_TAG}}" --bundle-img "$BUNDLE_IMAGE" --catalog-img "$CATALOG_IMAGE" --mode {{mode}} --catalog-base "{{catalog_base}}"
 
-    echo ""
-    echo "========================================="
-    echo "Cleaning up cloned repositories"
-    echo "========================================="
-    cd {{justfile_directory()}}
-    # rm -rf "$OPERATOR_DIR"
-    echo "✓ Cleanup complete"
+    # Uncomment to clean up cloned repository after build:
+    # just cleanup-operator --mode {{mode}}
 
     echo ""
     echo "========================================="
