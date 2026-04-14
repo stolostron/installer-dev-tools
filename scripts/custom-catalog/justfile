@@ -1,29 +1,91 @@
 # Copyright Contributors to the Open Cluster Management project
 
-# Mode selection: MCH (multiclusterhub) or MCE (multicluster-engine)
-# Set MODE=MCE for multicluster-engine operations, defaults to MCH
-#
-# Usage examples:
-#   MCH (default): just e2e-catalog myuser release-2.16 latest-2.16 mytag
-#   MCE:           MODE=MCE just e2e-catalog myuser release-2.6 latest-2.6 mytag
-#
-export MODE := env_var_or_default("MODE", "MCH")
+# Show help information
+[default]
+help:
+    @echo "Custom Catalog Build Tool"
+    @echo ""
+    @echo "Main Recipes:"
+    @echo "  e2e-catalog           - End-to-end build: operator, bundle, and catalog"
+    @echo "  dev-branch-e2e        - Dev workflow with chart regeneration and component overrides"
+    @echo "  clone-operator        - Clone operator repository (MCH or MCE)"
+    @echo "  operator-build        - Build operator image"
+    @echo "  operator-build-and-push - Build and push operator image"
+    @echo "  bundle-build          - Build bundle image"
+    @echo "  bundle-build-and-push - Build and push bundle image"
+    @echo "  catalog-build         - Build catalog image"
+    @echo "  catalog-build-and-push - Build and push catalog image"
+    @echo "  cleanup-operator      - Clean up cloned operator repository"
+    @echo "  info                  - Show current configuration"
+    @echo ""
+    @echo "Usage Examples:"
+    @echo "  MCH (default):"
+    @echo "    just e2e-catalog --username myuser --bundle-branch release-2.16 --base-catalog-tag latest-2.16 --image-tag mytag"
+    @echo ""
+    @echo "  MCE with custom fork:"
+    @echo "    just e2e-catalog --mode MCE --operator-repo git@github.com:user/backplane-operator.git \\"
+    @echo "      --operator-branch my-branch --username myuser --bundle-branch backplane-2.17 \\"
+    @echo "      --base-catalog-tag latest-2.17 --image-tag mytag"
+    @echo ""
+    @echo "  Use HTTPS instead of SSH:"
+    @echo "    just e2e-catalog --use-https --username myuser --bundle-branch release-2.16 \\"
+    @echo "      --base-catalog-tag latest-2.16 --image-tag mytag"
+    @echo ""
+    @echo "Parameters:"
+    @echo "  --mode                MODE (MCH or MCE, default: MCH)"
+    @echo "  --username            USERNAME (your quay.io username)"
+    @echo "  --bundle-branch       BUNDLE_BRANCH (bundle repo git branch, e.g., release-2.16)"
+    @echo "  --base-catalog-tag    BASE_CATALOG_TAG (base catalog image tag, e.g., latest-2.16)"
+    @echo "  --image-tag           IMAGE_TAG (tag for your custom images)"
+    @echo "  --operator-branch     OPERATOR_BRANCH (operator repo git branch, default: main)"
+    @echo "  --operator-repo       OPERATOR_REPO (custom operator fork URL)"
+    @echo "  --bundle-repo         BUNDLE_REPO (custom bundle fork URL)"
+    @echo "  --catalog-base        CATALOG_BASE (custom catalog base URL)"
+    @echo "  --use-https           Use HTTPS instead of SSH for git clones"
+    @echo ""
+    @echo "For more details, run 'just --list' to see all available recipes"
 
-# Configuration based on MODE
-OPERATOR_REPO := if MODE == "MCE" { "https://github.com/stolostron/backplane-operator.git" } else { "https://github.com/stolostron/multiclusterhub-operator.git" }
-OPERATOR_DIR := if MODE == "MCE" { "backplane-operator" } else { "multiclusterhub-operator" }
-BUNDLE_REPO := if MODE == "MCE" { "https://github.com/stolostron/mce-operator-bundle.git" } else { "https://github.com/stolostron/acm-operator-bundle.git" }
-CATALOG_BASE := if MODE == "MCE" { "quay.io/acm-d/mce-dev-catalog" } else { "quay.io/acm-d/acm-dev-catalog" }
-
-# Clone operator repository (MCH or MCE based on MODE)
-clone-operator BRANCH="main":
+# Clone operator repository (MCH or MCE based on mode)
+[arg("BRANCH", long="branch")]
+[arg("mode", long="mode")]
+[arg("operator_repo", long="operator-repo")]
+[arg("use_https", long="use-https", value="true")]
+clone-operator BRANCH="main" mode="MCH" operator_repo="" use_https="false":
     #!/usr/bin/env bash
-    echo "Mode: {{MODE}}"
-    echo "Operator repo: {{OPERATOR_REPO}}"
-    echo "Target directory: {{OPERATOR_DIR}}"
+
+    # Determine operator directory based on mode
+    if [ "{{mode}}" == "MCE" ]; then
+        OPERATOR_DIR="backplane-operator"
+    else
+        OPERATOR_DIR="multiclusterhub-operator"
+    fi
+
+    # Determine operator repo URL
+    if [ -n "{{operator_repo}}" ]; then
+        OPERATOR_REPO="{{operator_repo}}"
+    else
+        # Compute default based on mode and use_https
+        if [ "{{mode}}" == "MCE" ]; then
+            if [ "{{use_https}}" == "true" ]; then
+                OPERATOR_REPO="https://github.com/stolostron/backplane-operator.git"
+            else
+                OPERATOR_REPO="git@github.com:stolostron/backplane-operator.git"
+            fi
+        else
+            if [ "{{use_https}}" == "true" ]; then
+                OPERATOR_REPO="https://github.com/stolostron/multiclusterhub-operator.git"
+            else
+                OPERATOR_REPO="git@github.com:stolostron/multiclusterhub-operator.git"
+            fi
+        fi
+    fi
+
+    echo "Mode: {{mode}}"
+    echo "Operator repo: $OPERATOR_REPO"
+    echo "Target directory: $OPERATOR_DIR"
 
     # Use absolute path from justfile directory
-    OPERATOR_PATH="{{justfile_directory()}}/{{OPERATOR_DIR}}"
+    OPERATOR_PATH="{{justfile_directory()}}/$OPERATOR_DIR"
 
     if [ -d "$OPERATOR_PATH" ]; then
         echo "Repository already exists at $OPERATOR_PATH"
@@ -31,20 +93,87 @@ clone-operator BRANCH="main":
         cd "$OPERATOR_PATH" && git fetch origin && git checkout {{BRANCH}} && git pull
     else
         echo "Cloning operator repository..."
-        cd {{justfile_directory()}} && git clone -b {{BRANCH}} {{OPERATOR_REPO}} {{OPERATOR_DIR}}
+        cd {{justfile_directory()}} && git clone -b {{BRANCH}} "$OPERATOR_REPO" "$OPERATOR_DIR"
     fi
     echo "✓ Repository ready at $OPERATOR_PATH"
 
 # Legacy alias for backward compatibility
-clone-mch-operator BRANCH="main": (clone-operator BRANCH)
+[arg("BRANCH", long="branch")]
+[arg("mode", long="mode")]
+[arg("operator_repo", long="operator-repo")]
+[arg("use_https", long="use-https", value="true")]
+clone-mch-operator BRANCH="main" mode="MCH" operator_repo="" use_https="false": (clone-operator BRANCH mode operator_repo use_https)
 
-# Show current MODE configuration
-info:
-    @echo "Current MODE: {{MODE}}"
-    @echo "Operator Repo: {{OPERATOR_REPO}}"
-    @echo "Operator Dir: {{OPERATOR_DIR}}"
-    @echo "Bundle Repo: {{BUNDLE_REPO}}"
-    @echo "Catalog Base: {{CATALOG_BASE}}"
+# Show current configuration
+[arg("mode", long="mode")]
+[arg("operator_repo", long="operator-repo")]
+[arg("bundle_repo", long="bundle-repo")]
+[arg("catalog_base", long="catalog-base")]
+[arg("use_https", long="use-https", value="true")]
+info mode="MCH" operator_repo="" bundle_repo="" catalog_base="" use_https="false":
+    #!/usr/bin/env bash
+
+    # Determine operator directory based on mode
+    if [ "{{mode}}" == "MCE" ]; then
+        OPERATOR_DIR="backplane-operator"
+    else
+        OPERATOR_DIR="multiclusterhub-operator"
+    fi
+
+    # Determine operator repo URL
+    if [ -n "{{operator_repo}}" ]; then
+        OPERATOR_REPO="{{operator_repo}}"
+    else
+        if [ "{{mode}}" == "MCE" ]; then
+            if [ "{{use_https}}" == "true" ]; then
+                OPERATOR_REPO="https://github.com/stolostron/backplane-operator.git"
+            else
+                OPERATOR_REPO="git@github.com:stolostron/backplane-operator.git"
+            fi
+        else
+            if [ "{{use_https}}" == "true" ]; then
+                OPERATOR_REPO="https://github.com/stolostron/multiclusterhub-operator.git"
+            else
+                OPERATOR_REPO="git@github.com:stolostron/multiclusterhub-operator.git"
+            fi
+        fi
+    fi
+
+    # Determine bundle repo URL
+    if [ -n "{{bundle_repo}}" ]; then
+        BUNDLE_REPO="{{bundle_repo}}"
+    else
+        if [ "{{mode}}" == "MCE" ]; then
+            if [ "{{use_https}}" == "true" ]; then
+                BUNDLE_REPO="https://github.com/stolostron/mce-operator-bundle.git"
+            else
+                BUNDLE_REPO="git@github.com:stolostron/mce-operator-bundle.git"
+            fi
+        else
+            if [ "{{use_https}}" == "true" ]; then
+                BUNDLE_REPO="https://github.com/stolostron/acm-operator-bundle.git"
+            else
+                BUNDLE_REPO="git@github.com:stolostron/acm-operator-bundle.git"
+            fi
+        fi
+    fi
+
+    # Determine catalog base
+    if [ -n "{{catalog_base}}" ]; then
+        CATALOG_BASE="{{catalog_base}}"
+    else
+        if [ "{{mode}}" == "MCE" ]; then
+            CATALOG_BASE="quay.io/acm-d/mce-dev-catalog"
+        else
+            CATALOG_BASE="quay.io/acm-d/acm-dev-catalog"
+        fi
+    fi
+
+    echo "Current MODE: {{mode}}"
+    echo "Operator Repo: $OPERATOR_REPO"
+    echo "Operator Dir: $OPERATOR_DIR"
+    echo "Bundle Repo: $BUNDLE_REPO"
+    echo "Catalog Base: $CATALOG_BASE"
 
 # Check if logged into quay.io with podman
 _check-quay-login:
@@ -54,6 +183,24 @@ _check-quay-login:
         exit 1
     fi
 
+# Clean up cloned operator repository
+[arg("mode", long="mode")]
+cleanup-operator mode="MCH":
+    #!/usr/bin/env bash
+    if [ "{{mode}}" == "MCE" ]; then
+        OPERATOR_DIR="backplane-operator"
+    else
+        OPERATOR_DIR="multiclusterhub-operator"
+    fi
+
+    echo ""
+    echo "========================================="
+    echo "Cleaning up cloned repositories"
+    echo "========================================="
+    cd {{justfile_directory()}}
+    rm -rf "$OPERATOR_DIR"
+    echo "✓ Cleanup complete"
+
 # Install Python requirements for bundle automation in a virtual environment
 _install-requirements:
     [ -d .venv ] || python3 -m venv .venv
@@ -62,6 +209,13 @@ _install-requirements:
 # Regenerates charts, processing them through the Installer Chart Automation
 # COMPONENT_BRANCHES: Optional component branch overrides in format "component1:branch1 component2:branch2"
 # COMPONENT_FORKS: Optional component fork overrides in format "component1:git_url1 component2:git_url2"
+[arg("ORG", long="org")]
+[arg("REPO", long="repo")]
+[arg("BRANCH", long="branch")]
+[arg("PIPELINE_REPO", long="pipeline-repo")]
+[arg("PIPELINE_BRANCH", long="pipeline-branch")]
+[arg("COMPONENT_BRANCHES", long="component-branches")]
+[arg("COMPONENT_FORKS", long="component-forks")]
 regenerate-charts ORG="stolostron" REPO="installer-dev-tools" BRANCH="main" PIPELINE_REPO="pipeline" PIPELINE_BRANCH="2.17-integration" COMPONENT_BRANCHES="" COMPONENT_FORKS="": _install-requirements
     #!/usr/bin/env bash
     source .venv/bin/activate
@@ -92,6 +246,9 @@ regenerate-charts ORG="stolostron" REPO="installer-dev-tools" BRANCH="main" PIPE
 
 
 # Copy existing Helm charts to pkg/templates/
+[arg("ORG", long="org")]
+[arg("REPO", long="repo")]
+[arg("BRANCH", long="branch")]
 copy-charts ORG="stolostron" REPO="installer-dev-tools" BRANCH="main": _install-requirements
     source .venv/bin/activate && python3 ./hack/bundle-automation/generate-shell.py \
         --copy-charts \
@@ -100,27 +257,59 @@ copy-charts ORG="stolostron" REPO="installer-dev-tools" BRANCH="main": _install-
         --branch "{{BRANCH}}"
 
 # Build Operator image
-operator-build IMG BRANCH="main": (clone-operator BRANCH)
-    podman build --no-cache -t {{IMG}} {{justfile_directory()}}/{{OPERATOR_DIR}}
+[arg("IMG", long="img")]
+[arg("BRANCH", long="branch")]
+[arg("mode", long="mode")]
+[arg("operator_repo", long="operator-repo")]
+[arg("use_https", long="use-https", value="true")]
+operator-build IMG BRANCH="main" mode="MCH" operator_repo="" use_https="false": (clone-operator BRANCH mode operator_repo use_https)
+    #!/usr/bin/env bash
+
+    # Determine operator directory based on mode
+    if [ "{{mode}}" == "MCE" ]; then
+        OPERATOR_DIR="backplane-operator"
+    else
+        OPERATOR_DIR="multiclusterhub-operator"
+    fi
+
+    podman build --no-cache -t {{IMG}} {{justfile_directory()}}/$OPERATOR_DIR
 
 # Push Operator image
+[arg("IMG", long="img")]
 operator-push IMG:
     podman push {{IMG}}
 
 # Build and Push Operator image
-operator-build-and-push IMG BRANCH="main":
-    @just operator-build {{IMG}} {{BRANCH}}
-    @just operator-push {{IMG}}
+[arg("IMG", long="img")]
+[arg("BRANCH", long="branch")]
+[arg("mode", long="mode")]
+[arg("operator_repo", long="operator-repo")]
+[arg("use_https", long="use-https", value="true")]
+operator-build-and-push IMG BRANCH="main" mode="MCH" operator_repo="" use_https="false":
+    #!/usr/bin/env bash
+    HTTPS_FLAG=""
+    if [ "{{use_https}}" == "true" ]; then
+        HTTPS_FLAG="--use-https"
+    fi
+    just operator-build --img {{IMG}} --branch {{BRANCH}} --mode {{mode}} --operator-repo "{{operator_repo}}" $HTTPS_FLAG
+    just operator-push --img {{IMG}}
 
 # Build bundle image
-bundle-build OPERATOR_IMAGE BUNDLE_IMAGE BRANCH="release-2.16" DISPLAY_NAME="Custom Catalog":
+[arg("OPERATOR_IMAGE", long="operator-image")]
+[arg("BUNDLE_IMAGE", long="bundle-image")]
+[arg("BRANCH", long="branch")]
+[arg("DISPLAY_NAME", long="display-name")]
+[arg("mode", long="mode")]
+[arg("bundle_repo", long="bundle-repo")]
+[arg("use_https", long="use-https", value="true")]
+bundle-build OPERATOR_IMAGE BUNDLE_IMAGE BRANCH="release-2.16" DISPLAY_NAME="Custom Catalog" mode="MCH" bundle_repo="" use_https="false":
     #!/usr/bin/env bash
 
     # temp dir
     TMPDIR=$(mktemp -d)
 
-    # Set bundle directory name based on MODE
-    if [ "{{MODE}}" == "MCE" ]; then
+    # Set bundle directory name based on mode
+    if [ "{{mode}}" == "MCE" ]; then
         BUNDLE_DIR="mce-operator-bundle"
         CSV_PATTERN="multicluster-engine.v"
     else
@@ -128,9 +317,28 @@ bundle-build OPERATOR_IMAGE BUNDLE_IMAGE BRANCH="release-2.16" DISPLAY_NAME="Cus
         CSV_PATTERN="advanced-cluster-management.v"
     fi
 
+    # Determine bundle repo URL
+    if [ -n "{{bundle_repo}}" ]; then
+        BUNDLE_REPO="{{bundle_repo}}"
+    else
+        if [ "{{mode}}" == "MCE" ]; then
+            if [ "{{use_https}}" == "true" ]; then
+                BUNDLE_REPO="https://github.com/stolostron/mce-operator-bundle.git"
+            else
+                BUNDLE_REPO="git@github.com:stolostron/mce-operator-bundle.git"
+            fi
+        else
+            if [ "{{use_https}}" == "true" ]; then
+                BUNDLE_REPO="https://github.com/stolostron/acm-operator-bundle.git"
+            else
+                BUNDLE_REPO="git@github.com:stolostron/acm-operator-bundle.git"
+            fi
+        fi
+    fi
+
     # git clone branch
-    echo "Cloning bundle repo: {{BUNDLE_REPO}}"
-    git clone -b {{BRANCH}} {{BUNDLE_REPO}} "$TMPDIR/$BUNDLE_DIR"
+    echo "Cloning bundle repo: $BUNDLE_REPO"
+    git clone -b {{BRANCH}} "$BUNDLE_REPO" "$TMPDIR/$BUNDLE_DIR"
 
     # replace quay.io with quay.io:443 to make sure it's there
     CSV_FILE=$(ls "$TMPDIR/$BUNDLE_DIR/manifests/${CSV_PATTERN}"*.clusterserviceversion.yaml)
@@ -154,15 +362,23 @@ bundle-build OPERATOR_IMAGE BUNDLE_IMAGE BRANCH="release-2.16" DISPLAY_NAME="Cus
 #
 
 # Push bundle image
+[arg("BUNDLE_IMAGE", long="bundle-image")]
 bundle-push BUNDLE_IMAGE: _check-quay-login
     podman push {{BUNDLE_IMAGE}}
 
 # Build and push bundle image
-bundle-build-and-push OPERATOR_IMAGE BUNDLE_IMAGE BRANCH="release-2.16" DISPLAY_NAME="":
+[arg("OPERATOR_IMAGE", long="operator-image")]
+[arg("BUNDLE_IMAGE", long="bundle-image")]
+[arg("BRANCH", long="branch")]
+[arg("DISPLAY_NAME", long="display-name")]
+[arg("mode", long="mode")]
+[arg("bundle_repo", long="bundle-repo")]
+[arg("use_https", long="use-https", value="true")]
+bundle-build-and-push OPERATOR_IMAGE BUNDLE_IMAGE BRANCH="release-2.16" DISPLAY_NAME="" mode="MCH" bundle_repo="" use_https="false":
     #!/usr/bin/env bash
-    # Set default display name based on MODE if not provided
+    # Set default display name based on mode if not provided
     if [ -z "{{DISPLAY_NAME}}" ]; then
-        if [ "{{MODE}}" == "MCE" ]; then
+        if [ "{{mode}}" == "MCE" ]; then
             DISPLAY_NAME="Custom MCE Catalog"
         else
             DISPLAY_NAME="Custom ACM Catalog"
@@ -170,30 +386,52 @@ bundle-build-and-push OPERATOR_IMAGE BUNDLE_IMAGE BRANCH="release-2.16" DISPLAY_
     else
         DISPLAY_NAME="{{DISPLAY_NAME}}"
     fi
-    just bundle-build "{{OPERATOR_IMAGE}}" "{{BUNDLE_IMAGE}}" "{{BRANCH}}" "$DISPLAY_NAME"
-    just bundle-push "{{BUNDLE_IMAGE}}"
+
+    HTTPS_FLAG=""
+    if [ "{{use_https}}" == "true" ]; then
+        HTTPS_FLAG="--use-https"
+    fi
+
+    just bundle-build --operator-image "{{OPERATOR_IMAGE}}" --bundle-image "{{BUNDLE_IMAGE}}" --branch "{{BRANCH}}" --display-name "$DISPLAY_NAME" --mode {{mode}} --bundle-repo "{{bundle_repo}}" $HTTPS_FLAG
+    just bundle-push --bundle-image "{{BUNDLE_IMAGE}}"
 
 
 # Build the Catalog for Version, and then opm render the IMG on top of it
-catalog-build VERSION BUNDLE_IMG CATALOG_IMG: _check-quay-login
+[arg("BASE_CATALOG_TAG", long="base-catalog-tag")]
+[arg("BUNDLE_IMG", long="bundle-img")]
+[arg("CATALOG_IMG", long="catalog-img")]
+[arg("mode", long="mode")]
+[arg("catalog_base", long="catalog-base")]
+catalog-build BASE_CATALOG_TAG BUNDLE_IMG CATALOG_IMG mode="MCH" catalog_base="": _check-quay-login
     #!/usr/bin/env bash
     set -e
 
     TMPDIR=$(mktemp -d)
     echo "Temp dir: $TMPDIR"
-    echo "Mode: {{MODE}}"
+    echo "Mode: {{mode}}"
 
-    # Set catalog directory name based on MODE
-    if [ "{{MODE}}" == "MCE" ]; then
+    # Set catalog directory name based on mode
+    if [ "{{mode}}" == "MCE" ]; then
         CATALOG_DIR="multicluster-engine"
     else
         CATALOG_DIR="advanced-cluster-management"
     fi
 
+    # Determine catalog base
+    if [ -n "{{catalog_base}}" ]; then
+        CATALOG_BASE="{{catalog_base}}"
+    else
+        if [ "{{mode}}" == "MCE" ]; then
+            CATALOG_BASE="quay.io/acm-d/mce-dev-catalog"
+        else
+            CATALOG_BASE="quay.io/acm-d/acm-dev-catalog"
+        fi
+    fi
+
     # Pull base catalog
-    BASE_CATALOG="{{CATALOG_BASE}}:{{VERSION}}"
+    BASE_CATALOG="$CATALOG_BASE:{{BASE_CATALOG_TAG}}"
     echo "Pulling base catalog: $BASE_CATALOG"
-    podman create --name temp-catalog docker://$BASE_CATALOG
+    podman create --replace --name temp-catalog docker://$BASE_CATALOG
     podman cp temp-catalog:/configs/$CATALOG_DIR $TMPDIR
     podman rm temp-catalog
 
@@ -209,13 +447,13 @@ catalog-build VERSION BUNDLE_IMG CATALOG_IMG: _check-quay-login
     echo "New bundle name: $NEW_BUNDLE_NAME"
 
     # Determine the channel name based on version
-    if [ "{{MODE}}" == "MCE" ]; then
-        # Extract version like 2.17 from the VERSION parameter (e.g., latest-2.17 -> 2.17)
-        CHANNEL_VERSION=$(echo "{{VERSION}}" | grep -oP '\d+\.\d+' | head -1)
+    if [ "{{mode}}" == "MCE" ]; then
+        # Extract version like 2.17 from the BASE_CATALOG_TAG parameter (e.g., latest-2.17 -> 2.17)
+        CHANNEL_VERSION=$(echo "{{BASE_CATALOG_TAG}}" | grep -oP '\d+\.\d+' | head -1)
         CHANNEL_NAME="stable-${CHANNEL_VERSION}"
     else
         # For ACM, extract similarly
-        CHANNEL_VERSION=$(echo "{{VERSION}}" | grep -oP '\d+\.\d+' | head -1)
+        CHANNEL_VERSION=$(echo "{{BASE_CATALOG_TAG}}" | grep -oP '\d+\.\d+' | head -1)
         CHANNEL_NAME="release-${CHANNEL_VERSION}"
     fi
     echo "Target channel: $CHANNEL_NAME"
@@ -238,40 +476,63 @@ catalog-build VERSION BUNDLE_IMG CATALOG_IMG: _check-quay-login
 
 #
 
+[arg("CATALOG_IMG", long="catalog-img")]
 catalog-push CATALOG_IMG: _check-quay-login
     podman push {{CATALOG_IMG}}
 
-catalog-build-and-push VERSION BUNDLE_IMG CATALOG_IMG:
-    just catalog-build "{{VERSION}}" "{{BUNDLE_IMG}}" "{{CATALOG_IMG}}"
-    just catalog-push "{{CATALOG_IMG}}"
+[arg("BASE_CATALOG_TAG", long="base-catalog-tag")]
+[arg("BUNDLE_IMG", long="bundle-img")]
+[arg("CATALOG_IMG", long="catalog-img")]
+[arg("mode", long="mode")]
+[arg("catalog_base", long="catalog-base")]
+catalog-build-and-push BASE_CATALOG_TAG BUNDLE_IMG CATALOG_IMG mode="MCH" catalog_base="":
+    just catalog-build --base-catalog-tag "{{BASE_CATALOG_TAG}}" --bundle-img "{{BUNDLE_IMG}}" --catalog-img "{{CATALOG_IMG}}" --mode {{mode}} --catalog-base "{{catalog_base}}"
+    just catalog-push --catalog-img "{{CATALOG_IMG}}"
 
-# End-to-end build operator, bundle, and catalog (USERNAME: quay.io username, VERSION: bundle branch e.g. release-2.16, UPSTREAM_TAG: base catalog tag e.g. latest-2.16, TAG: custom tag for all images, OPERATOR_BRANCH: operator branch)
-e2e-catalog USERNAME VERSION UPSTREAM_TAG TAG OPERATOR_BRANCH="main":
+# End-to-end build operator, bundle, and catalog
+[arg("USERNAME", long="username")]
+[arg("BUNDLE_BRANCH", long="bundle-branch")]
+[arg("BASE_CATALOG_TAG", long="base-catalog-tag")]
+[arg("IMAGE_TAG", long="image-tag")]
+[arg("OPERATOR_BRANCH", long="operator-branch")]
+[arg("mode", long="mode")]
+[arg("operator_repo", long="operator-repo")]
+[arg("bundle_repo", long="bundle-repo")]
+[arg("catalog_base", long="catalog-base")]
+[arg("use_https", long="use-https", value="true")]
+e2e-catalog USERNAME BUNDLE_BRANCH BASE_CATALOG_TAG IMAGE_TAG OPERATOR_BRANCH="main" mode="MCH" operator_repo="" bundle_repo="" catalog_base="" use_https="false":
     #!/usr/bin/env bash
-    echo "Mode: {{MODE}}"
+    echo "Mode: {{mode}}"
 
-    # Set image names based on MODE
-    if [ "{{MODE}}" == "MCE" ]; then
-        OPERATOR_IMAGE="quay.io/{{USERNAME}}/backplane-operator:{{TAG}}"
-        BUNDLE_IMAGE="quay.io/{{USERNAME}}/mce-operator-bundle:{{TAG}}"
-        CATALOG_IMAGE="quay.io/{{USERNAME}}/mce-dev-catalog:{{TAG}}"
+    # Determine operator directory based on mode
+    if [ "{{mode}}" == "MCE" ]; then
+        OPERATOR_DIR="backplane-operator"
     else
-        OPERATOR_IMAGE="quay.io/{{USERNAME}}/multiclusterhub-operator:{{TAG}}"
-        BUNDLE_IMAGE="quay.io/{{USERNAME}}/acm-operator-bundle:{{TAG}}"
-        CATALOG_IMAGE="quay.io/{{USERNAME}}/acm-dev-catalog:{{TAG}}"
+        OPERATOR_DIR="multiclusterhub-operator"
     fi
 
-    just operator-build-and-push "$OPERATOR_IMAGE" "{{OPERATOR_BRANCH}}"
-    just bundle-build-and-push "$OPERATOR_IMAGE" "$BUNDLE_IMAGE" "{{VERSION}}"
-    just catalog-build-and-push "{{UPSTREAM_TAG}}" "$BUNDLE_IMAGE" "$CATALOG_IMAGE"
+    # Set image names based on mode
+    if [ "{{mode}}" == "MCE" ]; then
+        OPERATOR_IMAGE="quay.io/{{USERNAME}}/backplane-operator:{{IMAGE_TAG}}"
+        BUNDLE_IMAGE="quay.io/{{USERNAME}}/mce-operator-bundle:{{IMAGE_TAG}}"
+        CATALOG_IMAGE="quay.io/{{USERNAME}}/mce-dev-catalog:{{IMAGE_TAG}}"
+    else
+        OPERATOR_IMAGE="quay.io/{{USERNAME}}/multiclusterhub-operator:{{IMAGE_TAG}}"
+        BUNDLE_IMAGE="quay.io/{{USERNAME}}/acm-operator-bundle:{{IMAGE_TAG}}"
+        CATALOG_IMAGE="quay.io/{{USERNAME}}/acm-dev-catalog:{{IMAGE_TAG}}"
+    fi
 
-    echo ""
-    echo "========================================="
-    echo "Cleaning up cloned repositories"
-    echo "========================================="
-    cd {{justfile_directory()}}
-    rm -rf {{OPERATOR_DIR}}
-    echo "✓ Cleanup complete"
+    HTTPS_FLAG=""
+    if [ "{{use_https}}" == "true" ]; then
+        HTTPS_FLAG="--use-https"
+    fi
+
+    just operator-build-and-push --img "$OPERATOR_IMAGE" --branch "{{OPERATOR_BRANCH}}" --mode {{mode}} --operator-repo "{{operator_repo}}" $HTTPS_FLAG
+    just bundle-build-and-push --operator-image "$OPERATOR_IMAGE" --bundle-image "$BUNDLE_IMAGE" --branch "{{BUNDLE_BRANCH}}" --mode {{mode}} --bundle-repo "{{bundle_repo}}" $HTTPS_FLAG
+    just catalog-build-and-push --base-catalog-tag "{{BASE_CATALOG_TAG}}" --bundle-img "$BUNDLE_IMAGE" --catalog-img "$CATALOG_IMAGE" --mode {{mode}} --catalog-base "{{catalog_base}}"
+
+    # Uncomment to clean up cloned repository after build:
+    # just cleanup-operator --mode {{mode}}
 
     echo ""
     echo "========================================="
@@ -284,13 +545,37 @@ e2e-catalog USERNAME VERSION UPSTREAM_TAG TAG OPERATOR_BRANCH="main":
 # Dev workflow: Regenerate charts with component branch overrides, then build full e2e catalog
 # COMPONENT_BRANCHES: Space-separated component branch overrides, e.g. "search-operator:my-branch observability:feature-x"
 # COMPONENT_FORKS: Space-separated component fork overrides, e.g. "search-operator:https://github.com/user/search-operator.git observability:https://github.com/user/observability.git"
-dev-branch-e2e USERNAME VERSION UPSTREAM_TAG TAG OPERATOR_BRANCH="main" COMPONENT_BRANCHES="" COMPONENT_FORKS="" ORG="stolostron" REPO="installer-dev-tools" BRANCH="main" PIPELINE_REPO="pipeline" PIPELINE_BRANCH="2.17-integration": (clone-operator OPERATOR_BRANCH)
+[arg("USERNAME", long="username")]
+[arg("BUNDLE_BRANCH", long="bundle-branch")]
+[arg("BASE_CATALOG_TAG", long="base-catalog-tag")]
+[arg("IMAGE_TAG", long="image-tag")]
+[arg("OPERATOR_BRANCH", long="operator-branch")]
+[arg("COMPONENT_BRANCHES", long="component-branches")]
+[arg("COMPONENT_FORKS", long="component-forks")]
+[arg("ORG", long="org")]
+[arg("REPO", long="repo")]
+[arg("BRANCH", long="branch")]
+[arg("PIPELINE_REPO", long="pipeline-repo")]
+[arg("PIPELINE_BRANCH", long="pipeline-branch")]
+[arg("mode", long="mode")]
+[arg("operator_repo", long="operator-repo")]
+[arg("bundle_repo", long="bundle-repo")]
+[arg("catalog_base", long="catalog-base")]
+[arg("use_https", long="use-https", value="true")]
+dev-branch-e2e USERNAME BUNDLE_BRANCH BASE_CATALOG_TAG IMAGE_TAG OPERATOR_BRANCH="main" COMPONENT_BRANCHES="" COMPONENT_FORKS="" ORG="stolostron" REPO="installer-dev-tools" BRANCH="main" PIPELINE_REPO="pipeline" PIPELINE_BRANCH="2.17-integration" mode="MCH" operator_repo="" bundle_repo="" catalog_base="" use_https="false": (clone-operator OPERATOR_BRANCH mode operator_repo use_https)
     #!/usr/bin/env bash
     set -e
 
+    # Determine operator directory based on mode
+    if [ "{{mode}}" == "MCE" ]; then
+        OPERATOR_DIR="backplane-operator"
+    else
+        OPERATOR_DIR="multiclusterhub-operator"
+    fi
+
     echo "========================================="
-    echo "Mode: {{MODE}}"
-    echo "Operator directory: {{OPERATOR_DIR}}"
+    echo "Mode: {{mode}}"
+    echo "Operator directory: $OPERATOR_DIR"
     echo "========================================="
     echo ""
     echo "========================================="
@@ -298,7 +583,7 @@ dev-branch-e2e USERNAME VERSION UPSTREAM_TAG TAG OPERATOR_BRANCH="main" COMPONEN
     echo "========================================="
 
     # Navigate to operator repo (using absolute path from justfile directory)
-    cd {{justfile_directory()}}/{{OPERATOR_DIR}}
+    cd {{justfile_directory()}}/$OPERATOR_DIR
 
     # Install Python requirements if needed
     if [ ! -d .venv ]; then
@@ -341,18 +626,23 @@ dev-branch-e2e USERNAME VERSION UPSTREAM_TAG TAG OPERATOR_BRANCH="main" COMPONEN
     echo "Step 2: Building and pushing operator image"
     echo "========================================="
 
-    # Build and push the operator (image name based on MODE)
-    if [ "{{MODE}}" == "MCE" ]; then
-        OPERATOR_IMAGE="quay.io/{{USERNAME}}/backplane-operator:{{TAG}}"
-        BUNDLE_IMAGE="quay.io/{{USERNAME}}/mce-operator-bundle:{{TAG}}"
-        CATALOG_IMAGE="quay.io/{{USERNAME}}/mce-dev-catalog:{{TAG}}"
+    # Build and push the operator (image name based on mode)
+    if [ "{{mode}}" == "MCE" ]; then
+        OPERATOR_IMAGE="quay.io/{{USERNAME}}/backplane-operator:{{IMAGE_TAG}}"
+        BUNDLE_IMAGE="quay.io/{{USERNAME}}/mce-operator-bundle:{{IMAGE_TAG}}"
+        CATALOG_IMAGE="quay.io/{{USERNAME}}/mce-dev-catalog:{{IMAGE_TAG}}"
     else
-        OPERATOR_IMAGE="quay.io/{{USERNAME}}/multiclusterhub-operator:{{TAG}}"
-        BUNDLE_IMAGE="quay.io/{{USERNAME}}/acm-operator-bundle:{{TAG}}"
-        CATALOG_IMAGE="quay.io/{{USERNAME}}/acm-dev-catalog:{{TAG}}"
+        OPERATOR_IMAGE="quay.io/{{USERNAME}}/multiclusterhub-operator:{{IMAGE_TAG}}"
+        BUNDLE_IMAGE="quay.io/{{USERNAME}}/acm-operator-bundle:{{IMAGE_TAG}}"
+        CATALOG_IMAGE="quay.io/{{USERNAME}}/acm-dev-catalog:{{IMAGE_TAG}}"
     fi
 
-    just operator-build-and-push "$OPERATOR_IMAGE" "{{OPERATOR_BRANCH}}"
+    HTTPS_FLAG=""
+    if [ "{{use_https}}" == "true" ]; then
+        HTTPS_FLAG="--use-https"
+    fi
+
+    just operator-build-and-push --img "$OPERATOR_IMAGE" --branch "{{OPERATOR_BRANCH}}" --mode {{mode}} --operator-repo "{{operator_repo}}" $HTTPS_FLAG
 
     echo ""
     echo "========================================="
@@ -360,7 +650,7 @@ dev-branch-e2e USERNAME VERSION UPSTREAM_TAG TAG OPERATOR_BRANCH="main" COMPONEN
     echo "========================================="
 
     # Build and push the bundle
-    just bundle-build-and-push "$OPERATOR_IMAGE" "$BUNDLE_IMAGE" "{{VERSION}}"
+    just bundle-build-and-push --operator-image "$OPERATOR_IMAGE" --bundle-image "$BUNDLE_IMAGE" --branch "{{BUNDLE_BRANCH}}" --mode {{mode}} --bundle-repo "{{bundle_repo}}" $HTTPS_FLAG
 
     echo ""
     echo "========================================="
@@ -368,15 +658,10 @@ dev-branch-e2e USERNAME VERSION UPSTREAM_TAG TAG OPERATOR_BRANCH="main" COMPONEN
     echo "========================================="
 
     # Build and push the catalog
-    just catalog-build-and-push "{{UPSTREAM_TAG}}" "$BUNDLE_IMAGE" "$CATALOG_IMAGE"
+    just catalog-build-and-push --base-catalog-tag "{{BASE_CATALOG_TAG}}" --bundle-img "$BUNDLE_IMAGE" --catalog-img "$CATALOG_IMAGE" --mode {{mode}} --catalog-base "{{catalog_base}}"
 
-    echo ""
-    echo "========================================="
-    echo "Cleaning up cloned repositories"
-    echo "========================================="
-    cd {{justfile_directory()}}
-    rm -rf {{OPERATOR_DIR}}
-    echo "✓ Cleanup complete"
+    # Uncomment to clean up cloned repository after build:
+    # just cleanup-operator --mode {{mode}}
 
     echo ""
     echo "========================================="
@@ -385,3 +670,14 @@ dev-branch-e2e USERNAME VERSION UPSTREAM_TAG TAG OPERATOR_BRANCH="main" COMPONEN
     echo "Operator: $OPERATOR_IMAGE"
     echo "Bundle:   $BUNDLE_IMAGE"
     echo "Catalog:  $CATALOG_IMAGE"
+
+
+[arg("arg1", long="asdf")]
+[arg("arg2", long="arg2")]
+[arg("arg3", long="arg3", value="asdf")]
+test-recipe arg1="a" arg2="b" arg3="c":
+    #!/usr/bin/env bash
+
+    echo "{{arg1}}"
+    echo "{{arg2}}"
+    echo "{{arg3}}"
