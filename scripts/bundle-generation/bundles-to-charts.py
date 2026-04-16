@@ -1074,52 +1074,125 @@ def injectHelmFlowControl(deployment, sizes, branch):
     a_file.close()
     logging.info("Added Helm flow control for NodeSelector, Proxy Overrides and SecCompProfile.\n")
 
-# add_probe_defaults adds explicit timeout and failure threshold values to probes (ACM 2.17+)
-def add_probe_defaults(deployment):
+# inject_probe_config_helm_templates injects conditional probeConfig templates (ACM 2.17+)
+def inject_probe_config_helm_templates(deployment_file):
     """
-    Adds default timeoutSeconds and failureThreshold to probes that don't have them.
-    Only applies to exec probes (like 'ls' commands) which are more susceptible to I/O delays.
+    Injects conditional Helm templates for probe configuration into deployment files.
+
+    Adds template blocks for exec probes that allow users to optionally configure:
+    - timeoutSeconds (K8s default: 1)
+    - failureThreshold (K8s default: 3)
+    - successThreshold (K8s default: 1)
 
     This addresses ACM-29011 where customers on compact clusters or slow I/O systems
-    experience frequent probe timeouts with the Kubernetes default of 1 second.
+    experience frequent probe timeouts. Rather than forcing new defaults on all users,
+    this allows opt-in configuration via MCH CR probeConfig field while preserving
+    Kubernetes defaults when not configured.
+
+    Only applies to exec probes (not httpGet/tcpSocket). Only injects if values don't
+    already exist in the template.
 
     Note: This function is only called for ACM 2.17+ and MCE 2.17+ releases.
 
     Args:
-        deployment (dict): The deployment manifest to update
+        deployment_file (str): Path to the deployment YAML file to update
     """
-    def update_single_probe(probe, probe_type, container_name, deployment_name):
-        """Helper to update a single probe with template defaults"""
-        # Only add defaults if it's an exec probe (not httpGet/tcpSocket)
-        if 'exec' not in probe:
-            return False
+    import re
 
-        modified = False
-        if 'timeoutSeconds' not in probe:
-            probe['timeoutSeconds'] = '{{ .Values.hubconfig.probeTimeoutSeconds | default 10 }}'
-            logging.info(f"  Added timeoutSeconds template to {probe_type} in {deployment_name}/{container_name}")
-            modified = True
-        if 'failureThreshold' not in probe:
-            probe['failureThreshold'] = '{{ .Values.hubconfig.probeFailureThreshold | default 3 }}'
-            logging.info(f"  Added failureThreshold template to {probe_type} in {deployment_name}/{container_name}")
-            modified = True
-        return modified
+    with open(deployment_file, 'r', encoding='utf-8') as f:
+        content = f.read()
 
-    deployment_name = deployment.get('metadata', {}).get('name', 'unknown')
-    containers = deployment.get('spec', {}).get('template', {}).get('spec', {}).get('containers', [])
+    lines = content.split('\n')
+    new_lines = []
+    i = 0
 
-    modified = False
-    for container in containers:
-        container_name = container.get('name', 'unknown')
+    while i < len(lines):
+        line = lines[i]
+        new_lines.append(line)
 
-        # Update all probe types (liveness, readiness, startup)
-        for probe_type in ['livenessProbe', 'readinessProbe', 'startupProbe']:
-            if probe_type in container:
-                if update_single_probe(container[probe_type], probe_type, container_name, deployment_name):
-                    modified = True
+        # Detect probe sections (livenessProbe, readinessProbe, startupProbe)
+        probe_match = re.match(r'^(\s+)(livenessProbe|readinessProbe|startupProbe):\s*$', line)
+        if probe_match:
+            probe_indent = len(probe_match.group(1))
+            value_indent = probe_indent + 2
+            indent_str = ' ' * value_indent
 
-    if modified:
-        logging.info(f"Applied probe defaults to deployment '{deployment_name}'")
+            # Look ahead to check if this is an exec probe and what fields exist
+            j = i + 1
+            is_exec_probe = False
+            has_timeout = False
+            has_failure = False
+            has_success = False
+            last_probe_line = i
+
+            while j < len(lines):
+                next_line = lines[j]
+                if next_line.strip():  # Skip empty lines
+                    next_indent = len(next_line) - len(next_line.lstrip())
+
+                    # If indent decreased, we've left the probe section
+                    if next_indent <= probe_indent:
+                        break
+
+                    if next_indent == value_indent:
+                        if 'exec:' in next_line:
+                            is_exec_probe = True
+                        if 'timeoutSeconds:' in next_line:
+                            has_timeout = True
+                        if 'failureThreshold:' in next_line:
+                            has_failure = True
+                        if 'successThreshold:' in next_line:
+                            has_success = True
+                        last_probe_line = j
+
+                new_lines.append(lines[j])
+                j += 1
+
+            # If it's an exec probe and missing fields, inject conditional templates
+            if is_exec_probe:
+                templates_to_add = []
+
+                if not has_timeout:
+                    templates_to_add.extend([
+                        f'{indent_str[:-2]}{{{{- if .Values.hubconfig.probeConfig }}}}',
+                        f'{indent_str[:-2]}{{{{- if .Values.hubconfig.probeConfig.timeoutSeconds }}}}',
+                        f'{indent_str}timeoutSeconds: {{{{ .Values.hubconfig.probeConfig.timeoutSeconds }}}}',
+                        f'{indent_str[:-2]}{{{{- end }}}}',
+                        f'{indent_str[:-2]}{{{{- end }}}}'
+                    ])
+
+                if not has_failure:
+                    templates_to_add.extend([
+                        f'{indent_str[:-2]}{{{{- if .Values.hubconfig.probeConfig }}}}',
+                        f'{indent_str[:-2]}{{{{- if .Values.hubconfig.probeConfig.failureThreshold }}}}',
+                        f'{indent_str}failureThreshold: {{{{ .Values.hubconfig.probeConfig.failureThreshold }}}}',
+                        f'{indent_str[:-2]}{{{{- end }}}}',
+                        f'{indent_str[:-2]}{{{{- end }}}}'
+                    ])
+
+                if not has_success:
+                    templates_to_add.extend([
+                        f'{indent_str[:-2]}{{{{- if .Values.hubconfig.probeConfig }}}}',
+                        f'{indent_str[:-2]}{{{{- if .Values.hubconfig.probeConfig.successThreshold }}}}',
+                        f'{indent_str}successThreshold: {{{{ .Values.hubconfig.probeConfig.successThreshold }}}}',
+                        f'{indent_str[:-2]}{{{{- end }}}}',
+                        f'{indent_str[:-2]}{{{{- end }}}}'
+                    ])
+
+                # Insert templates after the last probe field
+                if templates_to_add:
+                    new_lines.extend(templates_to_add)
+                    logging.info(f"  Injected probeConfig templates for {probe_match.group(2)} in {deployment_file}")
+
+            # Skip the lines we already processed
+            i = j
+            continue
+
+        i += 1
+
+    # Write updated content
+    with open(deployment_file, 'w', encoding='utf-8') as f:
+        f.write('\n'.join(new_lines))
 
 # updateDeployments adds standard configuration to the deployments (antiaffinity, security policies, and tolerations)
 def updateDeployments(helmChart, operator, exclusions, sizes, branch):
@@ -1175,10 +1248,6 @@ def updateDeployments(helmChart, operator, exclusions, sizes, branch):
         pod_template_spec['nodeSelector'] = ""
         pod_template_spec['imagePullSecrets'] = ''
 
-        # Add probe defaults to exec probes that don't have explicit timeouts (ACM 2.17+)
-        if is_version_compatible(branch, '2.17', '2.17', '2.17'):
-            add_probe_defaults(deploy)
-
         with open(deployment, 'w', encoding='utf-8') as f:
             yaml.dump(deploy, f, width=float("inf"))
 
@@ -1186,15 +1255,10 @@ def updateDeployments(helmChart, operator, exclusions, sizes, branch):
 
         injectHelmFlowControl(deployment, sizes, branch)
 
-        # Post-process to remove quotes from Helm template expressions for integer values
-        # This must be done AFTER injectHelmFlowControl since that function reads the YAML
-        with open(deployment, 'r', encoding='utf-8') as f:
-            content = f.read()
-        # Remove quotes around template expressions that should be integers (probeTimeoutSeconds, probeFailureThreshold)
-        content = content.replace("'{{ .Values.hubconfig.probeTimeoutSeconds | default 10 }}'", "{{ .Values.hubconfig.probeTimeoutSeconds | default 10 }}")
-        content = content.replace("'{{ .Values.hubconfig.probeFailureThreshold | default 3 }}'", "{{ .Values.hubconfig.probeFailureThreshold | default 3 }}")
-        with open(deployment, 'w', encoding='utf-8') as f:
-            f.write(content)
+        # Inject conditional probe config templates (ACM 2.17+)
+        # This must be done AFTER injectHelmFlowControl since that function manipulates the YAML
+        if is_version_compatible(branch, '2.17', '2.17', '2.17'):
+            inject_probe_config_helm_templates(deployment)
 
 # updateRBAC adds standard configuration to the RBAC resources (clusterroles, roles, clusterrolebindings, and rolebindings)
 def updateRBAC(helmChart, branch):
