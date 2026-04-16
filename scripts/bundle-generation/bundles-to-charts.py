@@ -1128,27 +1128,27 @@ def inject_probe_config_helm_templates(deployment_file):
             if 'exec:' in probe_text:
                 # Append missing fields
                 if 'timeoutSeconds:' not in probe_text:
-                    lines.insert(j, f'{field_indent[:-2]}{{{{- if .Values.hubconfig.probeConfig }}}}\n')
-                    lines.insert(j+1, f'{field_indent[:-2]}{{{{- if .Values.hubconfig.probeConfig.timeoutSeconds }}}}\n')
+                    lines.insert(j, '{{- if .Values.hubconfig.probeConfig }}\n')
+                    lines.insert(j+1, '{{- if .Values.hubconfig.probeConfig.timeoutSeconds }}\n')
                     lines.insert(j+2, f'{field_indent}timeoutSeconds: {{{{ .Values.hubconfig.probeConfig.timeoutSeconds }}}}\n')
-                    lines.insert(j+3, f'{field_indent[:-2]}{{{{- end }}}}\n')
-                    lines.insert(j+4, f'{field_indent[:-2]}{{{{- end }}}}\n')
+                    lines.insert(j+3, '{{- end }}\n')
+                    lines.insert(j+4, '{{- end }}\n')
                     j += 5
 
                 if 'failureThreshold:' not in probe_text:
-                    lines.insert(j, f'{field_indent[:-2]}{{{{- if .Values.hubconfig.probeConfig }}}}\n')
-                    lines.insert(j+1, f'{field_indent[:-2]}{{{{- if .Values.hubconfig.probeConfig.failureThreshold }}}}\n')
+                    lines.insert(j, '{{- if .Values.hubconfig.probeConfig }}\n')
+                    lines.insert(j+1, '{{- if .Values.hubconfig.probeConfig.failureThreshold }}\n')
                     lines.insert(j+2, f'{field_indent}failureThreshold: {{{{ .Values.hubconfig.probeConfig.failureThreshold }}}}\n')
-                    lines.insert(j+3, f'{field_indent[:-2]}{{{{- end }}}}\n')
-                    lines.insert(j+4, f'{field_indent[:-2]}{{{{- end }}}}\n')
+                    lines.insert(j+3, '{{- end }}\n')
+                    lines.insert(j+4, '{{- end }}\n')
                     j += 5
 
                 if 'successThreshold:' not in probe_text:
-                    lines.insert(j, f'{field_indent[:-2]}{{{{- if .Values.hubconfig.probeConfig }}}}\n')
-                    lines.insert(j+1, f'{field_indent[:-2]}{{{{- if .Values.hubconfig.probeConfig.successThreshold }}}}\n')
+                    lines.insert(j, '{{- if .Values.hubconfig.probeConfig }}\n')
+                    lines.insert(j+1, '{{- if .Values.hubconfig.probeConfig.successThreshold }}\n')
                     lines.insert(j+2, f'{field_indent}successThreshold: {{{{ .Values.hubconfig.probeConfig.successThreshold }}}}\n')
-                    lines.insert(j+3, f'{field_indent[:-2]}{{{{- end }}}}\n')
-                    lines.insert(j+4, f'{field_indent[:-2]}{{{{- end }}}}\n')
+                    lines.insert(j+3, '{{- end }}\n')
+                    lines.insert(j+4, '{{- end }}\n')
                     j += 5
 
             i = j
