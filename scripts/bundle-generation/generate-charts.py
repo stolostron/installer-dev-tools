@@ -656,6 +656,24 @@ def addPullSecretOverride(deployment):
         a_file.writelines(lines)
         a_file.close()
 
+def _add_probe_config_template(indent_str, field_name):
+    """Helper function to generate probe config template lines for a given field.
+
+    Args:
+        indent_str (str): The indentation string for the probe field
+        field_name (str): The probe config field name (e.g., 'timeoutSeconds', 'failureThreshold')
+
+    Returns:
+        list: Template lines for the probe config field
+    """
+    return [
+        f'{indent_str[:-2]}{{{{- if .Values.hubconfig.probeConfig }}}}',
+        f'{indent_str[:-2]}{{{{- if .Values.hubconfig.probeConfig.{field_name} }}}}',
+        f'{indent_str}{field_name}: {{{{ .Values.hubconfig.probeConfig.{field_name} }}}}',
+        f'{indent_str[:-2]}{{{{- end }}}}',
+        f'{indent_str[:-2]}{{{{- end }}}}'
+    ]
+
 # inject_probe_config_helm_templates injects conditional probeConfig templates (ACM 2.17+)
 def inject_probe_config_helm_templates(deployment_file):
     """
@@ -735,31 +753,13 @@ def inject_probe_config_helm_templates(deployment_file):
                 templates_to_add = []
 
                 if not has_timeout:
-                    templates_to_add.extend([
-                        f'{indent_str[:-2]}{{{{- if .Values.hubconfig.probeConfig }}}}',
-                        f'{indent_str[:-2]}{{{{- if .Values.hubconfig.probeConfig.timeoutSeconds }}}}',
-                        f'{indent_str}timeoutSeconds: {{{{ .Values.hubconfig.probeConfig.timeoutSeconds }}}}',
-                        f'{indent_str[:-2]}{{{{- end }}}}',
-                        f'{indent_str[:-2]}{{{{- end }}}}'
-                    ])
+                    templates_to_add.extend(_add_probe_config_template(indent_str, 'timeoutSeconds'))
 
                 if not has_failure:
-                    templates_to_add.extend([
-                        f'{indent_str[:-2]}{{{{- if .Values.hubconfig.probeConfig }}}}',
-                        f'{indent_str[:-2]}{{{{- if .Values.hubconfig.probeConfig.failureThreshold }}}}',
-                        f'{indent_str}failureThreshold: {{{{ .Values.hubconfig.probeConfig.failureThreshold }}}}',
-                        f'{indent_str[:-2]}{{{{- end }}}}',
-                        f'{indent_str[:-2]}{{{{- end }}}}'
-                    ])
+                    templates_to_add.extend(_add_probe_config_template(indent_str, 'failureThreshold'))
 
                 if not has_success:
-                    templates_to_add.extend([
-                        f'{indent_str[:-2]}{{{{- if .Values.hubconfig.probeConfig }}}}',
-                        f'{indent_str[:-2]}{{{{- if .Values.hubconfig.probeConfig.successThreshold }}}}',
-                        f'{indent_str}successThreshold: {{{{ .Values.hubconfig.probeConfig.successThreshold }}}}',
-                        f'{indent_str[:-2]}{{{{- end }}}}',
-                        f'{indent_str[:-2]}{{{{- end }}}}'
-                    ])
+                    templates_to_add.extend(_add_probe_config_template(indent_str, 'successThreshold'))
 
                 # Insert templates after the last probe field
                 if templates_to_add:
