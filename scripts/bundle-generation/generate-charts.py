@@ -656,24 +656,6 @@ def addPullSecretOverride(deployment):
         a_file.writelines(lines)
         a_file.close()
 
-def _add_probe_config_template(indent_str, field_name):
-    """Helper function to generate probe config template lines for a given field.
-
-    Args:
-        indent_str (str): The indentation string for the probe field
-        field_name (str): The probe config field name (e.g., 'timeoutSeconds', 'failureThreshold')
-
-    Returns:
-        list: Template lines for the probe config field
-    """
-    return [
-        f'{indent_str[:-2]}{{{{- if .Values.hubconfig.probeConfig }}}}',
-        f'{indent_str[:-2]}{{{{- if .Values.hubconfig.probeConfig.{field_name} }}}}',
-        f'{indent_str}{field_name}: {{{{ .Values.hubconfig.probeConfig.{field_name} }}}}',
-        f'{indent_str[:-2]}{{{{- end }}}}',
-        f'{indent_str[:-2]}{{{{- end }}}}'
-    ]
-
 # inject_probe_config_helm_templates injects conditional probeConfig templates (ACM 2.17+)
 def inject_probe_config_helm_templates(deployment_file):
     """
@@ -700,81 +682,63 @@ def inject_probe_config_helm_templates(deployment_file):
     import re
 
     with open(deployment_file, 'r', encoding='utf-8') as f:
-        content = f.read()
+        lines = f.readlines()
 
-    lines = content.split('\n')
-    new_lines = []
     i = 0
-
     while i < len(lines):
         line = lines[i]
-        new_lines.append(line)
 
-        # Detect probe sections (livenessProbe, readinessProbe, startupProbe)
+        # Find probe sections
         probe_match = re.match(r'^(\s+)(livenessProbe|readinessProbe|startupProbe):\s*$', line)
         if probe_match:
-            probe_indent = len(probe_match.group(1))
-            value_indent = probe_indent + 2
-            indent_str = ' ' * value_indent
+            base_indent = len(probe_match.group(1))
+            field_indent = ' ' * (base_indent + 2)
 
-            # Look ahead to check if this is an exec probe and what fields exist
+            # Collect the probe section
+            probe_section = []
             j = i + 1
-            is_exec_probe = False
-            has_timeout = False
-            has_failure = False
-            has_success = False
-            last_probe_line = i
-
-            while j < len(lines):
-                next_line = lines[j]
-                if next_line.strip():  # Skip empty lines
-                    next_indent = len(next_line) - len(next_line.lstrip())
-
-                    # If indent decreased, we've left the probe section
-                    if next_indent <= probe_indent:
-                        break
-
-                    if next_indent == value_indent:
-                        if 'exec:' in next_line:
-                            is_exec_probe = True
-                        if 'timeoutSeconds:' in next_line:
-                            has_timeout = True
-                        if 'failureThreshold:' in next_line:
-                            has_failure = True
-                        if 'successThreshold:' in next_line:
-                            has_success = True
-                        last_probe_line = j
-
-                new_lines.append(lines[j])
+            while j < len(lines) and lines[j].strip():
+                line_indent = len(lines[j]) - len(lines[j].lstrip())
+                if line_indent <= base_indent:
+                    break
+                probe_section.append(lines[j])
                 j += 1
 
-            # If it's an exec probe and missing fields, inject conditional templates
-            if is_exec_probe:
-                templates_to_add = []
+            probe_text = ''.join(probe_section)
 
-                if not has_timeout:
-                    templates_to_add.extend(_add_probe_config_template(indent_str, 'timeoutSeconds'))
+            # Only process exec probes
+            if 'exec:' in probe_text:
+                # Append missing fields
+                if 'timeoutSeconds:' not in probe_text:
+                    lines.insert(j, f'{field_indent[:-2]}{{{{- if .Values.hubconfig.probeConfig }}}}\n')
+                    lines.insert(j+1, f'{field_indent[:-2]}{{{{- if .Values.hubconfig.probeConfig.timeoutSeconds }}}}\n')
+                    lines.insert(j+2, f'{field_indent}timeoutSeconds: {{{{ .Values.hubconfig.probeConfig.timeoutSeconds }}}}\n')
+                    lines.insert(j+3, f'{field_indent[:-2]}{{{{- end }}}}\n')
+                    lines.insert(j+4, f'{field_indent[:-2]}{{{{- end }}}}\n')
+                    j += 5
 
-                if not has_failure:
-                    templates_to_add.extend(_add_probe_config_template(indent_str, 'failureThreshold'))
+                if 'failureThreshold:' not in probe_text:
+                    lines.insert(j, f'{field_indent[:-2]}{{{{- if .Values.hubconfig.probeConfig }}}}\n')
+                    lines.insert(j+1, f'{field_indent[:-2]}{{{{- if .Values.hubconfig.probeConfig.failureThreshold }}}}\n')
+                    lines.insert(j+2, f'{field_indent}failureThreshold: {{{{ .Values.hubconfig.probeConfig.failureThreshold }}}}\n')
+                    lines.insert(j+3, f'{field_indent[:-2]}{{{{- end }}}}\n')
+                    lines.insert(j+4, f'{field_indent[:-2]}{{{{- end }}}}\n')
+                    j += 5
 
-                if not has_success:
-                    templates_to_add.extend(_add_probe_config_template(indent_str, 'successThreshold'))
+                if 'successThreshold:' not in probe_text:
+                    lines.insert(j, f'{field_indent[:-2]}{{{{- if .Values.hubconfig.probeConfig }}}}\n')
+                    lines.insert(j+1, f'{field_indent[:-2]}{{{{- if .Values.hubconfig.probeConfig.successThreshold }}}}\n')
+                    lines.insert(j+2, f'{field_indent}successThreshold: {{{{ .Values.hubconfig.probeConfig.successThreshold }}}}\n')
+                    lines.insert(j+3, f'{field_indent[:-2]}{{{{- end }}}}\n')
+                    lines.insert(j+4, f'{field_indent[:-2]}{{{{- end }}}}\n')
+                    j += 5
 
-                # Insert templates after the last probe field
-                if templates_to_add:
-                    new_lines.extend(templates_to_add)
-                    logging.info(f"  Injected probeConfig templates for {probe_match.group(2)} in {deployment_file}")
-
-            # Skip the lines we already processed
             i = j
-            continue
+        else:
+            i += 1
 
-        i += 1
-
-    # Write updated content
     with open(deployment_file, 'w', encoding='utf-8') as f:
-        f.write('\n'.join(new_lines))
+        f.writelines(lines)
 
 # updateDeployments adds standard configuration to the deployments (antiaffinity, security policies, and tolerations)
 def updateDeployments(chartName, helmChart, exclusions, inclusions, branch):
