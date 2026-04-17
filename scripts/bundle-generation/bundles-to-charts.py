@@ -29,6 +29,8 @@ from utils.git_sha_fetcher import fetch_sha_from_git_remote
 # Configure logging with coloredlogs
 coloredlogs.install(level='DEBUG')  # Set the logging level as needed
 
+# Removed literal_str class - using post-processing instead
+
 # Config Constants
 SCRIPT_DIR = os.path.join(os.path.dirname(os.path.realpath(__file__)))
 ROOT_DIR = os.path.abspath(os.path.join(SCRIPT_DIR, "..", ".."))
@@ -1072,6 +1074,90 @@ def injectHelmFlowControl(deployment, sizes, branch):
     a_file.close()
     logging.info("Added Helm flow control for NodeSelector, Proxy Overrides and SecCompProfile.\n")
 
+# inject_probe_config_helm_templates injects conditional probeConfig templates (ACM 2.17+)
+def inject_probe_config_helm_templates(deployment_file):
+    """
+    Injects conditional Helm templates for probe configuration into deployment files.
+
+    Adds template blocks for exec probes that allow users to optionally configure:
+    - timeoutSeconds (K8s default: 1)
+    - failureThreshold (K8s default: 3)
+    - successThreshold (K8s default: 1)
+
+    This addresses ACM-29011 where customers on compact clusters or slow I/O systems
+    experience frequent probe timeouts. Rather than forcing new defaults on all users,
+    this allows opt-in configuration via MCH CR probeConfig field while preserving
+    Kubernetes defaults when not configured.
+
+    Only applies to exec probes (not httpGet/tcpSocket). Only injects if values don't
+    already exist in the template.
+
+    Note: This function is only called for ACM 2.17+ and MCE 2.17+ releases.
+
+    Args:
+        deployment_file (str): Path to the deployment YAML file to update
+    """
+    import re
+
+    with open(deployment_file, 'r', encoding='utf-8') as f:
+        lines = f.readlines()
+
+    i = 0
+    while i < len(lines):
+        line = lines[i]
+
+        # Find probe sections
+        probe_match = re.match(r'^(\s+)(livenessProbe|readinessProbe|startupProbe):\s*$', line)
+        if probe_match:
+            base_indent = len(probe_match.group(1))
+            field_indent = ' ' * (base_indent + 2)
+
+            # Collect the probe section
+            probe_section = []
+            j = i + 1
+            while j < len(lines) and lines[j].strip():
+                line_indent = len(lines[j]) - len(lines[j].lstrip())
+                if line_indent <= base_indent:
+                    break
+                probe_section.append(lines[j])
+                j += 1
+
+            probe_text = ''.join(probe_section)
+
+            # Only process exec probes
+            if 'exec:' in probe_text:
+                # Append missing fields
+                if 'timeoutSeconds:' not in probe_text:
+                    lines.insert(j, '{{- if .Values.hubconfig.probeConfig }}\n')
+                    lines.insert(j+1, '{{- if .Values.hubconfig.probeConfig.timeoutSeconds }}\n')
+                    lines.insert(j+2, f'{field_indent}timeoutSeconds: {{{{ .Values.hubconfig.probeConfig.timeoutSeconds }}}}\n')
+                    lines.insert(j+3, '{{- end }}\n')
+                    lines.insert(j+4, '{{- end }}\n')
+                    j += 5
+
+                if 'failureThreshold:' not in probe_text:
+                    lines.insert(j, '{{- if .Values.hubconfig.probeConfig }}\n')
+                    lines.insert(j+1, '{{- if .Values.hubconfig.probeConfig.failureThreshold }}\n')
+                    lines.insert(j+2, f'{field_indent}failureThreshold: {{{{ .Values.hubconfig.probeConfig.failureThreshold }}}}\n')
+                    lines.insert(j+3, '{{- end }}\n')
+                    lines.insert(j+4, '{{- end }}\n')
+                    j += 5
+
+                if 'successThreshold:' not in probe_text:
+                    lines.insert(j, '{{- if .Values.hubconfig.probeConfig }}\n')
+                    lines.insert(j+1, '{{- if .Values.hubconfig.probeConfig.successThreshold }}\n')
+                    lines.insert(j+2, f'{field_indent}successThreshold: {{{{ .Values.hubconfig.probeConfig.successThreshold }}}}\n')
+                    lines.insert(j+3, '{{- end }}\n')
+                    lines.insert(j+4, '{{- end }}\n')
+                    j += 5
+
+            i = j
+        else:
+            i += 1
+
+    with open(deployment_file, 'w', encoding='utf-8') as f:
+        f.writelines(lines)
+
 # updateDeployments adds standard configuration to the deployments (antiaffinity, security policies, and tolerations)
 def updateDeployments(helmChart, operator, exclusions, sizes, branch):
     """_summary_
@@ -1127,10 +1213,16 @@ def updateDeployments(helmChart, operator, exclusions, sizes, branch):
         pod_template_spec['imagePullSecrets'] = ''
 
         with open(deployment, 'w', encoding='utf-8') as f:
-            yaml.dump(deploy, f)
+            yaml.dump(deploy, f, width=float("inf"))
+
         logging.info("Deployments updated with antiaffinity, security policies, and tolerations successfully. \n")
 
         injectHelmFlowControl(deployment, sizes, branch)
+
+        # Inject conditional probe config templates (ACM 2.17+)
+        # This must be done AFTER injectHelmFlowControl since that function manipulates the YAML
+        if is_version_compatible(branch, '2.17', '2.17', '2.17'):
+            inject_probe_config_helm_templates(deployment)
 
 # updateRBAC adds standard configuration to the RBAC resources (clusterroles, roles, clusterrolebindings, and rolebindings)
 def updateRBAC(helmChart, branch):
