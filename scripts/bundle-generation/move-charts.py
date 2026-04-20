@@ -18,20 +18,98 @@ from validate_csv import *
 SCRIPT_DIR = os.path.join(os.path.dirname(os.path.realpath(__file__)))
 ROOT_DIR = os.path.abspath(os.path.join(SCRIPT_DIR, "..", ".."))
 
+def inject_probe_config_helm_templates(deployment_file):
+    """
+    Injects conditional Helm templates for probe configuration into deployment files.
+
+    Adds template blocks for exec probes that allow users to optionally configure:
+    - timeoutSeconds (K8s default: 1) - all probe types
+    - failureThreshold (K8s default: 3) - all probe types
+    - successThreshold (K8s default: 1) - readinessProbe only
+
+    Note: successThreshold is only injected for readinessProbe because Kubernetes
+    validation requires livenessProbe.successThreshold to be exactly 1, making it
+    non-configurable for liveness and startup probes.
+
+    This addresses ACM-29011 where customers on compact clusters or slow I/O systems
+    experience frequent probe timeouts. Rather than forcing new defaults on all users,
+    this allows opt-in configuration via MCH CR probeConfig field while preserving
+    Kubernetes defaults when not configured.
+
+    Only applies to exec probes (not httpGet/tcpSocket). Only injects if values don't
+    already exist in the template.
+
+    Note: This function is only called for ACM 2.17+ and MCE 2.17+ releases.
+
+    Args:
+        deployment_file (str): Path to the deployment YAML file to update
+    """
+    with open(deployment_file, 'r', encoding='utf-8') as f:
+        lines = f.readlines()
+
+    i = 0
+    while i < len(lines):
+        line = lines[i]
+
+        # Find probe sections
+        probe_match = re.match(r'^(\s+)(livenessProbe|readinessProbe|startupProbe):\s*$', line)
+        if probe_match:
+            base_indent = len(probe_match.group(1))
+            probe_type = probe_match.group(2)
+            field_indent = ' ' * (base_indent + 2)
+
+            # Collect the probe section
+            probe_section = []
+            j = i + 1
+            while j < len(lines) and lines[j].strip():
+                line_indent = len(lines[j]) - len(lines[j].lstrip())
+                if line_indent <= base_indent:
+                    break
+                probe_section.append(lines[j])
+                j += 1
+
+            probe_text = ''.join(probe_section)
+
+            # Only process exec probes
+            if 'exec:' in probe_text:
+                # Append missing fields
+                if 'timeoutSeconds:' not in probe_text:
+                    lines.insert(j, '{{- if and .Values.hubconfig.probeConfig (hasKey .Values.hubconfig.probeConfig "timeoutSeconds") }}\n')
+                    lines.insert(j+1, f'{field_indent}timeoutSeconds: {{{{ .Values.hubconfig.probeConfig.timeoutSeconds }}}}\n')
+                    lines.insert(j+2, '{{- end }}\n')
+                    j += 3
+
+                if 'failureThreshold:' not in probe_text:
+                    lines.insert(j, '{{- if and .Values.hubconfig.probeConfig (hasKey .Values.hubconfig.probeConfig "failureThreshold") }}\n')
+                    lines.insert(j+1, f'{field_indent}failureThreshold: {{{{ .Values.hubconfig.probeConfig.failureThreshold }}}}\n')
+                    lines.insert(j+2, '{{- end }}\n')
+                    j += 3
+
+                # Only inject successThreshold for readinessProbe
+                # livenessProbe.successThreshold must be 1 (K8s validation requirement)
+                if probe_type == 'readinessProbe' and 'successThreshold:' not in probe_text:
+                    lines.insert(j, '{{- if and .Values.hubconfig.probeConfig (hasKey .Values.hubconfig.probeConfig "successThreshold") }}\n')
+                    lines.insert(j+1, f'{field_indent}successThreshold: {{{{ .Values.hubconfig.probeConfig.successThreshold }}}}\n')
+                    lines.insert(j+2, '{{- end }}\n')
+                    j += 3
+
+            i = j
+        else:
+            i += 1
+
+    with open(deployment_file, 'w', encoding='utf-8') as f:
+        f.writelines(lines)
+
 def fix_probe_config_templates(destination_template_dir):
     """
-    Fix probeConfig template checks to prevent map key errors.
+    Inject probeConfig templates into deployment files for ACM/MCE 2.17+.
 
-    Replaces direct field access with hasKey checks for:
-    - timeoutSeconds
-    - failureThreshold
-    - successThreshold
+    Processes all deployment YAML files in the destination template directory
+    and injects conditional probe configuration templates.
     """
     if not os.path.exists(destination_template_dir):
         logging.warning(f"Template directory does not exist: {destination_template_dir}")
         return
-
-    fixed_files = []
 
     for filename in os.listdir(destination_template_dir):
         if not filename.endswith('.yaml'):
@@ -40,44 +118,10 @@ def fix_probe_config_templates(destination_template_dir):
         filepath = os.path.join(destination_template_dir, filename)
 
         try:
-            with open(filepath, 'r', encoding='utf-8') as f:
-                content = f.read()
-
-            original_content = content
-
-            # Fix timeoutSeconds
-            content = re.sub(
-                r'\{\{- if \.Values\.hubconfig\.probeConfig\.timeoutSeconds \}\}',
-                r'{{- if and .Values.hubconfig.probeConfig (hasKey .Values.hubconfig.probeConfig "timeoutSeconds") }}',
-                content
-            )
-
-            # Fix failureThreshold
-            content = re.sub(
-                r'\{\{- if \.Values\.hubconfig\.probeConfig\.failureThreshold \}\}',
-                r'{{- if and .Values.hubconfig.probeConfig (hasKey .Values.hubconfig.probeConfig "failureThreshold") }}',
-                content
-            )
-
-            # Fix successThreshold
-            content = re.sub(
-                r'\{\{- if \.Values\.hubconfig\.probeConfig\.successThreshold \}\}',
-                r'{{- if and .Values.hubconfig.probeConfig (hasKey .Values.hubconfig.probeConfig "successThreshold") }}',
-                content
-            )
-
-            # Only write if changes were made
-            if content != original_content:
-                with open(filepath, 'w', encoding='utf-8') as f:
-                    f.write(content)
-                fixed_files.append(filename)
-                logging.debug(f"Fixed probeConfig checks in: {filename}")
-
+            inject_probe_config_helm_templates(filepath)
+            logging.debug(f"Injected probeConfig templates in: {filename}")
         except Exception as e:
             logging.error(f"Error processing {filepath}: {e}")
-
-    if fixed_files:
-        logging.info(f"Fixed probeConfig checks in {len(fixed_files)} template file(s)")
 
 # Copy chart-templates to a new helmchart directory
 def copyHelmChart(destinationChartPath, repo, chart):
