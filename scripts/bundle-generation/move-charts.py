@@ -5,6 +5,7 @@
 
 import argparse
 import os
+import re
 import shutil
 import yaml
 import logging
@@ -16,6 +17,67 @@ from validate_csv import *
 # Config Constants
 SCRIPT_DIR = os.path.join(os.path.dirname(os.path.realpath(__file__)))
 ROOT_DIR = os.path.abspath(os.path.join(SCRIPT_DIR, "..", ".."))
+
+def fix_probe_config_templates(destination_template_dir):
+    """
+    Fix probeConfig template checks to prevent map key errors.
+
+    Replaces direct field access with hasKey checks for:
+    - timeoutSeconds
+    - failureThreshold
+    - successThreshold
+    """
+    if not os.path.exists(destination_template_dir):
+        logging.warning(f"Template directory does not exist: {destination_template_dir}")
+        return
+
+    fixed_files = []
+
+    for filename in os.listdir(destination_template_dir):
+        if not filename.endswith('.yaml'):
+            continue
+
+        filepath = os.path.join(destination_template_dir, filename)
+
+        try:
+            with open(filepath, 'r', encoding='utf-8') as f:
+                content = f.read()
+
+            original_content = content
+
+            # Fix timeoutSeconds
+            content = re.sub(
+                r'\{\{- if \.Values\.hubconfig\.probeConfig\.timeoutSeconds \}\}',
+                r'{{- if and .Values.hubconfig.probeConfig (hasKey .Values.hubconfig.probeConfig "timeoutSeconds") }}',
+                content
+            )
+
+            # Fix failureThreshold
+            content = re.sub(
+                r'\{\{- if \.Values\.hubconfig\.probeConfig\.failureThreshold \}\}',
+                r'{{- if and .Values.hubconfig.probeConfig (hasKey .Values.hubconfig.probeConfig "failureThreshold") }}',
+                content
+            )
+
+            # Fix successThreshold
+            content = re.sub(
+                r'\{\{- if \.Values\.hubconfig\.probeConfig\.successThreshold \}\}',
+                r'{{- if and .Values.hubconfig.probeConfig (hasKey .Values.hubconfig.probeConfig "successThreshold") }}',
+                content
+            )
+
+            # Only write if changes were made
+            if content != original_content:
+                with open(filepath, 'w', encoding='utf-8') as f:
+                    f.write(content)
+                fixed_files.append(filename)
+                logging.debug(f"Fixed probeConfig checks in: {filename}")
+
+        except Exception as e:
+            logging.error(f"Error processing {filepath}: {e}")
+
+    if fixed_files:
+        logging.info(f"Fixed probeConfig checks in {len(fixed_files)} template file(s)")
 
 # Copy chart-templates to a new helmchart directory
 def copyHelmChart(destinationChartPath, repo, chart):
@@ -63,6 +125,9 @@ def copyHelmChart(destinationChartPath, repo, chart):
 
     shutil.copyfile(valuesYamlPath, os.path.join(destinationChartPath, "values.yaml"))
     logging.info("Chart copied.\n")
+
+    # Fix probeConfig template checks
+    fix_probe_config_templates(destinationTemplateDir)
 
 def addCRDs(repo, chart, outputDir):
     if not 'chart-path' in chart:
