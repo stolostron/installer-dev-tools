@@ -662,9 +662,13 @@ def inject_probe_config_helm_templates(deployment_file):
     Injects conditional Helm templates for probe configuration into deployment files.
 
     Adds template blocks for exec probes that allow users to optionally configure:
-    - timeoutSeconds (K8s default: 1)
-    - failureThreshold (K8s default: 3)
-    - successThreshold (K8s default: 1)
+    - timeoutSeconds (K8s default: 1) - all probe types
+    - failureThreshold (K8s default: 3) - all probe types
+    - successThreshold (K8s default: 1) - readinessProbe only
+
+    Note: successThreshold is only injected for readinessProbe because Kubernetes
+    validation requires livenessProbe.successThreshold to be exactly 1, making it
+    non-configurable for liveness and startup probes.
 
     This addresses ACM-29011 where customers on compact clusters or slow I/O systems
     experience frequent probe timeouts. Rather than forcing new defaults on all users,
@@ -692,6 +696,7 @@ def inject_probe_config_helm_templates(deployment_file):
         probe_match = re.match(r'^(\s+)(livenessProbe|readinessProbe|startupProbe):\s*$', line)
         if probe_match:
             base_indent = len(probe_match.group(1))
+            probe_type = probe_match.group(2)
             field_indent = ' ' * (base_indent + 2)
 
             # Collect the probe section
@@ -721,7 +726,9 @@ def inject_probe_config_helm_templates(deployment_file):
                     lines.insert(j+2, '{{- end }}\n')
                     j += 3
 
-                if 'successThreshold:' not in probe_text:
+                # Only inject successThreshold for readinessProbe
+                # livenessProbe.successThreshold must be 1 (K8s validation requirement)
+                if probe_type == 'readinessProbe' and 'successThreshold:' not in probe_text:
                     lines.insert(j, '{{- if and .Values.hubconfig.probeConfig (hasKey .Values.hubconfig.probeConfig "successThreshold") }}\n')
                     lines.insert(j+1, f'{field_indent}successThreshold: {{{{ .Values.hubconfig.probeConfig.successThreshold }}}}\n')
                     lines.insert(j+2, '{{- end }}\n')
