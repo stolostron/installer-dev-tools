@@ -11,12 +11,70 @@ import yaml
 import logging
 import subprocess
 from git import Repo, exc
+from packaging import version
 
 from validate_csv import *
 
 # Config Constants
 SCRIPT_DIR = os.path.join(os.path.dirname(os.path.realpath(__file__)))
 ROOT_DIR = os.path.abspath(os.path.join(SCRIPT_DIR, "..", ".."))
+
+def is_version_compatible(branch, min_release_version, min_backplane_version, min_ocm_version, enforce_master_check=True):
+    """
+    Check if the current version meets the minimum required version for a feature.
+
+    Args:
+        min_release_version (_type_): _description_
+        min_backplane_version (_type_): _description_
+        min_ocm_version (_type_): _description_
+        enforce_master_check (bool, optional): _description_. Defaults to True.
+
+    Returns:
+        _type_: _description_
+    """
+    # Retrieve the release versions from environment variables
+    acm_release_version = os.getenv('ACM_RELEASE_VERSION')
+    mce_release_version = os.getenv('MCE_RELEASE_VERSION')
+
+    if not acm_release_version and not mce_release_version:
+        # logging.error("Neither ACM nor MCE release version is set in environment variables.")
+        # If no env vars set, try to determine version from branch
+        # Extract the version part from the branch name (e.g., '2.12-integration' -> '2.12')
+        pattern = r'(\d+\.\d+)'  # Matches versions like '2.12'
+
+        # Special handling for master branch
+        if enforce_master_check and branch in ['main', 'master']:
+            logging.info("Branch is 'main' or 'master', assuming latest version compatible with all features.")
+            return True
+
+        match = re.search(pattern, branch)
+        if match:
+            v = match.group(1)  # Extract the version
+            branch_version = version.Version(v)  # Create a Version object
+
+            if 'ocm' in branch.lower():
+                min_branch_version = version.Version(min_ocm_version)  # Use the minimum release version
+            elif 'backplane' in branch.lower():
+                min_branch_version = version.Version(min_release_version)  # Use the minimum release version
+            else:
+                min_branch_version = version.Version(min_backplane_version)  # Use the minimum backplane version
+
+            logging.debug(f"Branch version: {branch_version}, Min version: {min_branch_version}")
+            logging.debug(f"Is compatible: {branch_version >= min_branch_version}")
+
+            # Check if the branch version is compatible with the specified minimum branch
+            return branch_version >= min_branch_version
+        else:
+            logging.error("Version not found in branch: %s", branch)
+            return False
+
+    if acm_release_version and version.Version(acm_release_version) >= version.Version(min_release_version):
+        return True
+
+    elif mce_release_version and version.Version(mce_release_version) >= version.Version(min_backplane_version):
+        return True
+
+    return False
 
 def inject_probe_config_helm_templates(deployment_file):
     """
@@ -124,7 +182,7 @@ def fix_probe_config_templates(destination_template_dir):
             logging.error(f"Error processing {filepath}: {e}")
 
 # Copy chart-templates to a new helmchart directory
-def copyHelmChart(destinationChartPath, repo, chart):
+def copyHelmChart(destinationChartPath, repo, chart, branch):
     chartName = chart['name']
     logging.info(f"Copying templates into new {chartName} chart directory ...")
 
@@ -170,33 +228,35 @@ def copyHelmChart(destinationChartPath, repo, chart):
     destinationValuesPath = os.path.join(destinationChartPath, "values.yaml")
     shutil.copyfile(valuesYamlPath, destinationValuesPath)
 
-    # Inject probeConfig into values.yaml if not present
-    try:
-        with open(destinationValuesPath, 'r') as f:
-            content = f.read()
+    # Inject probeConfig into values.yaml if not present (ACM/MCE 2.17+)
+    if is_version_compatible(branch, '2.17', '2.17', '2.17'):
+        try:
+            with open(destinationValuesPath, 'r') as f:
+                content = f.read()
 
-        values = yaml.safe_load(content)
+            values = yaml.safe_load(content)
 
-        if 'hubconfig' in values and 'probeConfig' not in values['hubconfig']:
-            # Insert probeConfig after ocpVersion to maintain field order
-            lines = content.split('\n')
-            for i, line in enumerate(lines):
-                if line.strip().startswith('ocpVersion:'):
-                    # Insert probeConfig on next line with same indentation
-                    indent = len(line) - len(line.lstrip())
-                    lines.insert(i + 1, ' ' * indent + 'probeConfig: null')
-                    break
+            if 'hubconfig' in values and 'probeConfig' not in values['hubconfig']:
+                # Insert probeConfig after ocpVersion to maintain field order
+                lines = content.split('\n')
+                for i, line in enumerate(lines):
+                    if line.strip().startswith('ocpVersion:'):
+                        # Insert probeConfig on next line with same indentation
+                        indent = len(line) - len(line.lstrip())
+                        lines.insert(i + 1, ' ' * indent + 'probeConfig: null')
+                        break
 
-            with open(destinationValuesPath, 'w') as f:
-                f.write('\n'.join(lines))
-            logging.info("Added probeConfig to values.yaml")
-    except Exception as e:
-        logging.error(f"Error injecting probeConfig into values.yaml: {e}")
+                with open(destinationValuesPath, 'w') as f:
+                    f.write('\n'.join(lines))
+                logging.info("Added probeConfig to values.yaml")
+        except Exception as e:
+            logging.error(f"Error injecting probeConfig into values.yaml: {e}")
 
     logging.info("Chart copied.\n")
 
-    # Fix probeConfig template checks
-    fix_probe_config_templates(destinationTemplateDir)
+    # Fix probeConfig template checks (ACM/MCE 2.17+)
+    if is_version_compatible(branch, '2.17', '2.17', '2.17'):
+        fix_probe_config_templates(destinationTemplateDir)
 
 def addCRDs(repo, chart, outputDir):
     if not 'chart-path' in chart:
@@ -271,6 +331,11 @@ def main():
     with open(config_yaml, 'r') as f:
         config = yaml.safe_load(f)
 
+    # Set release version environment variables if provided in config
+    if isinstance(config, dict):
+        os.environ['ACM_RELEASE_VERSION'] = config.get('acm-release-version', '')
+        os.environ['MCE_RELEASE_VERSION'] = config.get('mce-release-version', '')
+
     # Normalize config into a list of components
     if isinstance(config, dict):
         components = config.get("components", [])
@@ -289,6 +354,7 @@ def main():
             shutil.rmtree(repo_path)
 
         repository = Repo.clone_from(repo["github_ref"], repo_path) # Clone repo to above path
+        branch = repo.get('branch', 'main')  # Default to 'main' if no branch specified
         if 'branch' in repo:
             repository.git.checkout(repo['branch']) # If a branch is specified, checkout that branch
 
@@ -311,7 +377,7 @@ def main():
 
             # Template Helm Chart Directory from 'chart-templates'
             logging.info("Templating helm chart '%s' ...", chart["name"])
-            copyHelmChart(destinationChartPath, repo["repo_name"], chart)
+            copyHelmChart(destinationChartPath, repo["repo_name"], chart, branch)
 
     logging.info("All repositories and operators processed successfully.")
     logging.info("Performing cleanup...")
