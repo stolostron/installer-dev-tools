@@ -167,7 +167,32 @@ def copyHelmChart(destinationChartPath, repo, chart):
         logging.error(f"No values.yaml found for chart: '{chartName}'")
         return
 
-    shutil.copyfile(valuesYamlPath, os.path.join(destinationChartPath, "values.yaml"))
+    destinationValuesPath = os.path.join(destinationChartPath, "values.yaml")
+    shutil.copyfile(valuesYamlPath, destinationValuesPath)
+
+    # Inject probeConfig into values.yaml if not present
+    try:
+        with open(destinationValuesPath, 'r') as f:
+            content = f.read()
+
+        values = yaml.safe_load(content)
+
+        if 'hubconfig' in values and 'probeConfig' not in values['hubconfig']:
+            # Insert probeConfig after ocpVersion to maintain field order
+            lines = content.split('\n')
+            for i, line in enumerate(lines):
+                if line.strip().startswith('ocpVersion:'):
+                    # Insert probeConfig on next line with same indentation
+                    indent = len(line) - len(line.lstrip())
+                    lines.insert(i + 1, ' ' * indent + 'probeConfig: null')
+                    break
+
+            with open(destinationValuesPath, 'w') as f:
+                f.write('\n'.join(lines))
+            logging.info("Added probeConfig to values.yaml")
+    except Exception as e:
+        logging.error(f"Error injecting probeConfig into values.yaml: {e}")
+
     logging.info("Chart copied.\n")
 
     # Fix probeConfig template checks
