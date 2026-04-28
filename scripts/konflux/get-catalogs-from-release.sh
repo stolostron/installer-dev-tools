@@ -3,9 +3,13 @@
 RELEASE="$1"
 
 if  [ -z "$RELEASE" ]; then
-	echo "Usage: get-catalogs-from-release.sh <releaseName>"
+	echo "Usage: get-catalogs-from-release.sh <releaseName> ..."
 	exit 1
 fi
 
-oc get release "$RELEASE" -o yaml | yq '.status.artifacts.components' | jq -r '.[] | .ocp_version +": "+ .index_image'
-
+set -o pipefail
+status=0
+for rel in "$@"; do
+   oc get release "$rel" -o yaml | yq '.status.artifacts.components | .[] | .ocp_version +": "+ .index_image' || status=1
+done
+exit "$status"
