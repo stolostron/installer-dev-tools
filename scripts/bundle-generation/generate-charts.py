@@ -901,7 +901,64 @@ def ensure_clustermanagementaddon_namespace(resource_data, resource_name, defaul
             placement_namespace = f"{{{{ default \"{placement_namespace}\" .Values.global.namespace }}}}"
             placement['namespace'] = placement_namespace
             logging.info(f"Namespace for Placement {placement['name']} for {resource_name} set to {placement_namespace}")
-    
+
+
+def ensure_managedproxyconfiguration_spec(resource_data, resource_name, default_namespace):
+    """
+    Ensures that ManagedProxyConfiguration spec fields use Helm templating for
+    images, namespaces, and replicas. Only transforms values that need templating.
+
+    Args:
+        resource_data (dict): The ManagedProxyConfiguration resource data.
+        resource_name (str): The name of the resource.
+        default_namespace (str): The default namespace template.
+
+    Returns:
+        None: Modifies resource_data in place.
+    """
+    if 'spec' not in resource_data:
+        return
+
+    spec = resource_data['spec']
+
+    # Update proxyServer configuration
+    if 'proxyServer' in spec:
+        proxy_server = spec['proxyServer']
+
+        # Transform image reference to use imageOverrides
+        if 'image' in proxy_server:
+            # Extract image name from existing value for mapping
+            image_ref = parse_image_ref(proxy_server['image'])
+            image_key = image_ref.get('repository', 'cluster_proxy')
+            # Use the repository name as the image key (e.g., cluster-proxy -> cluster_proxy)
+            image_key = image_key.replace('-', '_')
+            proxy_server['image'] = f"{{{{ .Values.global.imageOverrides.{image_key} }}}}"
+            logging.info(f"Image for {resource_name} proxyServer set to imageOverrides.{image_key}")
+
+        # Transform namespace to use template variable
+        if 'namespace' in proxy_server:
+            proxy_server['namespace'] = default_namespace
+            logging.info(f"Namespace for {resource_name} proxyServer set to {default_namespace}")
+
+        # Transform replicas to use template variable
+        if 'replicas' in proxy_server:
+            proxy_server['replicas'] = "{{ .Values.hubconfig.replicaCount }}"
+            logging.info(f"Replicas for {resource_name} proxyServer set to Helm template")
+
+    # Update proxyAgent configuration
+    if 'proxyAgent' in spec:
+        proxy_agent = spec['proxyAgent']
+
+        # Transform image reference to use imageOverrides
+        if 'image' in proxy_agent:
+            # Extract image name from existing value for mapping
+            image_ref = parse_image_ref(proxy_agent['image'])
+            image_key = image_ref.get('repository', 'cluster_proxy')
+            # Use the repository name as the image key (e.g., cluster-proxy -> cluster_proxy)
+            image_key = image_key.replace('-', '_')
+            proxy_agent['image'] = f"{{{{ .Values.global.imageOverrides.{image_key} }}}}"
+            logging.info(f"Image for {resource_name} proxyAgent set to imageOverrides.{image_key}")
+
 
 def ensure_webhook_namespace(resource_data, resource_name, default_namespace):
     """
@@ -1027,12 +1084,12 @@ def update_helm_resources(chartName, helmChart, skip_rbac_overrides, exclusions,
 
     resource_kinds = [
         "AddOnTemplate", "Certificate", "ClusterManagementAddOn", "ClusterRole", "ClusterRoleBinding", "ConfigMap", "ConsolePlugin", "Deployment", "Issuer", "Job",
-        "ManagedClusterSetBinding", "MutatingWebhookConfiguration", "NetworkPolicy", "PersistentVolumeClaim", "Placement", "PodDisruptionBudget", "Role", "RoleBinding",
+        "ManagedClusterSetBinding", "ManagedProxyConfiguration", "MutatingWebhookConfiguration", "NetworkPolicy", "PersistentVolumeClaim", "Placement", "PodDisruptionBudget", "Role", "RoleBinding",
         "Route", "Secret", "Service", "StatefulSet", "ValidatingWebhookConfiguration",
     ]
 
     namespace_scoped_kinds = [
-        "Certificate", "ConfigMap", "Deployment", "Issuer", "Job", "ManagedClusterSetBinding", "NetworkPolicy", "PersistentVolumeClaim", "Placement",
+        "Certificate", "ConfigMap", "Deployment", "Issuer", "Job", "ManagedClusterSetBinding", "ManagedProxyConfiguration", "NetworkPolicy", "PersistentVolumeClaim", "Placement",
         "PodDisruptionBudget", "Role", "RoleBinding", "Route", "Secret", "Service", "StatefulSet"
     ]
 
@@ -1115,7 +1172,12 @@ def update_helm_resources(chartName, helmChart, skip_rbac_overrides, exclusions,
                 # defaulting to Helm values if not specified.
                 if kind == 'ClusterManagementAddOn':
                     ensure_clustermanagementaddon_namespace(resource_data, resource_name, default_namespace)
-                
+
+                # Ensure ManagedProxyConfiguration spec uses Helm templating,
+                # for images, namespaces, replicas, entrypoint, and node placement.
+                if kind == 'ManagedProxyConfiguration':
+                    ensure_managedproxyconfiguration_spec(resource_data, resource_name, default_namespace)
+
                 # Ensure the StatefulSet has a storageClassName set,
                 # defaulting to Helm values if not specified.
                 if kind == 'StatefulSet':
@@ -1125,43 +1187,6 @@ def update_helm_resources(chartName, helmChart, skip_rbac_overrides, exclusions,
                 # defaulting to Helm values if not specified.
                 if kind == 'PersistentVolumeClaim':
                     ensure_pvc_storage_class(resource_data, resource_name)
-                
-
-                if chartName == 'flight-control':
-                    if kind == 'Route':
-                        if resource_name == 'flightctl-api-route':
-                            resource_data['spec']['host'] = """api.{{ .Values.global.baseDomain  }}"""
-                        if resource_name == 'flightctl-api-route-agent':
-                            resource_data['spec']['host'] = """agent-api.{{ .Values.global.baseDomain  }}"""
-
-                    if kind == 'ConfigMap':
-                        resource_data['metadata']['namespace'] = '{{ .Values.global.namespace  }}'
-                        config_data = resource_data.get('data')
-                        for key, value in config_data.items():
-                            if key.endswith(".yaml") or key.endswith(".yml"):
-                                value = re.sub(r": ([^'\"\n]*\{\{[^}]+\}\}[^'\"\n]*)$", r": '\1'", value, flags=re.MULTILINE)
-                                key_data = yaml.safe_load(value)
-                                # logging.warning(f"key_data={key_data.get('database').get('hostname')}")
-                                # hostname = key_data.get('database').get('hostname')
-                                key_data = replace_default(key_data, 'PLACEHOLDER_NAMESPACE', '{{ .Values.global.namespace }}')
-                                key_data = replace_default(key_data, 'placeholder_apiurl', '{{ .Values.global.apiUrl }}')
-                                key_data = replace_default(key_data, 'placeholder_basedomain', '{{ .Values.global.baseDomain }}')
-                                updated_yaml = yaml.dump(key_data, default_flow_style=False, allow_unicode=True, width=float("inf"))
-                                updated_yaml = re.sub(r": (?!['\"])(.*\{\{[^}]+\}\}.*?)$", r": '\1'", updated_yaml, flags=re.MULTILINE)
-                                config_data[key] = updated_yaml
-                                resource_data['data'] = config_data
-                        resource_data['data'] = replace_default(resource_data['data'], 'PLACEHOLDER_NAMESPACE', '{{ .Values.global.namespace }}')
-                
-                    if kind == "ClusterRoleBinding":
-                        resource_data = replace_default(resource_data, 'PLACEHOLDER_NAMESPACE', '{{ .Values.global.namespace }}')
-                    if kind == "ClusterRole":
-                        resource_data = replace_default(resource_data, 'PLACEHOLDER_NAMESPACE', '{{ .Values.global.namespace }}')
-
-                    if kind == "NetworkPolicy":
-                        resource_data['metadata']['namespace'] = '{{ .Values.global.namespace }}'
-                        resource_data = replace_default(resource_data, 'PLACEHOLDER_NAMESPACE', '{{ .Values.global.namespace }}')
-                    if kind == "Job":
-                        resource_data = replace_default(resource_data, 'PLACEHOLDER_NAMESPACE', '{{ .Values.global.namespace }}')
 
                 if chartName != "managed-serviceaccount":
                     if kind == "ClusterRoleBinding" or kind == "RoleBinding":
