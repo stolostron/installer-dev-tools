@@ -753,6 +753,11 @@ def updateDeployments(chartName, helmChart, exclusions, inclusions, branch):
         with open(deployment, 'r') as f:
             deploy = yaml.safe_load(f)
         deploy['metadata'].pop('namespace')
+
+        # Transform replicas to use Helm template
+        if 'replicas' in deploy['spec']:
+            deploy['spec']['replicas'] = '{{ .Values.hubconfig.replicaCount }}'
+
         affinityList = deploySpec['affinity']['podAntiAffinity']['preferredDuringSchedulingIgnoredDuringExecution']
         for antiaffinity in affinityList:
             antiaffinity['podAffinityTerm']['labelSelector']['matchExpressions'][0]['values'][0] = deploy['metadata']['name']
