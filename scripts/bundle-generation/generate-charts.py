@@ -742,20 +742,20 @@ def inject_probe_config_helm_templates(deployment_file):
         f.writelines(lines)
 
 # updateDeployments adds standard configuration to the deployments (antiaffinity, security policies, and tolerations)
-def updateDeployments(chartName, helmChart, exclusions, inclusions, branch):
+def updateDeployments(chartName, helmChart, exclusions, inclusions, branch, enable_replica_count=False):
     logging.info("Updating deployments with antiaffinity, security policies, and tolerations ...")
     deploySpecYaml = os.path.join(os.path.dirname(os.path.realpath(__file__)), "chart-templates/templates/deploymentspec.yaml")
     with open(deploySpecYaml, 'r') as f:
         deploySpec = yaml.safe_load(f)
-    
+
     deployments = find_templates_of_type(helmChart, 'Deployment')
     for deployment in deployments:
         with open(deployment, 'r') as f:
             deploy = yaml.safe_load(f)
         deploy['metadata'].pop('namespace')
 
-        # Transform replicas to use Helm template
-        if 'replicas' in deploy['spec']:
+        # Transform replicas to use Helm template if enable-replica-count is true
+        if enable_replica_count and 'replicas' in deploy['spec']:
             deploy['spec']['replicas'] = '{{ .Values.hubconfig.replicaCount }}'
 
         affinityList = deploySpec['affinity']['podAntiAffinity']['preferredDuringSchedulingIgnoredDuringExecution']
@@ -1426,6 +1426,7 @@ def injectRequirements(helm_chart_path, chart, branch):
     inclusions = chart.get("inclusions", [])
     security_context_constraints = chart.get("security-context-constraints", [])
     skip_rbac_overrides = chart.get("skipRBACOverrides", False)
+    enable_replica_count = chart.get("enable-replica-count", False)
 
     fixImageReferences(helm_chart_path, image_mappings)
     fixEnvVarImageReferences(helm_chart_path, image_mappings)
@@ -1441,7 +1442,7 @@ def injectRequirements(helm_chart_path, chart, branch):
     if is_version_compatible(branch, '2.13', '2.8', '2.13'):
         update_helm_resources(chart_name, helm_chart_path, skip_rbac_overrides, exclusions, inclusions, branch)
 
-    updateDeployments(chart_name, helm_chart_path, exclusions, inclusions, branch)
+    updateDeployments(chart_name, helm_chart_path, exclusions, inclusions, branch, enable_replica_count)
 
     logging.info("Updated Chart '%s' successfully", helm_chart_path)
 
