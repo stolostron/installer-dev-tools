@@ -755,7 +755,7 @@ def updateDeployments(chartName, helmChart, exclusions, inclusions, branch, enab
         deploy['metadata'].pop('namespace')
 
         # Transform replicas to use Helm template if enable-replica-count is true
-        if enable_replica_count and 'replicas' in deploy['spec']:
+        if enable_replica_count:
             deploy['spec']['replicas'] = '{{ .Values.hubconfig.replicaCount }}'
 
         affinityList = deploySpec['affinity']['podAntiAffinity']['preferredDuringSchedulingIgnoredDuringExecution']
