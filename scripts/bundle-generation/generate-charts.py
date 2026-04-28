@@ -908,7 +908,7 @@ def ensure_clustermanagementaddon_namespace(resource_data, resource_name, defaul
             logging.info(f"Namespace for Placement {placement['name']} for {resource_name} set to {placement_namespace}")
 
 
-def ensure_managedproxyconfiguration_spec(resource_data, resource_name, default_namespace):
+def ensure_managedproxyconfiguration_spec(resource_data, resource_name, default_namespace, image_mappings):
     """
     Ensures that ManagedProxyConfiguration spec fields use Helm templating for
     images, namespaces, and replicas. Only transforms values that need templating.
@@ -917,6 +917,7 @@ def ensure_managedproxyconfiguration_spec(resource_data, resource_name, default_
         resource_data (dict): The ManagedProxyConfiguration resource data.
         resource_name (str): The name of the resource.
         default_namespace (str): The default namespace template.
+        image_mappings (dict): Image key mappings from charts-config.yaml.
 
     Returns:
         None: Modifies resource_data in place.
@@ -932,11 +933,12 @@ def ensure_managedproxyconfiguration_spec(resource_data, resource_name, default_
 
         # Transform image reference to use imageOverrides
         if 'image' in proxy_server:
-            # Extract image name from existing value for mapping
-            image_ref = parse_image_ref(proxy_server['image'])
-            image_key = image_ref.get('repository', 'cluster_proxy')
-            # Use the repository name as the image key (e.g., cluster-proxy -> cluster_proxy)
-            image_key = image_key.replace('-', '_')
+            image_key = parse_image_ref(proxy_server['image'])["repository"]
+            try:
+                image_key = image_mappings[image_key]
+            except KeyError:
+                logging.critical("No image key mapping provided for imageKey: %s" % image_key)
+                exit(1)
             proxy_server['image'] = f"{{{{ .Values.global.imageOverrides.{image_key} }}}}"
             logging.info(f"Image for {resource_name} proxyServer set to imageOverrides.{image_key}")
 
@@ -956,11 +958,12 @@ def ensure_managedproxyconfiguration_spec(resource_data, resource_name, default_
 
         # Transform image reference to use imageOverrides
         if 'image' in proxy_agent:
-            # Extract image name from existing value for mapping
-            image_ref = parse_image_ref(proxy_agent['image'])
-            image_key = image_ref.get('repository', 'cluster_proxy')
-            # Use the repository name as the image key (e.g., cluster-proxy -> cluster_proxy)
-            image_key = image_key.replace('-', '_')
+            image_key = parse_image_ref(proxy_agent['image'])["repository"]
+            try:
+                image_key = image_mappings[image_key]
+            except KeyError:
+                logging.critical("No image key mapping provided for imageKey: %s" % image_key)
+                exit(1)
             proxy_agent['image'] = f"{{{{ .Values.global.imageOverrides.{image_key} }}}}"
             logging.info(f"Image for {resource_name} proxyAgent set to imageOverrides.{image_key}")
 
@@ -1084,7 +1087,7 @@ def replace_default(data, old, new):
     return data
 
 # updateHelmResources adds standard configuration to the generic kubernetes resources
-def update_helm_resources(chartName, helmChart, skip_rbac_overrides, exclusions, inclusions, branch):
+def update_helm_resources(chartName, helmChart, skip_rbac_overrides, exclusions, inclusions, branch, image_mappings):
     logging.info(f"Updating resources chart: {chartName}")
 
     resource_kinds = [
@@ -1181,7 +1184,7 @@ def update_helm_resources(chartName, helmChart, skip_rbac_overrides, exclusions,
                 # Ensure ManagedProxyConfiguration spec uses Helm templating,
                 # for images, namespaces, replicas, entrypoint, and node placement.
                 if kind == 'ManagedProxyConfiguration':
-                    ensure_managedproxyconfiguration_spec(resource_data, resource_name, default_namespace)
+                    ensure_managedproxyconfiguration_spec(resource_data, resource_name, default_namespace, image_mappings)
 
                 # Ensure the StatefulSet has a storageClassName set,
                 # defaulting to Helm values if not specified.
@@ -1440,7 +1443,7 @@ def injectRequirements(helm_chart_path, chart, branch):
         update_security_contexts(helm_chart_path, security_context_constraints)
     
     if is_version_compatible(branch, '2.13', '2.8', '2.13'):
-        update_helm_resources(chart_name, helm_chart_path, skip_rbac_overrides, exclusions, inclusions, branch)
+        update_helm_resources(chart_name, helm_chart_path, skip_rbac_overrides, exclusions, inclusions, branch, image_mappings)
 
     updateDeployments(chart_name, helm_chart_path, exclusions, inclusions, branch, enable_replica_count)
 
