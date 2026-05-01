@@ -1,0 +1,24 @@
+# Image sync configuration
+# This file defines container images to sync from source to target registries
+
+images:
+  # Example: Sync a specific tagged image
+  - source: quay.io/source-org/example-image
+    target: quay.io/target-org/example-image
+    tag: v1.0.0
+
+  # Example: Sync latest tag
+  - source: quay.io/source-org/another-image
+    target: quay.io/target-org/another-image
+    tag: latest
+
+  # Example: Sync with different tag at destination
+  # - source: quay.io/source-org/app
+  #   target: quay.io/target-org/app
+  #   tag: 2.5.0
+
+# Authentication (configure these as GitHub secrets):
+# - SOURCE_REGISTRY_USER: Username for source registry
+# - SOURCE_REGISTRY_PASSWORD: Password/token for source registry
+# - TARGET_REGISTRY_USER: Username for target registry
+# - TARGET_REGISTRY_PASSWORD: Password/token for target registry
