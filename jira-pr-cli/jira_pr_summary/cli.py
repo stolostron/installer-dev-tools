@@ -150,6 +150,11 @@ class JiraPRSummary:
             print("❌ Error: Jira token not configured. Run setup first.")
             sys.exit(1)
 
+        self.jira_user = self.config_manager.get('jira_user')
+        if not self.jira_user:
+            print("❌ Error: Jira user email not configured. Run setup first.")
+            sys.exit(1)
+
         self.jira_base = self.config_manager.get('jira_base', 'https://issues.redhat.com')
         pattern_str = self.config_manager.get('issue_pattern', r'\b(ACM-\d+)\b')
         self.issue_pattern = re.compile(pattern_str, re.IGNORECASE)
@@ -340,10 +345,12 @@ class JiraPRSummary:
         """Make a request to Jira API"""
         import urllib.request
         import urllib.error
+        import base64
 
         url = f"{self.jira_base}{endpoint}"
+        auth_string = base64.b64encode(f"{self.jira_user}:{self.token}".encode()).decode()
         headers = {
-            "Authorization": f"Bearer {self.token}",
+            "Authorization": f"Basic {auth_string}",
             "Content-Type": "application/json"
         }
 
@@ -784,7 +791,7 @@ class JiraPRSummary:
         if self.verbose:
             print(f"🔍 [DEBUG] Fetching issue status from Jira for {issue_key}...")
 
-        data = self._jira_request(f"/rest/api/2/issue/{issue_key}?fields=status,summary,labels,assignee")
+        data = self._jira_request(f"/rest/api/3/issue/{issue_key}?fields=status,summary,labels,assignee")
         if data and 'fields' in data:
             status = data['fields']['status']['name']
             summary = data['fields'].get('summary')
@@ -808,7 +815,7 @@ class JiraPRSummary:
         if self.verbose:
             print(f"🔍 [DEBUG] Fetching issue labels from Jira for {issue_key}...")
 
-        data = self._jira_request(f"/rest/api/2/issue/{issue_key}?fields=labels,status,summary,assignee")
+        data = self._jira_request(f"/rest/api/3/issue/{issue_key}?fields=labels,status,summary,assignee")
         if data and 'fields' in data:
             labels = data['fields'].get('labels', [])
             status = data['fields']['status']['name']
@@ -832,7 +839,7 @@ class JiraPRSummary:
         if self.verbose:
             print(f"🔍 [DEBUG] Fetching issue summary from Jira for {issue_key}...")
 
-        data = self._jira_request(f"/rest/api/2/issue/{issue_key}?fields=summary,status,labels,assignee")
+        data = self._jira_request(f"/rest/api/3/issue/{issue_key}?fields=summary,status,labels,assignee")
         if data and 'fields' in data:
             summary = data['fields'].get('summary')
             status = data['fields']['status']['name']
@@ -847,7 +854,7 @@ class JiraPRSummary:
 
     def get_available_transitions(self, issue_key: str) -> List[Dict]:
         """Get available status transitions for an issue"""
-        data = self._jira_request(f"/rest/api/2/issue/{issue_key}/transitions")
+        data = self._jira_request(f"/rest/api/3/issue/{issue_key}/transitions")
         if data and 'transitions' in data:
             return data['transitions']
         return []
@@ -855,7 +862,7 @@ class JiraPRSummary:
     def transition_issue(self, issue_key: str, transition_id: str) -> bool:
         """Transition an issue to a new status"""
         data = {"transition": {"id": transition_id}}
-        result = self._jira_request(f"/rest/api/2/issue/{issue_key}/transitions", method="POST", data=data)
+        result = self._jira_request(f"/rest/api/3/issue/{issue_key}/transitions", method="POST", data=data)
 
         # Invalidate cache after successful transition
         if result:
@@ -905,7 +912,7 @@ class JiraPRSummary:
             print(f"   🤖 Generating AI closing summary...")
 
             # Get issue summary/description
-            issue_data = self._jira_request(f"/rest/api/2/issue/{issue_key}")
+            issue_data = self._jira_request(f"/rest/api/3/issue/{issue_key}")
             if not issue_data:
                 return None
 
@@ -1159,14 +1166,12 @@ Closing Summary:"""
         if self.verbose:
             print(f"🔍 [DEBUG] JQL Query: {jql}")
 
-        params = {
+        payload = {
             "jql": jql,
             "maxResults": max_results,
-            "fields": "summary,status,assignee,components"
+            "fields": ["summary", "status", "assignee", "components"]
         }
-        import urllib.parse
-        query_string = urllib.parse.urlencode(params)
-        data = self._jira_request(f"/rest/api/2/search?{query_string}")
+        data = self._jira_request("/rest/api/3/search/jql", method="POST", data=payload)
 
         if data and 'issues' in data:
             if self.verbose:
@@ -2135,7 +2140,7 @@ Test Cases:"""
     def post_comment(self, issue_key: str, comment: str) -> bool:
         """Post a comment to a Jira issue"""
         data = {"body": comment}
-        result = self._jira_request(f"/rest/api/2/issue/{issue_key}/comment", method="POST", data=data)
+        result = self._jira_request(f"/rest/api/3/issue/{issue_key}/comment", method="POST", data=data)
         return bool(result)
 
     def _group_prs_by_issue(self, prs: List[Dict]) -> Dict[str, List[Dict]]:
