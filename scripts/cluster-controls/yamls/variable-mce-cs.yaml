@@ -4,7 +4,7 @@ metadata:
   name: mce-dev-catalog-custom
   namespace: openshift-marketplace
 spec:
-  displayName: MultiCluster Engine
+  displayName: Custom MultiCluster Engine
   publisher: Red Hat
   sourceType: grpc
   image:

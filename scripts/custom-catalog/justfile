@@ -302,7 +302,8 @@ operator-build-and-push IMG BRANCH="main" mode="MCH" operator_repo="" use_https=
 [arg("mode", long="mode")]
 [arg("bundle_repo", long="bundle-repo")]
 [arg("use_https", long="use-https", value="true")]
-bundle-build OPERATOR_IMAGE BUNDLE_IMAGE BRANCH="release-2.16" DISPLAY_NAME="Custom Catalog" mode="MCH" bundle_repo="" use_https="false":
+[arg("additional_images", long="additional-images")]
+bundle-build OPERATOR_IMAGE BUNDLE_IMAGE BRANCH="release-2.16" DISPLAY_NAME="Custom Catalog" mode="MCH" bundle_repo="" use_https="false" additional_images="":
     #!/usr/bin/env bash
 
     # temp dir
@@ -349,6 +350,25 @@ bundle-build OPERATOR_IMAGE BUNDLE_IMAGE BRANCH="release-2.16" DISPLAY_NAME="Cus
     echo "ℹ️  Replacing operator image in CSV with $OPERATOR_IMAGE_WITH_PORT"
     yq -i '.spec.install.spec.deployments[0].spec.template.spec.containers[0].image = "'"$OPERATOR_IMAGE_WITH_PORT"'"' "$CSV_FILE"
 
+    # replace additional component images if specified
+    if [ -n "{{additional_images}}" ]; then
+        IFS=',' read -ra OVERRIDES <<< "{{additional_images}}"
+        for override in "${OVERRIDES[@]}"; do
+            image_key="${override%%=*}"
+            image_value="${override#*=}"
+            image_value_with_port="${image_value//quay.io/quay.io:443}"
+            echo "ℹ️  Replacing $image_key with $image_value_with_port"
+
+            # Replace in relatedImages
+            yq -i "(.spec.relatedImages[] | select(.name == \"$image_key\") | .image) = \"$image_value_with_port\"" "$CSV_FILE"
+
+            # Replace in deployment env vars (OPERAND_IMAGE_* pattern)
+            env_var_name="OPERAND_IMAGE_${image_key^^}"
+            echo "ℹ️  Replacing env var $env_var_name with $image_value_with_port"
+            yq -i "(.spec.install.spec.deployments[].spec.template.spec.containers[].env[] | select(.name == \"$env_var_name\") | .value) = \"$image_value_with_port\"" "$CSV_FILE"
+        done
+    fi
+
     # set display name
     echo "ℹ️  Setting display name to {{DISPLAY_NAME}}"
     yq -i '.spec.displayName = "{{DISPLAY_NAME}}"' "$CSV_FILE"
@@ -374,7 +394,8 @@ bundle-push BUNDLE_IMAGE: _check-quay-login
 [arg("mode", long="mode")]
 [arg("bundle_repo", long="bundle-repo")]
 [arg("use_https", long="use-https", value="true")]
-bundle-build-and-push OPERATOR_IMAGE BUNDLE_IMAGE BRANCH="release-2.16" DISPLAY_NAME="" mode="MCH" bundle_repo="" use_https="false":
+[arg("additional_images", long="additional-images")]
+bundle-build-and-push OPERATOR_IMAGE BUNDLE_IMAGE BRANCH="release-2.16" DISPLAY_NAME="" mode="MCH" bundle_repo="" use_https="false" additional_images="":
     #!/usr/bin/env bash
     # Set default display name based on mode if not provided
     if [ -z "{{DISPLAY_NAME}}" ]; then
@@ -392,7 +413,12 @@ bundle-build-and-push OPERATOR_IMAGE BUNDLE_IMAGE BRANCH="release-2.16" DISPLAY_
         HTTPS_FLAG="--use-https"
     fi
 
-    just bundle-build --operator-image "{{OPERATOR_IMAGE}}" --bundle-image "{{BUNDLE_IMAGE}}" --branch "{{BRANCH}}" --display-name "$DISPLAY_NAME" --mode {{mode}} --bundle-repo "{{bundle_repo}}" $HTTPS_FLAG
+    ADDITIONAL_IMAGES_FLAG=""
+    if [ -n "{{additional_images}}" ]; then
+        ADDITIONAL_IMAGES_FLAG="--additional-images \"{{additional_images}}\""
+    fi
+
+    just bundle-build --operator-image "{{OPERATOR_IMAGE}}" --bundle-image "{{BUNDLE_IMAGE}}" --branch "{{BRANCH}}" --display-name "$DISPLAY_NAME" --mode {{mode}} --bundle-repo "{{bundle_repo}}" $HTTPS_FLAG $ADDITIONAL_IMAGES_FLAG
     just bundle-push --bundle-image "{{BUNDLE_IMAGE}}"
 
 
@@ -500,7 +526,8 @@ catalog-build-and-push BASE_CATALOG_TAG BUNDLE_IMG CATALOG_IMG mode="MCH" catalo
 [arg("bundle_repo", long="bundle-repo")]
 [arg("catalog_base", long="catalog-base")]
 [arg("use_https", long="use-https", value="true")]
-e2e-catalog USERNAME BUNDLE_BRANCH BASE_CATALOG_TAG IMAGE_TAG OPERATOR_BRANCH="main" mode="MCH" operator_repo="" bundle_repo="" catalog_base="" use_https="false":
+[arg("additional_images", long="additional-images")]
+e2e-catalog USERNAME BUNDLE_BRANCH BASE_CATALOG_TAG IMAGE_TAG OPERATOR_BRANCH="main" mode="MCH" operator_repo="" bundle_repo="" catalog_base="" use_https="false" additional_images="":
     #!/usr/bin/env bash
     echo "Mode: {{mode}}"
 
@@ -527,8 +554,13 @@ e2e-catalog USERNAME BUNDLE_BRANCH BASE_CATALOG_TAG IMAGE_TAG OPERATOR_BRANCH="m
         HTTPS_FLAG="--use-https"
     fi
 
+    ADDITIONAL_IMAGES_FLAG=""
+    if [ -n "{{additional_images}}" ]; then
+        ADDITIONAL_IMAGES_FLAG="--additional-images \"{{additional_images}}\""
+    fi
+
     just operator-build-and-push --img "$OPERATOR_IMAGE" --branch "{{OPERATOR_BRANCH}}" --mode {{mode}} --operator-repo "{{operator_repo}}" $HTTPS_FLAG
-    just bundle-build-and-push --operator-image "$OPERATOR_IMAGE" --bundle-image "$BUNDLE_IMAGE" --branch "{{BUNDLE_BRANCH}}" --mode {{mode}} --bundle-repo "{{bundle_repo}}" $HTTPS_FLAG
+    just bundle-build-and-push --operator-image "$OPERATOR_IMAGE" --bundle-image "$BUNDLE_IMAGE" --branch "{{BUNDLE_BRANCH}}" --mode {{mode}} --bundle-repo "{{bundle_repo}}" $HTTPS_FLAG $ADDITIONAL_IMAGES_FLAG
     just catalog-build-and-push --base-catalog-tag "{{BASE_CATALOG_TAG}}" --bundle-img "$BUNDLE_IMAGE" --catalog-img "$CATALOG_IMAGE" --mode {{mode}} --catalog-base "{{catalog_base}}"
 
     # Uncomment to clean up cloned repository after build:
@@ -562,7 +594,8 @@ e2e-catalog USERNAME BUNDLE_BRANCH BASE_CATALOG_TAG IMAGE_TAG OPERATOR_BRANCH="m
 [arg("bundle_repo", long="bundle-repo")]
 [arg("catalog_base", long="catalog-base")]
 [arg("use_https", long="use-https", value="true")]
-dev-branch-e2e USERNAME BUNDLE_BRANCH BASE_CATALOG_TAG IMAGE_TAG OPERATOR_BRANCH="main" COMPONENT_BRANCHES="" COMPONENT_FORKS="" ORG="stolostron" REPO="installer-dev-tools" BRANCH="main" PIPELINE_REPO="pipeline" PIPELINE_BRANCH="2.17-integration" mode="MCH" operator_repo="" bundle_repo="" catalog_base="" use_https="false": (clone-operator OPERATOR_BRANCH mode operator_repo use_https)
+[arg("additional_images", long="additional-images")]
+dev-branch-e2e USERNAME BUNDLE_BRANCH BASE_CATALOG_TAG IMAGE_TAG OPERATOR_BRANCH="main" COMPONENT_BRANCHES="" COMPONENT_FORKS="" ORG="stolostron" REPO="installer-dev-tools" BRANCH="main" PIPELINE_REPO="pipeline" PIPELINE_BRANCH="2.17-integration" mode="MCH" operator_repo="" bundle_repo="" catalog_base="" use_https="false" additional_images="": (clone-operator OPERATOR_BRANCH mode operator_repo use_https)
     #!/usr/bin/env bash
     set -e
 
@@ -642,6 +675,11 @@ dev-branch-e2e USERNAME BUNDLE_BRANCH BASE_CATALOG_TAG IMAGE_TAG OPERATOR_BRANCH
         HTTPS_FLAG="--use-https"
     fi
 
+    ADDITIONAL_IMAGES_FLAG=""
+    if [ -n "{{additional_images}}" ]; then
+        ADDITIONAL_IMAGES_FLAG="--additional-images \"{{additional_images}}\""
+    fi
+
     just operator-build-and-push --img "$OPERATOR_IMAGE" --branch "{{OPERATOR_BRANCH}}" --mode {{mode}} --operator-repo "{{operator_repo}}" $HTTPS_FLAG
 
     echo ""
@@ -650,7 +688,7 @@ dev-branch-e2e USERNAME BUNDLE_BRANCH BASE_CATALOG_TAG IMAGE_TAG OPERATOR_BRANCH
     echo "========================================="
 
     # Build and push the bundle
-    just bundle-build-and-push --operator-image "$OPERATOR_IMAGE" --bundle-image "$BUNDLE_IMAGE" --branch "{{BUNDLE_BRANCH}}" --mode {{mode}} --bundle-repo "{{bundle_repo}}" $HTTPS_FLAG
+    just bundle-build-and-push --operator-image "$OPERATOR_IMAGE" --bundle-image "$BUNDLE_IMAGE" --branch "{{BUNDLE_BRANCH}}" --mode {{mode}} --bundle-repo "{{bundle_repo}}" $HTTPS_FLAG $ADDITIONAL_IMAGES_FLAG
 
     echo ""
     echo "========================================="
