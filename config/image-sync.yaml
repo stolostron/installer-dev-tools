@@ -3,14 +3,14 @@
 
 images:
   # Example: Sync a specific tagged image
-  - source: quay.io/source-org/example-image
-    target: quay.io/target-org/example-image
-    tag: v1.0.0
+  - source: quay.io/edge-infrastructure/cluster-api-provider-bootstrap-openshift-assisted
+    target: quay.io/stolostron/cluster-api-provider-openshift-assisted-bootstrap
+    tag: 2.17.0
 
   # Example: Sync latest tag
-  - source: quay.io/source-org/another-image
-    target: quay.io/target-org/another-image
-    tag: latest
+  - source: quay.io/edge-infrastructure/cluster-api-provider-controlplane-openshift-assisted
+    target: quay.io/stolostron/cluster-api-provider-openshift-assisted-control-plane
+    tag: 2.17.0
 
   # Example: Sync with different tag at destination
   # - source: quay.io/source-org/app
