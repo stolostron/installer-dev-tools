@@ -100,12 +100,12 @@ fi
 log "${CYAN}🔍 Fetching bundle ${BOLD}${BUNDLE_TAG}${RESET}"
 BUNDLE_IMAGE="registry.redhat.io/multicluster-engine/mce-operator-bundle:${BUNDLE_TAG}"
 
-podman create --replace --name temp-bundle "${BUNDLE_IMAGE}" >/dev/null 2>&1 || {
+podman create --replace --name temp-bundle "${BUNDLE_IMAGE}" >/dev/null || {
     log "${RED}❌ Failed to pull bundle ${BUNDLE_TAG}${RESET}"
     exit 1
 }
 
-podman cp temp-bundle:/manifests "${TMP_DIR}/" 2>/dev/null
+podman cp temp-bundle:/manifests "${TMP_DIR}/"
 podman rm temp-bundle >/dev/null
 log "${GREEN}✓ Bundle extracted${RESET}"
 
@@ -119,7 +119,7 @@ if [[ ! -f "$csv_file" ]]; then
 fi
 
 # Extract the hive image from the CSV
-image=$("$YQ" '.spec.relatedImages[] | select(.name == "openshift_hive") | .image' "$csv_file" 2>/dev/null)
+image=$("$YQ" '.spec.relatedImages[] | select(.name == "openshift_hive") | .image' "$csv_file")
 
 if [[ -z "$image" ]]; then
     log "${RED}❌ No hive image found in bundle${RESET}"
@@ -130,7 +130,7 @@ log "${GREEN}✓ Found hive image${RESET}"
 log "\n${BOLD}${MAGENTA}📦 Hive Image VCS Reference${RESET}\n"
 
 # Get the vcs-ref from the image, with fallback to quay.io
-vcs_ref=$(skopeo inspect --no-tags --format '{{json .Labels}}' "docker://$image" 2>/dev/null | jq -r '."vcs-ref"' || {
+vcs_ref=$(skopeo inspect --no-tags --format '{{json .Labels}}' "docker://$image" | jq -r '."vcs-ref"' || {
     # If it fails, try quay.io/acm-d instead (replace everything before the image name)
     fallback_image=$(echo "$image" | sed 's|.*/\([^/]*\)$|quay.io/acm-d/\1|')
     log "${YELLOW}⚠️  Falling back to ${CYAN}$fallback_image${RESET}"
