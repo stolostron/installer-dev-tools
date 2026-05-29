@@ -118,6 +118,14 @@ if [[ ! -f "$csv_file" ]]; then
     exit 1
 fi
 
+# Extract the MCE version from the CSV
+mce_version=$("$YQ" -r '.spec.version // ""' "$csv_file" 2>/dev/null)
+
+if [[ -z "$mce_version" ]]; then
+    log "${YELLOW}⚠️  Could not determine MCE version from CSV${RESET}"
+    mce_version="unknown"
+fi
+
 # Extract the hive image from the CSV
 image=$("$YQ" '.spec.relatedImages[] | select(.name == "openshift_hive") | .image' "$csv_file")
 
@@ -141,11 +149,13 @@ vcs_ref=$(skopeo inspect --no-tags --format '{{json .Labels}}' "docker://$image"
 if [[ "$YAML_ONLY" == "true" ]]; then
     # Proper YAML format
     echo "bundle: $BUNDLE_TAG"
+    echo "mce_version: $mce_version"
     echo "image: $image"
     echo "sha: $vcs_ref"
 else
     # Colorful free-form output
     echo -e "${GREEN}bundle: ${BOLD}$BUNDLE_TAG${RESET}"
+    echo -e "${YELLOW}mce_version: ${BOLD}$mce_version${RESET}"
     echo -e "${CYAN}image: ${RESET}$image"
     echo -e "${MAGENTA}sha: ${RESET}$vcs_ref"
 fi
