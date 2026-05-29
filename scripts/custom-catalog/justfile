@@ -356,7 +356,7 @@ bundle-build OPERATOR_IMAGE BUNDLE_IMAGE BRANCH="release-2.16" DISPLAY_NAME="Cus
         for override in "${OVERRIDES[@]}"; do
             image_key="${override%%=*}"
             image_value="${override#*=}"
-            image_value_with_port="${image_value//quay.io/quay.io:443}"
+            image_value_with_port="${image_value/quay.io\//quay.io:443/}"
             echo "ℹ️  Replacing $image_key with $image_value_with_port"
 
             # Replace in relatedImages
