@@ -119,7 +119,7 @@ if [[ ! -f "$csv_file" ]]; then
 fi
 
 # Extract the MCE version from the CSV
-mce_version=$("$YQ" '.spec.version' "$csv_file" 2>/dev/null)
+mce_version=$("$YQ" -r '.spec.version // ""' "$csv_file" 2>/dev/null)
 
 if [[ -z "$mce_version" ]]; then
     log "${YELLOW}⚠️  Could not determine MCE version from CSV${RESET}"
