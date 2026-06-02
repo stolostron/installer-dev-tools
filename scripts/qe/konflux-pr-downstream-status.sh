@@ -235,18 +235,54 @@ function get_revision_for_pr_with_tag {
   local image_name=$(echo "$prodsec" | awk -F'/' '{print $NF}')
   debug_echo "Image Name: $image_name"
 
-  local published_image=$(cat cache/$tag.cs.yaml | yq "select(.schema == \"olm.bundle\" and .name == \"$csv\") | .relatedImages[] | select(.image==\"*$image_name*\") | .image")
+  local published_image
+  if ! published_image=$(
+    set -o pipefail
+    cat cache/$tag.cs.yaml | yq "select(.schema == \"olm.bundle\" and .name == \"$csv\") | .relatedImages[] | select(.image==\"*$image_name*\") | .image"
+  ); then
+    echo "⚠️  Error: Failed to resolve published image for '$image_name' in CSV '$csv'." >&2
+    echo "PUBLISHED_IMAGE_ERROR"
+    return 1
+  fi
   debug_echo "Published Image: $published_image"
+
+  if [ -z "$published_image" ] || [ "$published_image" = "null" ]; then
+    echo "⚠️  Error: No published image found matching '$image_name' in CSV '$csv'." >&2
+    echo "PUBLISHED_IMAGE_ERROR"
+    return 1
+  fi
 
   # Transform registry.redhat.io/xxxx/image to quay.io/acm-d/image
   local quay_image=$(echo "$published_image" | sed 's|registry\.redhat\.io/[^/]*/|quay.io/acm-d/|')
   debug_echo "Quay Image: $quay_image"
 
   # Get revision from image labels using skopeo
-  local revision_by_sha=$(skopeo inspect --no-tags --format '{{json .Labels}}' "docker://$quay_image" | jq -r '."vcs-ref"')
+  local revision_by_sha
+  if ! revision_by_sha=$(
+    set -o pipefail
+    skopeo inspect --no-tags --format '{{json .Labels}}' "docker://$quay_image" | jq -r '."vcs-ref"'
+  ); then
+    echo "⚠️  Error: Failed to inspect image '$quay_image' via skopeo." >&2
+    echo "SKOPEO_ERROR"
+    return 1
+  fi
   debug_echo "Revision by SHA: $revision_by_sha"
 
-  local revision_by_repo=$(gh api "repos/stolostron/$application_part-operator-bundle/contents/latest-snapshot.yaml?ref=$snapshot_branch" --jq '.content' | base64 -d | yq ".spec.components[] | select(.source.git.url == \"$repo\") | .source.git.revision")
+  if [ -z "$revision_by_sha" ] || [ "$revision_by_sha" = "null" ]; then
+    echo "⚠️  Error: No vcs-ref label found in image '$quay_image'." >&2
+    echo "SKOPEO_ERROR"
+    return 1
+  fi
+
+  local revision_by_repo
+  if ! revision_by_repo=$(
+    set -o pipefail
+    gh api "repos/stolostron/$application_part-operator-bundle/contents/latest-snapshot.yaml?ref=$snapshot_branch" --jq '.content' | base64 -d | yq ".spec.components[] | select(.source.git.url == \"$repo\") | .source.git.revision"
+  ); then
+    echo "⚠️  Error: Failed to resolve revision from bundle repo for '$repo'." >&2
+    echo "REVISION_ERROR"
+    return 1
+  fi
   debug_echo "Revision by Repo: $revision_by_repo"
 
   # Compare revisions
@@ -310,8 +346,33 @@ function print_pr_testability {
 	# echo "comparing $org/$repo/pull/$number"
   debug_echo "Published Sha: $published_sha"
   debug_echo "PR Sha: $pr_sha"
+
+  # Validate SHAs before calling compare API
+  if [ -z "$pr_sha" ] || [ "$pr_sha" = "null" ]; then
+    echo "🟨 Could not resolve merge commit SHA for PR $org/$repo#$number"
+    return
+  fi
+  if [ -z "$published_sha" ] || [ "$published_sha" = "null" ]; then
+    echo "🟨 No published SHA available for $org/$repo — cannot compare"
+    return
+  fi
+
     # echo "$compared_shas_url"
-	local status=$(gh api "repos/$org/$repo/compare/$pr_sha...$published_sha" --jq '.status' 2>/dev/null || echo "404")
+  local compare_output
+  local compare_rc=0
+  compare_output=$(gh api "repos/$org/$repo/compare/$pr_sha...$published_sha" --jq '.status' 2>&1) || compare_rc=$?
+
+  local status
+  if [ $compare_rc -ne 0 ]; then
+    if echo "$compare_output" | grep -qi "not found\|404"; then
+      status="404"
+    else
+      echo "⚠️  GitHub API error comparing $pr_sha...$published_sha: $compare_output" >&2
+      status="API_ERROR"
+    fi
+  else
+    status="$compare_output"
+  fi
 
 	# echo $status
 
@@ -319,15 +380,15 @@ function print_pr_testability {
 	# identical
 	# ahead
 	# we only actually care if it's behind or not
-  pr_sha=${pr_sha:-"[PR_SHA_NOT_FOUND]"}
-  published_sha=${published_sha:-"[PUBLISHED_SHA_NOT_FOUND]"}
 	if [ "$status" == "404" ]; then
 		echo "🟨 404: no revision path from $pr_sha to $published_sha"
-	elif [ $status == "ahead" ] || [ $status == "identical" ]; then
+	elif [ "$status" == "API_ERROR" ]; then
+		echo "🟥 API error while comparing $pr_sha to $published_sha (see stderr for details)"
+	elif [ "$status" == "ahead" ] || [ "$status" == "identical" ]; then
 		echo "🟩 $org/$repo pull $number is in the downstream build"
-	elif [ $status == "behind" ]; then
+	elif [ "$status" == "behind" ]; then
 		echo "🟥 $org/$repo pull $number is not in the downstream build"
-	elif [ $status == "diverged" ]; then
+	elif [ "$status" == "diverged" ]; then
 		echo "🟪 $org/$repo pull $number has diverged from the downstream build"
 	else
 		echo "Unknown repo status: $status"
@@ -346,7 +407,7 @@ for pr_url in "${pr_urls[@]}"; do
   else
     revision=$(get_revision_for_pr_with_snapshot "$snapshot" "$pr_url")
   fi
-  if [ "$revision" = "CSV_ERROR" ] || [ "$revision" = "COMPONENT_NAME_ERROR" ]; then
+  if [ "$revision" = "CSV_ERROR" ] || [ "$revision" = "COMPONENT_NAME_ERROR" ] || [ "$revision" = "PUBLISHED_IMAGE_ERROR" ] || [ "$revision" = "SKOPEO_ERROR" ] || [ "$revision" = "REVISION_ERROR" ]; then
     exit 1
   fi
   debug_echo "Discovered Revision: $revision"
