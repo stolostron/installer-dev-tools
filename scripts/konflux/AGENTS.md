@@ -159,7 +159,7 @@ List CVEs fixed in a specific ACM/MCE version by querying JIRA.
 
 Python-based vulnerability analysis tooling. See `README-vulnerability-scanner.md` for details.
 
-### Monitoring
+## Monitoring
 
 ### `konflux-build-monitor-v2.py` / `konflux-build-monitor-v3.py`
 
