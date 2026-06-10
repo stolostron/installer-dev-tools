@@ -18,6 +18,7 @@ import shutil
 import logging
 import re
 import sys
+import tempfile
 import coloredlogs
 import yaml
 
@@ -133,6 +134,15 @@ def parse_image_ref(image_ref):
     parsed_ref["repository_and_suffix"]  = repo_and_suffix
 
     return parsed_ref
+
+def lookup_image_key(repository, image_key_mapping):
+    return image_key_mapping.get(repository)
+
+def format_image_mapping_error(operator_name, file_path, field, repository):
+    return (
+        f"[{operator_name}] No image key mapping for repository '{repository}' "
+        f"in {field} ({file_path})"
+    )
 
 # Copy chart-templates to a new helmchart directory
 def templateHelmChart(outputDir, helmChart, preservedFiles=None, overwrite=False):
@@ -792,20 +802,22 @@ def find_templates_of_type(helmChart, kind, branch):
 
 # For each deployment, identify the image references if any exist in the environment variable fields, insert helm flow control code to reference it, and add image-key to the values.yaml file.
 # If the image-key referenced in the deployment does not exist in `imageMappings` in the Config.yaml, this will fail. Images must be explicitly defined
-def fixEnvVarImageReferences(helmChart, imageKeyMapping, branch):
+def fixEnvVarImageReferences(helmChart, imageKeyMapping, branch, operator_name, apply=True):
     """_summary_
 
     Args:
         helmChart (_type_): _description_
         imageKeyMapping (_type_): _description_
         branch (_type_): _description_
+        operator_name (_type_): _description_
+        apply (bool): When False, validate mappings only without writing files.
     """
     logging.info("Fixing image references in container 'env' section in deployments and values.yaml ...")
     valuesYaml = os.path.join(helmChart, "values.yaml")
-    with open(valuesYaml, 'r', encoding='utf-8') as f:
-        values = yaml.safe_load(f)
     deployments = find_templates_of_type(helmChart, 'Deployment', branch)
 
+    errors = []
+    pending_updates = []
     imageKeys = []
     for deployment in deployments:
         with open(deployment, 'r', encoding='utf-8') as f:
@@ -817,64 +829,96 @@ def fixEnvVarImageReferences(helmChart, imageKeyMapping, branch):
                 continue
 
             for env in container['env']:
-                image_key = env['name']
-                if image_key.endswith('_IMAGE') == False:
+                env_var_name = env['name']
+                if not env_var_name.endswith('_IMAGE'):
                     continue
-                image_key = parse_image_ref(env['value'])['repository']
-                try:
-                    image_key = imageKeyMapping[image_key]
-                except KeyError:
-                    logging.critical("No image key mapping provided for imageKey: %s", image_key)
-                    sys.exit(1)
+                repository = parse_image_ref(env['value'])['repository']
+                image_key = lookup_image_key(repository, imageKeyMapping)
+                if image_key is None:
+                    errors.append(format_image_mapping_error(
+                        operator_name,
+                        os.path.relpath(deployment, helmChart),
+                        f"env.{env_var_name}",
+                        repository,
+                    ))
+                    logging.error(errors[-1])
+                    continue
                 imageKeys.append(image_key)
-                env['value'] = "{{ .Values.global.imageOverrides." + image_key + " }}"
+                if apply:
+                    env['value'] = "{{ .Values.global.imageOverrides." + image_key + " }}"
+
+        if apply:
+            pending_updates.append((deployment, deploy))
+
+    if errors or not apply:
+        return errors
+
+    for deployment, deploy in pending_updates:
         with open(deployment, 'w', encoding='utf-8') as f:
             yaml.dump(deploy, f)
 
+    with open(valuesYaml, 'r', encoding='utf-8') as f:
+        values = yaml.safe_load(f)
     for imageKey in imageKeys:
         values['global']['imageOverrides'][imageKey] = ""
     with open(valuesYaml, 'w', encoding='utf-8') as f:
         yaml.dump(values, f)
     logging.info("Image container env references in deployments and values.yaml updated successfully.\n")
+    return errors
 
 # For each deployment, identify the image references if any exist in the image field, insert helm flow control code to reference it, and add image-key to the values.yaml file.
 # If the image-key referenced in the deployment does not exist in `imageMappings` in the Config.yaml, this will fail. Images must be explicitly defined
-def fixImageReferences(helmChart, imageKeyMapping, branch):
+def fixImageReferences(helmChart, imageKeyMapping, branch, operator_name, apply=True):
     """_summary_
 
     Args:
         helmChart (_type_): _description_
         imageKeyMapping (_type_): _description_
         branch (_type_): _description_
+        operator_name (_type_): _description_
+        apply (bool): When False, validate mappings only without writing files.
     """
     logging.info("Fixing image and pull policy references in deployments and values.yaml ...")
     valuesYaml = os.path.join(helmChart, "values.yaml")
-    with open(valuesYaml, 'r', encoding='utf-8') as f:
-        values = yaml.safe_load(f)
-
     deployments = find_templates_of_type(helmChart, 'Deployment', branch)
+    errors = []
+    pending_updates = []
     imageKeys = []
-    temp = "" ## temporarily read image ref
     for deployment in deployments:
         with open(deployment, 'r', encoding='utf-8') as f:
             deploy = yaml.safe_load(f)
 
         containers = deploy['spec']['template']['spec']['containers']
         for container in containers:
-            image_key = parse_image_ref(container['image'])["repository"]
-            try:
-                image_key = imageKeyMapping[image_key]
-            except KeyError:
-                logging.critical("No image key mapping provided for imageKey: %s", image_key)
-                sys.exit(1)
+            repository = parse_image_ref(container['image'])["repository"]
+            container_name = container.get('name', 'unknown')
+            image_key = lookup_image_key(repository, imageKeyMapping)
+            if image_key is None:
+                errors.append(format_image_mapping_error(
+                    operator_name,
+                    os.path.relpath(deployment, helmChart),
+                    f"container[{container_name}].image",
+                    repository,
+                ))
+                logging.error(errors[-1])
+                continue
             imageKeys.append(image_key)
-            # temp = container['image']
-            container['image'] = "{{ .Values.global.imageOverrides." + image_key + " }}"
-            container['imagePullPolicy'] = "{{ .Values.global.pullPolicy }}"
+            if apply:
+                container['image'] = "{{ .Values.global.imageOverrides." + image_key + " }}"
+                container['imagePullPolicy'] = "{{ .Values.global.pullPolicy }}"
+
+        if apply:
+            pending_updates.append((deployment, deploy))
+
+    if errors or not apply:
+        return errors
+
+    for deployment, deploy in pending_updates:
         with open(deployment, 'w', encoding='utf-8') as f:
             yaml.dump(deploy, f)
 
-    # Remove the placeholder/dummy image overrides we might get from our values template
+    with open(valuesYaml, 'r', encoding='utf-8') as f:
+        values = yaml.safe_load(f)
     try:
         del values['global']['imageOverrides']['imageOverride']
     except KeyError:
@@ -884,6 +928,7 @@ def fixImageReferences(helmChart, imageKeyMapping, branch):
     with open(valuesYaml, 'w', encoding='utf-8') as f:
         yaml.dump(values, f)
     logging.info("Image references and pull policy in deployments and values.yaml updated successfully.\n")
+    return errors
 
 # insert Heml flow control if/end block around a first and last line without changing
 # the indexes of the lines list (so as to not mess up iteration across the lines).
@@ -1355,18 +1400,30 @@ def injectRequirements(helm_chart_path, operator, sizes, branch):
     """
     logging.info("Updating Helm chart '%s' with onboarding requirements ...", helm_chart_path)
     image_key_mapping = operator.get("imageMappings", {})
-    operator_name = operator.get("name")
+    operator_name = operator.get("name") or os.path.basename(helm_chart_path)
     exclusions = operator.get("exclusions")
     inclusions = operator.get("inclusions")
     security_context_constraints = operator.get("security-context-constraints", [])
     skip_rbac_overrides = operator.get("skipRBACOverrides", True)
     preserved_files = operator.get("preserve_files", [])
 
-    # Fixes image references in the Helm chart.
-    fixImageReferences(helm_chart_path, image_key_mapping, branch)
-    fixEnvVarImageReferences(helm_chart_path, image_key_mapping, branch)
+    errors = []
 
-    fixImageReferencesForAddonTemplate(helm_chart_path, image_key_mapping, branch)
+    # Validate image mappings before making any chart updates.
+    errors.extend(fixImageReferences(helm_chart_path, image_key_mapping, branch, operator_name, apply=False))
+    errors.extend(fixEnvVarImageReferences(helm_chart_path, image_key_mapping, branch, operator_name, apply=False))
+    errors.extend(fixImageReferencesForAddonTemplate(helm_chart_path, image_key_mapping, branch, operator_name, apply=False))
+    if errors:
+        logging.warning(
+            "Skipping chart updates for '%s' due to %d image mapping error(s)",
+            helm_chart_path,
+            len(errors),
+        )
+        return errors
+
+    fixImageReferences(helm_chart_path, image_key_mapping, branch, operator_name, apply=True)
+    fixEnvVarImageReferences(helm_chart_path, image_key_mapping, branch, operator_name, apply=True)
+    fixImageReferencesForAddonTemplate(helm_chart_path, image_key_mapping, branch, operator_name, apply=True)
     injectAnnotationsForAddonTemplate(helm_chart_path, branch)
 
     if is_version_compatible(branch, '2.10', '2.5', '2.10'):
@@ -1380,6 +1437,7 @@ def injectRequirements(helm_chart_path, operator, sizes, branch):
     updateDeployments(helm_chart_path, operator, exclusions, sizes, branch)
 
     logging.info("Updated Chart '%s' successfully\n", helm_chart_path)
+    return []
 
 def addCRDs(repo, operator, outputDir, branch, preservedFiles=None, overwrite=False):
     """
@@ -1596,18 +1654,22 @@ def injectAnnotationsForAddonTemplate(helmChart, branch):
 # in the image field, insert helm flow control code to reference it, and add image-key to the values.yaml file.
 # If the image-key referenced in the addon template deployment does not exist in `imageMappings` in the Config.yaml,
 # this will fail. Images must be explicitly defined
-def fixImageReferencesForAddonTemplate(helmChart, imageKeyMapping, branch):
+def fixImageReferencesForAddonTemplate(helmChart, imageKeyMapping, branch, operator_name, apply=True):
     """_summary_
 
     Args:
         helmChart (_type_): _description_
         imageKeyMapping (_type_): _description_
         branch (_type_): _description_
+        operator_name (_type_): _description_
+        apply (bool): When False, validate mappings only without writing files.
     """
     logging.info("Fixing image references in addon templates and values.yaml ...")
 
     addonTemplates = find_templates_of_type(helmChart, 'AddOnTemplate', branch)
+    errors = []
     all_imageKeys = []
+    pending_updates = []
 
     for addonTemplate in addonTemplates:
         with open(addonTemplate, 'r', encoding='utf-8') as f:
@@ -1633,24 +1695,41 @@ def fixImageReferencesForAddonTemplate(helmChart, imageKeyMapping, branch):
 
             for manifest in manifests:
                 if manifest['kind'] in ['Deployment', 'Job']:
+                    manifest_kind = manifest['kind']
+                    manifest_name = manifest.get('metadata', {}).get('name', 'unknown')
                     containers = manifest['spec']['template']['spec']['containers']
                     for container in containers:
-                        image_key = parse_image_ref(container['image'])["repository"]
-                        try:
-                            image_key = imageKeyMapping[image_key]
-                        except KeyError:
-                            logging.critical("No image key mapping provided for imageKey: %s", image_key)
-                            sys.exit(1)
+                        repository = parse_image_ref(container['image'])["repository"]
+                        container_name = container.get('name', 'unknown')
+                        image_key = lookup_image_key(repository, imageKeyMapping)
+                        if image_key is None:
+                            errors.append(format_image_mapping_error(
+                                operator_name,
+                                os.path.relpath(addonTemplate, helmChart),
+                                f"{manifest_kind}[{manifest_name}].container[{container_name}].image",
+                                repository,
+                            ))
+                            logging.error(errors[-1])
+                            continue
                         all_imageKeys.append(image_key)
-                        container['image'] = "{{ .Values.global.imageOverrides." + image_key + " }}"
-                        # container['imagePullPolicy'] = "{{ .Values.global.pullPolicy }}"
+                        if apply:
+                            container['image'] = "{{ .Values.global.imageOverrides." + image_key + " }}"
+                            # container['imagePullPolicy'] = "{{ .Values.global.pullPolicy }}"
 
+        if apply:
+            pending_updates.append((addonTemplate, docs))
+
+    if errors or not apply:
+        return errors
+
+    if not all_imageKeys:
+        return errors
+
+    for addonTemplate, docs in pending_updates:
         with open(addonTemplate, 'w', encoding='utf-8') as f:
             yaml.dump_all(docs, f, width=float("inf"))
-            logging.info("AddOnTemplate updated with image override successfully. \n")
+        logging.info("AddOnTemplate updated with image override successfully. \n")
 
-    if len(all_imageKeys) == 0:
-        return
     valuesYaml = os.path.join(helmChart, "values.yaml")
     with open(valuesYaml, 'r', encoding='utf-8') as f:
         values = yaml.safe_load(f)
@@ -1661,6 +1740,55 @@ def fixImageReferencesForAddonTemplate(helmChart, imageKeyMapping, branch):
     with open(valuesYaml, 'w', encoding='utf-8') as f:
         yaml.dump(values, f, width=float("inf"))
     logging.info("Image references and pull policy in addon templates and values.yaml updated successfully.\n")
+    return errors
+
+def backup_operator_output(output_dir, operator_name):
+    """Save existing destination files for an operator before updating."""
+    backup_root = tempfile.mkdtemp(prefix="operator-backup-")
+    backup = {"backup_root": backup_root, "chart_existed": False, "crds_existed": False}
+
+    chart_path = os.path.join(output_dir, "charts", "toggle", operator_name)
+    if os.path.exists(chart_path):
+        chart_backup = os.path.join(backup_root, "chart")
+        shutil.copytree(chart_path, chart_backup)
+        backup["chart"] = chart_backup
+        backup["chart_existed"] = True
+
+    crds_path = os.path.join(output_dir, "crds", operator_name)
+    if os.path.exists(crds_path):
+        crds_backup = os.path.join(backup_root, "crds")
+        shutil.copytree(crds_path, crds_backup)
+        backup["crds"] = crds_backup
+        backup["crds_existed"] = True
+
+    return backup
+
+def restore_operator_output(output_dir, operator_name, backup):
+    """Restore destination files saved before this run."""
+    chart_path = os.path.join(output_dir, "charts", "toggle", operator_name)
+    if backup["chart_existed"]:
+        if os.path.exists(chart_path):
+            shutil.rmtree(chart_path)
+        shutil.copytree(backup["chart"], chart_path)
+    elif os.path.exists(chart_path):
+        shutil.rmtree(chart_path)
+
+    crds_path = os.path.join(output_dir, "crds", operator_name)
+    if backup["crds_existed"]:
+        if os.path.exists(crds_path):
+            shutil.rmtree(crds_path)
+        shutil.copytree(backup["crds"], crds_path)
+    elif os.path.exists(crds_path):
+        shutil.rmtree(crds_path)
+
+    logging.warning(
+        "Restored destination output for operator '%s' to its original state due to errors.",
+        operator_name,
+    )
+
+def cleanup_operator_backup(backup):
+    """Remove the temporary backup directory."""
+    shutil.rmtree(backup["backup_root"], ignore_errors=True)
 
 def main():
     """_summary_
@@ -1752,6 +1880,8 @@ def main():
     # Optionally filter by a specific component
     if component:
         components = [repo for repo in components if repo.get("repo_name") == component]
+
+    errors = []
 
     # Loop through each repo in the config.yaml
     for repo in components:
@@ -1917,55 +2047,76 @@ def main():
             if preservedFiles:
                 logging.info("Preserving files for operator '%s': %s", operator["name"], str(preservedFiles))
 
-            # Copy over all CRDs to the destination directory from the manifest folder
-            addCRDs(repo["repo_name"], operator, destination, branch, preservedFiles)
+            operator_backup = backup_operator_output(destination, operator["name"])
+            try:
+                # Copy over all CRDs to the destination directory from the manifest folder
+                addCRDs(repo["repo_name"], operator, destination, branch, preservedFiles)
 
-            # If name is empty, fail
-            helmChart = operator["name"]
-            if helmChart == "":
-                logging.critical("Unable to generate helm chart without a name.")
-                sys.exit(1)
+                # If name is empty, fail
+                helmChart = operator["name"]
+                if helmChart == "":
+                    logging.critical("Unable to generate helm chart without a name.")
+                    sys.exit(1)
 
-            logging.info("Creating helm chart: '%s' ...", operator["name"])
-            # Template Helm Chart Directory from 'chart-templates'
-            logging.info("Templating helm chart '%s' ...", operator["name"])
+                logging.info("Creating helm chart: '%s' ...", operator["name"])
+                # Template Helm Chart Directory from 'chart-templates'
+                logging.info("Templating helm chart '%s' ...", operator["name"])
 
-            # Creates a helm chart template
-            templateHelmChart(destination, operator["name"], preservedFiles)
-            logging.info("Helm chart template created successfully.\n")
+                # Creates a helm chart template
+                templateHelmChart(destination, operator["name"], preservedFiles)
+                logging.info("Helm chart template created successfully.\n")
 
-            # Generate the Chart.yaml file based off of the CSV
-            helmChart = os.path.join(destination, "charts", "toggle", operator["name"])
-            logging.info("Filling Chart.yaml for helm chart '%s' ...", operator["name"])
-            fillChartYaml(helmChart, operator["name"], csvPath)
-            logging.info("Chart.yaml filled successfully.\n")
+                # Generate the Chart.yaml file based off of the CSV
+                helmChart = os.path.join(destination, "charts", "toggle", operator["name"])
+                logging.info("Filling Chart.yaml for helm chart '%s' ...", operator["name"])
+                fillChartYaml(helmChart, operator["name"], csvPath)
+                logging.info("Chart.yaml filled successfully.\n")
 
-            # Add all basic resources to the helm chart from the CSV
-            logging.info("Adding Resources from CSV to helm chart '%s' ...", operator["name"])
-            extract_csv_resources(helmChart, csvPath)
-            copy_additional_resources(helmChart, csvPath, branch)
+                # Add all basic resources to the helm chart from the CSV
+                logging.info("Adding Resources from CSV to helm chart '%s' ...", operator["name"])
+                extract_csv_resources(helmChart, csvPath)
+                copy_additional_resources(helmChart, csvPath, branch)
 
-            # In ACM 2.12+ we need to handle webhooks for components, so it's necessary to verify if any webhook paths
-            # are available and include manifest files for processing.
-            webhook_paths = operator.get("webhook_paths", [])
-            if webhook_paths is not None:
-                for path in webhook_paths:
-                    copy_webhook_configuration_manifests(helmChart, os.path.join(SCRIPT_DIR, "tmp", repo_name, path))
+                # In ACM 2.12+ we need to handle webhooks for components, so it's necessary to verify if any webhook paths
+                # are available and include manifest files for processing.
+                webhook_paths = operator.get("webhook_paths", [])
+                if webhook_paths is not None:
+                    for path in webhook_paths:
+                        copy_webhook_configuration_manifests(helmChart, os.path.join(SCRIPT_DIR, "tmp", repo_name, path))
 
-            escape_template_variables(helmChart, escaped_variables, branch)
-            logging.info("Resources added from CSV successfully.\n")
+                escape_template_variables(helmChart, escaped_variables, branch)
+                logging.info("Resources added from CSV successfully.\n")
 
-            if not skipOverrides:
-                logging.info("Adding Overrides to helm chart '%s' (set --skipOverrides=true to skip) ...", operator["name"])
-                exclusions = operator["exclusions"] if "exclusions" in operator else []
-                injectRequirements(helmChart, operator, sizes, branch)
-                logging.info("Overrides added to helm chart '%s' successfully.", operator["name"])
+                if not skipOverrides:
+                    logging.info("Adding Overrides to helm chart '%s' (set --skipOverrides=true to skip) ...", operator["name"])
+                    chart_errors = injectRequirements(helmChart, operator, sizes, branch)
+                    errors.extend(chart_errors)
+                    if chart_errors:
+                        restore_operator_output(destination, operator["name"], operator_backup)
+                        logging.warning(
+                            "Overrides failed with %d image mapping error(s) for helm chart '%s'.",
+                            len(chart_errors),
+                            operator["name"],
+                        )
+                    else:
+                        logging.info("Overrides added to helm chart '%s' successfully.", operator["name"])
+            finally:
+                cleanup_operator_backup(operator_backup)
 
-    logging.info("All repositories and operators processed successfully.")
+    logging.info("All repositories and operators completed processing.")
+
     logging.info("Performing cleanup...")
     shutil.rmtree((os.path.join(os.path.dirname(os.path.realpath(__file__)), "tmp")), ignore_errors=True)
-
     logging.info("Cleanup completed.")
+
+    if errors:
+        logging.critical("Errors encountered during chart generation:")
+        for err in errors:
+            logging.error(err)
+        sys.exit(1)
+    else:
+        logging.info("All repositories and operators processed successfully.")
+
     logging.info("Script execution completed.")
 
 if __name__ == "__main__":
