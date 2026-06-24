@@ -461,35 +461,36 @@ catalog-build BASE_CATALOG_TAG BUNDLE_IMG CATALOG_IMG mode="MCH" catalog_base=""
     podman cp temp-catalog:/configs/$CATALOG_DIR $TMPDIR
     podman rm temp-catalog
 
-    # Append the new bundle to bundles.yaml (don't remove old bundles)
+    # Replace the last bundle in the target channel with the new one
     BUNDLES_FILE="$TMPDIR/$CATALOG_DIR/bundles.yaml"
     CHANNELS_FILE="$TMPDIR/$CATALOG_DIR/channels.yaml"
 
-    echo "---" >> "$BUNDLES_FILE"
-    opm render {{BUNDLE_IMG}} -oyaml | yq '(.image, .relatedImages[].image) |= sub("quay.io/", "quay.io:443/")' >> "$BUNDLES_FILE"
-
-    # Extract the new bundle name from the rendered output
-    NEW_BUNDLE_NAME=$(yq eval 'select(.schema == "olm.bundle") | .name' "$BUNDLES_FILE" | tail -1)
-    echo "New bundle name: $NEW_BUNDLE_NAME"
-
     # Determine the channel name based on version
     if [ "{{mode}}" == "MCE" ]; then
-        # Extract version like 2.17 from the BASE_CATALOG_TAG parameter (e.g., latest-2.17 -> 2.17)
         CHANNEL_VERSION=$(echo "{{BASE_CATALOG_TAG}}" | grep -oP '\d+\.\d+' | head -1)
         CHANNEL_NAME="stable-${CHANNEL_VERSION}"
     else
-        # For ACM, extract similarly
         CHANNEL_VERSION=$(echo "{{BASE_CATALOG_TAG}}" | grep -oP '\d+\.\d+' | head -1)
         CHANNEL_NAME="release-${CHANNEL_VERSION}"
     fi
     echo "Target channel: $CHANNEL_NAME"
 
-    # Get the previous bundle name from the channel
-    PREV_BUNDLE_NAME=$(yq eval "select(.name == \"$CHANNEL_NAME\") | .entries[-1].name" "$CHANNELS_FILE")
-    echo "Previous bundle: $PREV_BUNDLE_NAME"
+    # Get the name of the last bundle in the channel (the one we're replacing)
+    OLD_BUNDLE_NAME=$(yq eval "select(.name == \"$CHANNEL_NAME\") | .entries[-1].name" "$CHANNELS_FILE")
+    echo "Replacing bundle: $OLD_BUNDLE_NAME"
 
-    # Add the new bundle to the channel
-    yq eval -i "(select(.name == \"$CHANNEL_NAME\") | .entries) += [{\"name\": \"$NEW_BUNDLE_NAME\", \"replaces\": \"$PREV_BUNDLE_NAME\"}]" "$CHANNELS_FILE"
+    # Render the new bundle
+    NEW_BUNDLE_RENDERED=$(opm render {{BUNDLE_IMG}} -oyaml | yq '(.image, .relatedImages[].image) |= sub("quay.io/", "quay.io:443/")')
+    NEW_BUNDLE_NAME=$(echo "$NEW_BUNDLE_RENDERED" | yq eval 'select(.schema == "olm.bundle") | .name')
+    echo "New bundle name: $NEW_BUNDLE_NAME"
+
+    # Remove the old bundle from bundles.yaml and append the new one
+    yq eval -i "select(.name != \"$OLD_BUNDLE_NAME\" or .schema != \"olm.bundle\")" "$BUNDLES_FILE"
+    echo "---" >> "$BUNDLES_FILE"
+    echo "$NEW_BUNDLE_RENDERED" >> "$BUNDLES_FILE"
+
+    # Replace the last channel entry with the new bundle name (preserving replaces/skipRange if present)
+    yq eval -i "(select(.name == \"$CHANNEL_NAME\") | .entries[-1].name) = \"$NEW_BUNDLE_NAME\"" "$CHANNELS_FILE"
 
     echo "Validating Catalog"
     opm validate "$TMPDIR/$CATALOG_DIR"
