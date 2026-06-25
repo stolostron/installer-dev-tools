@@ -877,7 +877,7 @@ def ensure_managedclustersetbinding_namespace(resource_data, resource_name, defa
     if 'metadata' not in resource_data:
         # this would cause a lot of problems
         return
-    
+
     mcsb_metadata = resource_data['metadata']
     mcsb_namespace = mcsb_metadata.get('namespace', default_namespace)
 
@@ -886,6 +886,42 @@ def ensure_managedclustersetbinding_namespace(resource_data, resource_name, defa
         mcsb_namespace = f"{{{{ default \"{mcsb_namespace}\" .Values.global.namespace }}}}"
         mcsb_metadata['namespace'] = mcsb_namespace
         logging.info(f"Namespace for ManagedClusterSetBinding {resource_name} set to {mcsb_namespace}")
+
+def ensure_multiclusterroleassignment_namespace(resource_data, resource_name, default_namespace):
+    """
+    Ensures that namespace references in MulticlusterRoleAssignment subject and placements are templated.
+
+    Note: metadata.namespace is already handled by the generic namespace-scoped resource logic
+    before this function is called. This function only handles subject.namespace and placements[].namespace.
+
+    If namespace fields are set to 'open-cluster-management', they are wrapped in a Helm
+    `default` function to allow overriding via `.Values.global.namespace`.
+
+    Args:
+        resource_data (dict): The MulticlusterRoleAssignment resource data dictionary.
+        resource_name (str): The name of the MulticlusterRoleAssignment resource.
+        default_namespace (str): The default namespace template to use.
+
+    Returns:
+        None: Modifies resource_data in place.
+    """
+    # Handle subject.namespace
+    if 'subject' in resource_data:
+        subject = resource_data['subject']
+        subject_namespace = subject.get('namespace', default_namespace)
+        if subject_namespace == 'open-cluster-management':
+            subject_namespace = f"{{{{ default \"{subject_namespace}\" .Values.global.namespace }}}}"
+            subject['namespace'] = subject_namespace
+            logging.info(f"Namespace for MulticlusterRoleAssignment {resource_name} subject set to {subject_namespace}")
+
+    # Handle placements[].namespace
+    if 'placements' in resource_data:
+        for placement in resource_data['placements']:
+            placement_namespace = placement.get('namespace', default_namespace)
+            if placement_namespace == 'open-cluster-management':
+                placement_namespace = f"{{{{ default \"{placement_namespace}\" .Values.global.namespace }}}}"
+                placement['namespace'] = placement_namespace
+                logging.info(f"Namespace for MulticlusterRoleAssignment {resource_name} placement '{placement.get('name')}' set to {placement_namespace}")
 
 def ensure_clustermanagementaddon_namespace(resource_data, resource_name, default_namespace):
     if 'spec' not in resource_data:
@@ -1027,12 +1063,12 @@ def update_helm_resources(chartName, helmChart, skip_rbac_overrides, exclusions,
 
     resource_kinds = [
         "AddOnTemplate", "Certificate", "ClusterManagementAddOn", "ClusterRole", "ClusterRoleBinding", "ConfigMap", "ConsolePlugin", "Deployment", "Issuer", "Job",
-        "ManagedClusterSetBinding", "MutatingWebhookConfiguration", "NetworkPolicy", "PersistentVolumeClaim", "Placement", "PodDisruptionBudget", "Role", "RoleBinding",
+        "ManagedClusterSetBinding", "MulticlusterRoleAssignment", "MutatingWebhookConfiguration", "NetworkPolicy", "PersistentVolumeClaim", "Placement", "PodDisruptionBudget", "Role", "RoleBinding",
         "Route", "Secret", "Service", "StatefulSet", "ValidatingWebhookConfiguration",
     ]
 
     namespace_scoped_kinds = [
-        "Certificate", "ConfigMap", "Deployment", "Issuer", "Job", "ManagedClusterSetBinding", "NetworkPolicy", "PersistentVolumeClaim", "Placement",
+        "Certificate", "ConfigMap", "Deployment", "Issuer", "Job", "ManagedClusterSetBinding", "MulticlusterRoleAssignment", "NetworkPolicy", "PersistentVolumeClaim", "Placement",
         "PodDisruptionBudget", "Role", "RoleBinding", "Route", "Secret", "Service", "StatefulSet"
     ]
 
@@ -1100,7 +1136,12 @@ def update_helm_resources(chartName, helmChart, skip_rbac_overrides, exclusions,
                 # defaulting to Helm values if not specified.
                 if kind == 'ManagedClusterSetBinding':
                     ensure_managedclustersetbinding_namespace(resource_data, resource_name, default_namespace)
-                
+
+                # Ensure MulticlusterRoleAssignment has namespace set for metadata, subject, and placements,
+                # defaulting to Helm values if not specified.
+                if kind == 'MulticlusterRoleAssignment':
+                    ensure_multiclusterroleassignment_namespace(resource_data, resource_name, default_namespace)
+
                 # Ensure Placement has namespace set for open-cluster-management references,
                 # defaulting to Helm values if not specified.
                 if kind == 'Placement':
