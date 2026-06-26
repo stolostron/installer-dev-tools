@@ -892,7 +892,8 @@ def ensure_multiclusterroleassignment_namespace(resource_data, resource_name, de
     Ensures that namespace references in MulticlusterRoleAssignment subject and placements are templated.
 
     Note: metadata.namespace is already handled by the generic namespace-scoped resource logic
-    before this function is called. This function only handles subject.namespace and placements[].namespace.
+    before this function is called. This function only handles spec.subject.namespace and
+    spec.roleAssignments[].clusterSelection.placements[].namespace.
 
     If namespace fields are set to 'open-cluster-management', they are wrapped in a Helm
     `default` function to allow overriding via `.Values.global.namespace`.
@@ -905,23 +906,34 @@ def ensure_multiclusterroleassignment_namespace(resource_data, resource_name, de
     Returns:
         None: Modifies resource_data in place.
     """
-    # Handle subject.namespace
-    if 'subject' in resource_data:
-        subject = resource_data['subject']
+    if 'spec' not in resource_data:
+        return
+
+    spec = resource_data['spec']
+
+    # Handle spec.subject.namespace
+    if 'subject' in spec:
+        subject = spec['subject']
         subject_namespace = subject.get('namespace', default_namespace)
         if subject_namespace == 'open-cluster-management':
             subject_namespace = f"{{{{ default \"{subject_namespace}\" .Values.global.namespace }}}}"
             subject['namespace'] = subject_namespace
             logging.info(f"Namespace for MulticlusterRoleAssignment {resource_name} subject set to {subject_namespace}")
 
-    # Handle placements[].namespace
-    if 'placements' in resource_data:
-        for placement in resource_data['placements']:
-            placement_namespace = placement.get('namespace', default_namespace)
-            if placement_namespace == 'open-cluster-management':
-                placement_namespace = f"{{{{ default \"{placement_namespace}\" .Values.global.namespace }}}}"
-                placement['namespace'] = placement_namespace
-                logging.info(f"Namespace for MulticlusterRoleAssignment {resource_name} placement '{placement.get('name')}' set to {placement_namespace}")
+    # Handle spec.roleAssignments[].clusterSelection.placements[].namespace
+    if 'roleAssignments' in spec:
+        for role_assignment in spec['roleAssignments']:
+            if 'clusterSelection' not in role_assignment:
+                continue
+            cluster_selection = role_assignment['clusterSelection']
+            if 'placements' not in cluster_selection:
+                continue
+            for placement in cluster_selection['placements']:
+                placement_namespace = placement.get('namespace', default_namespace)
+                if placement_namespace == 'open-cluster-management':
+                    placement_namespace = f"{{{{ default \"{placement_namespace}\" .Values.global.namespace }}}}"
+                    placement['namespace'] = placement_namespace
+                    logging.info(f"Namespace for MulticlusterRoleAssignment {resource_name} placement '{placement.get('name')}' set to {placement_namespace}")
 
 def ensure_clustermanagementaddon_namespace(resource_data, resource_name, default_namespace):
     if 'spec' not in resource_data:
