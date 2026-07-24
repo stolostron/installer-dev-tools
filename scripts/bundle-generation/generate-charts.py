@@ -378,8 +378,11 @@ def find_templates_of_type(helmChart, kind):
         if filename.endswith(".yaml") or filename.endswith(".yml"):
             filePath = os.path.join(helmChart, "templates", filename)
             with open(filePath, 'r') as f:
-                fileYml = yaml.safe_load(f)
-            if fileYml['kind'] == kind:
+                try:
+                    fileYml = yaml.safe_load(f)
+                except yaml.YAMLError:
+                    continue
+            if fileYml and fileYml.get('kind') == kind:
                 resources.append(filePath)
             continue
         else:
