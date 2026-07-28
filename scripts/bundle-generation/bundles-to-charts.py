@@ -465,8 +465,9 @@ def copy_additional_resources(helmChart, csvPath, branch):
 
     # List of optional resources that are supported by the OLM bundle
     optional_supported_bundle_resourceTypes = ["ClusterRole", "ClusterRoleBinding", "ConfigMap", "ConsoleCLIDownload",
-    "ConsoleLink", "ConsoleQuickStart", "ConsoleYamlSample", "PodDisruptionBudget", "PriorityClass", "PrometheusRule",
-    "Role", "RoleBinding", "Secret", "Service", "ServiceAccount", "ServiceMonitor", "VerticalPodAutoscaler"]
+    "ConsoleLink", "ConsoleQuickStart", "ConsoleYamlSample", "NetworkPolicy", "PodDisruptionBudget", "PriorityClass",
+    "PrometheusRule", "Role", "RoleBinding", "Secret", "Service", "ServiceAccount", "ServiceMonitor",
+    "VerticalPodAutoscaler"]
 
     # List of resources that are allowed but not be explicitly handled by the OLM bundle
     allowed_bundle_resource_types = ["AddOnTemplate", "ClusterManagementAddOn"]
