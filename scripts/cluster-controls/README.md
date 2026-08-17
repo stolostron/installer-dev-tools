@@ -37,24 +37,22 @@ The justfile is organized into modular files for better maintainability:
 - `just -l` or `just --list` - List all available recipes with descriptions
 - `just --choose` - Interactive menu to select and run recipes
 
-### Cluster Utilities (cluster.just)
+### Recipe Reference
 
-- `just open-console` - Open the OpenShift web console in your browser
+| Recipe | Source | Args | Purpose |
+|---|---|---|---|
+| `open-console` | cluster.just | — | Open the OpenShift web console in your browser |
+| `apply-pull-secret` | acm.just | — | Apply pull secret for registry access using your local podman/docker credentials for `quay.io` |
+| `install-acm` | acm.just | `[VERSION]` (default `release-2.16`) | Create namespace, operator group, and subscription, then apply the MultiClusterHub configuration |
+| `apply-custom-cs` | acm.just | — | Apply both custom catalog sources (ACM + MCE) |
+| `apply-custom-acm-cs` | acm.just | `[IMAGE]` (default from `acm-image`) | Apply a custom ACM catalog source |
+| `apply-custom-mce-cs` | acm.just | `[IMAGE]` (default from `mce-image`) | Apply a custom MCE catalog source |
+| `toggle-mce-component` | acm.just | `<COMPONENT> <STATE>` | Enable/disable an MCE component, e.g. `just toggle-mce-component cluster-manager true` |
 
-### ACM/MCE Installation (acm.just)
-
-- `just apply-pull-secret` - Apply pull secret for registry access (uses your podman credentials)
-- `just install-acm [VERSION]` - Install ACM (default: release-2.16)
-  - Creates namespace, operator group, and subscription
-  - Applies MultiClusterHub configuration
-- `just apply-custom-cs` - Apply both custom catalog sources (ACM + MCE)
-- `just apply-custom-acm-cs [IMAGE]` - Apply custom ACM catalog source
-- `just apply-custom-mce-cs [IMAGE]` - Apply custom MCE catalog source
-
-### MCE Component Management (acm.just)
-
-- `just toggle-mce-component <COMPONENT> <STATE>` - Enable/disable MCE components
-  - Example: `just toggle-mce-component cluster-manager true`
+**IMAGE format for `apply-custom-acm-cs` / `apply-custom-mce-cs`:** you can pass either a
+bare `org/repo:tag` (e.g. `myuser/acm-dev-catalog:mytag`) or a full `quay.io/...` /
+`quay.io:443/...` reference — any `quay.io` or `quay.io:443` prefix is stripped and
+re-added as `quay.io:443/...` automatically, so both forms work interchangeably.
 
 ## Directory Structure
 
@@ -101,6 +99,9 @@ just install-acm release-2.15
 
 # Apply custom catalog sources if needed
 just apply-custom-cs
+
+# Or apply a custom ACM catalog source with a specific image
+just apply-custom-acm-cs myuser/acm-dev-catalog:mytag
 
 # Open the web console
 just open-console
