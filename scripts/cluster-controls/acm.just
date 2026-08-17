@@ -5,11 +5,15 @@ acm-version := "release-2.16"
 
 # Apply custom ACM catalog source with specified image
 apply-custom-acm-cs IMAGE=acm-image:
-    cat ./yamls/variable-acm-cs.yaml | yq '.spec.image = "quay.io:443/{{IMAGE}}"' | oc apply -f -
+    #!/usr/bin/env bash
+    CLEAN_IMAGE=$(echo "{{IMAGE}}" | sed 's|^quay\.io:443/||;s|^quay\.io/||')
+    cat ./yamls/variable-acm-cs.yaml | yq ".spec.image = \"quay.io:443/${CLEAN_IMAGE}\"" | oc apply -f -
 
 # Apply custom MCE catalog source with specified image
 apply-custom-mce-cs IMAGE=mce-image:
-    cat ./yamls/variable-mce-cs.yaml | yq '.spec.image = "quay.io:443/{{IMAGE}}"' | oc apply -f -
+    #!/usr/bin/env bash
+    CLEAN_IMAGE=$(echo "{{IMAGE}}" | sed 's|^quay\.io:443/||;s|^quay\.io/||')
+    cat ./yamls/variable-mce-cs.yaml | yq ".spec.image = \"quay.io:443/${CLEAN_IMAGE}\"" | oc apply -f -
 
 # Apply both custom ACM and MCE catalog sources
 apply-custom-cs: apply-custom-acm-cs apply-custom-mce-cs
