@@ -1079,12 +1079,12 @@ def update_helm_resources(chartName, helmChart, skip_rbac_overrides, exclusions,
     resource_kinds = [
         "AddOnTemplate", "Certificate", "ClusterManagementAddOn", "ClusterRole", "ClusterRoleBinding", "ConfigMap", "ConsolePlugin", "Deployment", "Issuer", "Job",
         "ManagedClusterSetBinding", "MulticlusterRoleAssignment", "MutatingWebhookConfiguration", "NetworkPolicy", "PersistentVolumeClaim", "Placement", "PodDisruptionBudget", "Role", "RoleBinding",
-        "Route", "Secret", "Service", "StatefulSet", "ValidatingWebhookConfiguration",
+        "Route", "Secret", "Service", "StatefulSet", "ValidatingWebhookConfiguration", "VerticalPodAutoscaler",
     ]
 
     namespace_scoped_kinds = [
         "Certificate", "ConfigMap", "Deployment", "Issuer", "Job", "ManagedClusterSetBinding", "MulticlusterRoleAssignment", "NetworkPolicy", "PersistentVolumeClaim", "Placement",
-        "PodDisruptionBudget", "Role", "RoleBinding", "Route", "Secret", "Service", "StatefulSet"
+        "PodDisruptionBudget", "Role", "RoleBinding", "Route", "Secret", "Service", "StatefulSet", "VerticalPodAutoscaler"
     ]
 
     network_policy_templates = []

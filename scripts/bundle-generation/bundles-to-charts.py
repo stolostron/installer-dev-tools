@@ -465,9 +465,9 @@ def copy_additional_resources(helmChart, csvPath, branch):
 
     # List of optional resources that are supported by the OLM bundle
     optional_supported_bundle_resourceTypes = ["ClusterRole", "ClusterRoleBinding", "ConfigMap", "ConsoleCLIDownload",
-    "ConsoleLink", "ConsoleQuickStart", "ConsoleYamlSample", "NetworkPolicy", "PodDisruptionBudget", "PriorityClass",
-    "PrometheusRule", "Role", "RoleBinding", "Secret", "Service", "ServiceAccount", "ServiceMonitor",
-    "VerticalPodAutoscaler"]
+    "ConsoleLink", "ConsoleQuickStart", "ConsoleYamlSample", "MutatingWebhookConfiguration", "NetworkPolicy",
+    "PodDisruptionBudget", "PriorityClass", "PrometheusRule", "Role", "RoleBinding", "Secret", "Service",
+    "ServiceAccount", "ServiceMonitor", "ValidatingWebhookConfiguration", "VerticalPodAutoscaler"]
 
     # List of resources that are allowed but not be explicitly handled by the OLM bundle
     allowed_bundle_resource_types = ["AddOnTemplate", "ClusterManagementAddOn"]
@@ -702,12 +702,12 @@ def update_helm_resources(chartName, helmChart, skip_rbac_overrides, exclusions,
     resource_kinds = [
         "ClusterRole", "ClusterRoleBinding", "ConfigMap", "Deployment", "MutatingWebhookConfiguration",
         "NetworkPolicy", "PersistentVolumeClaim", "RoleBinding", "Role", "Route", "Secret", "Service", "StatefulSet",
-        "ValidatingWebhookConfiguration", "Job", "ConsolePlugin"
+        "ValidatingWebhookConfiguration", "VerticalPodAutoscaler", "Job", "ConsolePlugin"
     ]
 
     namespace_scoped_kinds = [
         "ConfigMap", "Deployment", "NetworkPolicy", "PersistentVolumeClaim", "RoleBinding", "Role", "Route",
-        "Secret", "Service", "StatefulSet", "Job"
+        "Secret", "Service", "StatefulSet", "VerticalPodAutoscaler", "Job"
     ]
 
     network_policy_templates = []
