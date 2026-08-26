@@ -224,6 +224,38 @@ def fillChartYaml(helmChart, name, csvPath):
         yaml.dump(chart, f)
     logging.info("'%s' Chart.yaml updated successfully.\n", helmChart)
 
+def ensure_container_port_protocols(deployment_spec):
+    """Default protocol to "TCP" for any containerPort entry that omits it.
+
+    Kubernetes defaults an unspecified port protocol to "TCP" once a
+    Deployment is applied to the cluster. If the CSV a chart is generated
+    from omits `protocol` on a containerPort, the resulting Helm template
+    and the live (API-defaulted) object will differ on that field alone.
+    Downstream consumers that diff existing vs. desired specs (e.g.
+    reconcilers deciding whether to Update or Patch a Deployment) can
+    misinterpret that difference as a real port change. Setting protocol
+    explicitly here keeps generated charts consistent with what the
+    cluster will actually report, avoiding that class of false positive.
+
+    Args:
+        deployment_spec (dict): A Deployment's `spec` dict, as found in a
+            CSV's `spec.install.spec.deployments[].spec`.
+    """
+    containers = (
+        (deployment_spec or {})
+        .get('template', {})
+        .get('spec', {})
+        .get('containers', []) or []
+    )
+    for container in containers:
+        for port in container.get('ports', []) or []:
+            # Use a falsy check rather than setdefault(): a CSV could set
+            # `protocol: null` explicitly, which setdefault would leave as
+            # None (writing `protocol: null` to the chart) since the key
+            # is already present.
+            if not port.get('protocol'):
+                port['protocol'] = 'TCP'
+
 # Copy chart-templates/deployment, update it with CSV deployment information, and add to chart
 def add_deployment(helmChart, deployment):
     """_summary_
@@ -242,6 +274,7 @@ def add_deployment(helmChart, deployment):
         deploy = yaml.safe_load(f)
 
     deploy['spec'] = deployment['spec']
+    ensure_container_port_protocols(deploy['spec'])
     if 'spec' in deploy:
         if 'template' in deploy['spec']:
             if 'spec' in deploy['spec']['template']:
