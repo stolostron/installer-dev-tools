@@ -1492,7 +1492,7 @@ def injectRequirements(helm_chart_path, operator, sizes, branch):
     if is_version_compatible(branch, '2.10', '2.5', '2.10'):
         update_security_contexts(helm_chart_path, security_context_constraints, branch)
 
-    if is_version_compatible(branch, '2.13', '2.7', '2.13'):
+    if is_version_compatible(branch, '2.11', '2.7', '2.11'):
         update_helm_resources(operator_name, helm_chart_path, skip_rbac_overrides, exclusions, inclusions, branch, preserved_files)
 
     # Updates RBAC and deployment configuration in the Helm chart.
