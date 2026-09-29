@@ -148,6 +148,202 @@ def ensure_placement_namespace(resource_data, resource_name, default_namespace):
         resource_data['metadata']['namespace'] = placement_namespace
         logging.info(f"Placement namespace for '{resource_name}' set to: '{placement_namespace}'")
 
+# Fields of an OperatorPolicy's spec.subscription that are safe to expose to
+# consumers through chart values. spec.upgradeApproval is a sibling of
+# subscription rather than a member of it, so it is handled separately.
+OPERATOR_POLICY_SUBSCRIPTION_FIELDS = (
+    'channel',
+    'name',
+    'namespace',
+    'source',
+    'sourceNamespace',
+    'startingCSV',
+)
+
+
+def operator_policy_values_key(policy_name):
+    """Derive a Helm-safe values key from an OperatorPolicy name.
+
+    The OperatorPolicy name is the only stable, unique identity an embedded
+    policy carries, so it is used as the key instead of a hand-maintained map.
+    A hand-maintained map silently skips components added later, which leaves
+    them with no override path and no error to show for it.
+
+    'kubevirt-hyperconverged-operator' -> 'kubevirtHyperconvergedOperator'
+    'mtv-operator'                     -> 'mtvOperator'
+    """
+    parts = [part for part in policy_name.split('-') if part]
+    if not parts:
+        return None
+    return parts[0] + ''.join(part[:1].upper() + part[1:] for part in parts[1:])
+
+
+def is_helm_template(value):
+    """True when a scalar has already been replaced with a Helm expression."""
+    return isinstance(value, str) and '{{' in value
+
+
+def ensure_operatorpolicy_value_templates(resource_data, extra_fields=None):
+    """Point an embedded OperatorPolicy's subscription fields at chart values.
+
+    Rewrites the hardcoded scalars of every OperatorPolicy carried in an
+    AddOnTemplate into references under `.Values.global.<derivedKey>` and
+    returns the values harvested from the resource, so the caller can write
+    them to values.yaml as defaults. Harvesting and rewriting happen together
+    so the rendered chart is identical before and after generation.
+
+    Fields that are absent are left absent, so this never invents a
+    subscription the upstream chart did not declare. Pass `extra_fields` to
+    also template fields that should exist even when upstream omits them, for
+    example 'source' or 'sourceNamespace'.
+
+    Returns a mapping of
+    {values_key: {'subscription': {...}, 'upgradeApproval': ...}}
+    for the policies that were templated.
+    """
+    specs = resource_data.get('spec') or {}
+    workload = (specs.get('agentSpec') or {}).get('workload') or {}
+    manifests = workload.get('manifests') or []
+
+    fields = list(OPERATOR_POLICY_SUBSCRIPTION_FIELDS)
+    for field in extra_fields or []:
+        if field not in fields:
+            fields.append(field)
+
+    addon_name = (resource_data.get('metadata') or {}).get('name', '<unknown>')
+    defaults = {}
+
+    for manifest in manifests:
+        if not isinstance(manifest, dict) or manifest.get('kind') != 'OperatorPolicy':
+            continue
+
+        policy_name = (manifest.get('metadata') or {}).get('name')
+        if not policy_name:
+            logging.warning("OperatorPolicy without metadata.name in AddOnTemplate '%s' [Skipping]", addon_name)
+            continue
+
+        key = operator_policy_values_key(policy_name)
+        if not key:
+            logging.warning("Unable to derive a values key for OperatorPolicy '%s' in AddOnTemplate '%s' [Skipping]", policy_name, addon_name)
+            continue
+
+        policy_spec = manifest.get('spec') or {}
+        subscription = policy_spec.get('subscription') or {}
+        harvested = {}
+
+        for field in fields:
+            reference = '{{ .Values.global.%s.subscription.%s }}' % (key, field)
+            current = subscription.get(field)
+
+            if current is None:
+                # An explicitly requested field is added even when the upstream
+                # chart omits it. Well-known fields are only templated if set.
+                if field in (extra_fields or []):
+                    subscription[field] = reference
+                continue
+
+            # Already templated: leave both the reference and its default
+            # alone, or the literal '{{ ... }}' string would be harvested as
+            # the default value on a second run.
+            if is_helm_template(current):
+                continue
+
+            harvested[field] = current
+            subscription[field] = reference
+
+        if subscription:
+            policy_spec['subscription'] = subscription
+
+        # spec.upgradeApproval is a sibling of subscription, not a member.
+        approval_reference = '{{ .Values.global.%s.upgradeApproval }}' % key
+        approval = policy_spec.get('upgradeApproval')
+        if approval is not None:
+            if not is_helm_template(approval):
+                harvested['upgradeApproval'] = approval
+                policy_spec['upgradeApproval'] = approval_reference
+        elif 'upgradeApproval' in (extra_fields or []):
+            policy_spec['upgradeApproval'] = approval_reference
+
+        manifest['spec'] = policy_spec
+
+        if harvested:
+            defaults[key] = {
+                'subscription': {k: v for k, v in harvested.items() if k != 'upgradeApproval'},
+            }
+            if 'upgradeApproval' in harvested:
+                defaults[key]['upgradeApproval'] = harvested['upgradeApproval']
+            logging.info("OperatorPolicy '%s' subscription templated under global.%s", policy_name, key)
+
+    return defaults
+
+
+def collect_operatorpolicy_defaults(target, harvested):
+    """Merge harvested defaults into the per-chart accumulator.
+
+    Two AddOnTemplates in one chart can carry policies with the same name, so
+    the subscription fields are merged field by field rather than replaced.
+    """
+    for key, entry in (harvested or {}).items():
+        existing = target.setdefault(key, {})
+        subscription = existing.setdefault('subscription', {})
+        subscription.update(entry.get('subscription', {}))
+        for field, value in entry.items():
+            if field != 'subscription':
+                existing.setdefault(field, value)
+    return target
+
+
+def merge_operatorpolicy_values(values_path, defaults):
+    """Add harvested OperatorPolicy defaults to a chart's values.yaml.
+
+    Existing keys win, so values a chart author has already customised are
+    never overwritten by the values harvested from the upstream template.
+    """
+    if not defaults:
+        return
+
+    if not os.path.exists(values_path):
+        logging.warning("Cannot seed OperatorPolicy values, values.yaml not found: %s", values_path)
+        return
+
+    with open(values_path, 'r') as f:
+        values = yaml.safe_load(f) or {}
+
+    global_block = values.get('global')
+    if not isinstance(global_block, dict):
+        logging.warning("Chart values.yaml has no 'global' mapping, skipping OperatorPolicy defaults: %s", values_path)
+        return
+
+    for key, entry in defaults.items():
+        existing = global_block.get(key)
+        if existing is None:
+            existing = {}
+        elif not isinstance(existing, dict):
+            logging.warning("values.yaml global.%s is not a mapping, leaving it untouched", key)
+            continue
+
+        subscription = existing.get('subscription')
+        if subscription is None:
+            subscription = {}
+        elif not isinstance(subscription, dict):
+            logging.warning("values.yaml global.%s.subscription is not a mapping, leaving it untouched", key)
+            continue
+
+        for field, value in entry.get('subscription', {}).items():
+            subscription.setdefault(field, value)
+        existing['subscription'] = subscription
+
+        if 'upgradeApproval' in entry:
+            existing.setdefault('upgradeApproval', entry['upgradeApproval'])
+
+        global_block[key] = existing
+
+    with open(values_path, 'w') as f:
+        yaml.dump(values, f, width=float("inf"), default_flow_style=False, allow_unicode=True)
+
+    logging.info("Seeded OperatorPolicy defaults for %s in %s", ', '.join(sorted(defaults)), values_path)
+
+
 def ensure_addontemplate_namespace(resource_data, resource_name, default_namespace):
     if 'spec' not in resource_data:
         return
@@ -1073,7 +1269,7 @@ def replace_default(data, old, new):
     return data
 
 # updateHelmResources adds standard configuration to the generic kubernetes resources
-def update_helm_resources(chartName, helmChart, skip_rbac_overrides, exclusions, inclusions, branch):
+def update_helm_resources(chartName, helmChart, skip_rbac_overrides, exclusions, inclusions, branch, subscription_extra_fields=None):
     logging.info(f"Updating resources chart: {chartName}")
 
     resource_kinds = [
@@ -1088,6 +1284,7 @@ def update_helm_resources(chartName, helmChart, skip_rbac_overrides, exclusions,
     ]
 
     network_policy_templates = []
+    operator_policy_defaults = {}
 
     for kind in resource_kinds:
         resource_templates = find_templates_of_type(helmChart, kind)
@@ -1168,6 +1365,14 @@ def update_helm_resources(chartName, helmChart, skip_rbac_overrides, exclusions,
                 # defaulting to Helm values if not specified.
                 if kind == 'AddOnTemplate':
                     ensure_addontemplate_namespace(resource_data, resource_name, default_namespace)
+
+                    # Point any embedded OperatorPolicy subscription at chart
+                    # values so the consuming operator can override it per
+                    # install, and harvest the current values as the defaults.
+                    collect_operatorpolicy_defaults(
+                        operator_policy_defaults,
+                        ensure_operatorpolicy_value_templates(resource_data, subscription_extra_fields),
+                    )
 
                 # Ensure ClusterManagementAddOn has namespace set,
                 # defaulting to Helm values if not specified.
@@ -1250,6 +1455,11 @@ def update_helm_resources(chartName, helmChart, skip_rbac_overrides, exclusions,
 
             except Exception as e:
                 logging.error(f"Error processing template '{template_path}': {e}")
+
+    # Add the OperatorPolicy subscription values harvested from the
+    # AddOnTemplates to this chart's values.yaml, so every reference
+    # introduced above resolves to the value the upstream chart declared.
+    merge_operatorpolicy_values(os.path.join(helmChart, 'values.yaml'), operator_policy_defaults)
 
     # Ensure NetworkPolicy templates are wrapped with a Helm conditional to only deploy when enabled.
     # Done after all kinds are processed to avoid breaking yaml.safe_load for subsequent kind iterations.
@@ -1546,7 +1756,8 @@ def injectRequirements(helm_chart_path, chart, branch):
         update_security_contexts(helm_chart_path, security_context_constraints)
     
     if is_version_compatible(branch, '2.13', '2.8', '2.13'):
-        update_helm_resources(chart_name, helm_chart_path, skip_rbac_overrides, exclusions, inclusions, branch)
+        update_helm_resources(chart_name, helm_chart_path, skip_rbac_overrides, exclusions, inclusions, branch,
+                              chart.get('operatorPolicySubscriptionFields'))
 
     updateDeployments(chart_name, helm_chart_path, exclusions, inclusions, branch)
 
