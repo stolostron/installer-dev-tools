@@ -1281,6 +1281,13 @@ def replace_default(data, old, new):
 def update_helm_resources(chartName, helmChart, skip_rbac_overrides, exclusions, inclusions, branch, subscription_extra_fields=None):
     logging.info(f"Updating resources chart: {chartName}")
 
+    # A consumer release older than 5.0 cannot populate the templated keys, so
+    # its charts keep the hardcoded subscription rather than rendering a
+    # reference to a value that will never be supplied.
+    template_operatorpolicy_subscriptions = is_version_compatible(branch, '5.0', '5.0', '5.0')
+    if not template_operatorpolicy_subscriptions:
+        logging.info("Skipping OperatorPolicy subscription templating for branch %s: requires 5.0 or later", branch)
+
     resource_kinds = [
         "AddOnTemplate", "Certificate", "ClusterManagementAddOn", "ClusterRole", "ClusterRoleBinding", "ConfigMap", "ConsolePlugin", "Deployment", "Issuer", "Job",
         "ManagedClusterSetBinding", "MulticlusterRoleAssignment", "MutatingWebhookConfiguration", "NetworkPolicy", "PersistentVolumeClaim", "Placement", "PodDisruptionBudget", "Role", "RoleBinding",
@@ -1378,10 +1385,13 @@ def update_helm_resources(chartName, helmChart, skip_rbac_overrides, exclusions,
                     # Point any embedded OperatorPolicy subscription at chart
                     # values so the consuming operator can override it per
                     # install, and harvest the current values as the defaults.
-                    collect_operatorpolicy_defaults(
-                        operator_policy_defaults,
-                        ensure_operatorpolicy_value_templates(resource_data, subscription_extra_fields),
-                    )
+                    # Skipped on consumer branches whose operator cannot supply
+                    # the templated keys.
+                    if template_operatorpolicy_subscriptions:
+                        collect_operatorpolicy_defaults(
+                            operator_policy_defaults,
+                            ensure_operatorpolicy_value_templates(resource_data, subscription_extra_fields),
+                        )
 
                 # Ensure ClusterManagementAddOn has namespace set,
                 # defaulting to Helm values if not specified.
