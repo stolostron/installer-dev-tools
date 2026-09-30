@@ -167,7 +167,7 @@ class TestEnsureOperatorPolicyValueTemplates(unittest.TestCase):
             })
         )
 
-        generate_charts.ensure_operatorpolicy_value_templates(
+        defaults = generate_charts.ensure_operatorpolicy_value_templates(
             resource_data, extra_fields=['source', 'sourceNamespace'],
         )
 
@@ -179,6 +179,82 @@ class TestEnsureOperatorPolicyValueTemplates(unittest.TestCase):
         self.assertEqual(
             spec['subscription']['sourceNamespace'],
             '{{ .Values.global.kubevirtHyperconvergedOperator.subscription.sourceNamespace }}',
+        )
+
+        # A requested field upstream omits is seeded empty, never dropped.
+        # An empty value is what the OperatorPolicy controller reads as
+        # "inherit the default", so it is a valid unset marker.
+        subscription = defaults['kubevirtHyperconvergedOperator']['subscription']
+        self.assertEqual(subscription['source'], '')
+        self.assertEqual(subscription['sourceNamespace'], '')
+
+    def test_starting_csv_is_seeded_empty_when_upstream_omits_it(self):
+        resource_data = addontemplate_with_policies(
+            operator_policy('kubevirt-hyperconverged-operator', subscription={
+                'channel': 'stable',
+                'name': 'kubevirt-hyperconverged',
+            })
+        )
+
+        defaults = generate_charts.ensure_operatorpolicy_value_templates(
+            resource_data, extra_fields=['startingCSV'],
+        )
+
+        spec = policy_spec(resource_data, 'kubevirt-hyperconverged-operator')
+        self.assertEqual(
+            spec['subscription']['startingCSV'],
+            '{{ .Values.global.kubevirtHyperconvergedOperator.subscription.startingCSV }}',
+        )
+        self.assertEqual(
+            defaults['kubevirtHyperconvergedOperator']['subscription']['startingCSV'],
+            '',
+        )
+
+    def test_requested_field_with_upstream_value_harvests_it_not_empty(self):
+        resource_data = addontemplate_with_policies(
+            operator_policy('kubevirt-hyperconverged-operator', subscription={
+                'channel': 'stable',
+                'name': 'kubevirt-hyperconverged',
+                'source': 'redhat-operators',
+                'sourceNamespace': 'openshift-marketplace',
+            })
+        )
+
+        defaults = generate_charts.ensure_operatorpolicy_value_templates(
+            resource_data, extra_fields=['source', 'sourceNamespace'],
+        )
+
+        # An upstream value wins; the empty seed only applies when absent.
+        self.assertEqual(
+            defaults['kubevirtHyperconvergedOperator']['subscription']['source'],
+            'redhat-operators',
+        )
+        self.assertEqual(
+            defaults['kubevirtHyperconvergedOperator']['subscription']['sourceNamespace'],
+            'openshift-marketplace',
+        )
+
+    def test_empty_seeded_defaults_are_idempotent(self):
+        resource_data = addontemplate_with_policies(
+            operator_policy('kubevirt-hyperconverged-operator', subscription={
+                'channel': 'stable',
+                'name': 'kubevirt-hyperconverged',
+            })
+        )
+
+        first = generate_charts.ensure_operatorpolicy_value_templates(
+            resource_data, extra_fields=['source', 'sourceNamespace'],
+        )
+        second = generate_charts.ensure_operatorpolicy_value_templates(
+            resource_data, extra_fields=['source', 'sourceNamespace'],
+        )
+
+        # The second pass must not harvest the '{{ ... }}' reference back
+        # into values.yaml as a literal default.
+        self.assertEqual(second, {})
+        self.assertEqual(
+            first['kubevirtHyperconvergedOperator']['subscription']['source'],
+            '',
         )
 
     def test_upgrade_approval_is_templated_as_a_sibling(self):

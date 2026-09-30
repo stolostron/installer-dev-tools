@@ -195,7 +195,10 @@ def ensure_operatorpolicy_value_templates(resource_data, extra_fields=None):
     Fields that are absent are left absent, so this never invents a
     subscription the upstream chart did not declare. Pass `extra_fields` to
     also template fields that should exist even when upstream omits them, for
-    example 'source' or 'sourceNamespace'.
+    example 'source', 'sourceNamespace' or 'startingCSV'. A requested field
+    that upstream omits is seeded with an empty default, because the
+    OperatorPolicy controller reads an empty value as "inherit the default"
+    from the Subscription it finds on the cluster.
 
     Returns a mapping of
     {values_key: {'subscription': {...}, 'upgradeApproval': ...}}
@@ -240,6 +243,12 @@ def ensure_operatorpolicy_value_templates(resource_data, extra_fields=None):
                 # chart omits it. Well-known fields are only templated if set.
                 if field in (extra_fields or []):
                     subscription[field] = reference
+                    # Seed an empty default rather than leaving the reference
+                    # unbacked by a value. The OperatorPolicy controller reads
+                    # an empty channel, source, sourceNamespace or startingCSV
+                    # as "inherit the default" from the Subscription it finds,
+                    # so '' is a valid unset marker rather than a broken value.
+                    harvested[field] = ''
                 continue
 
             # Already templated: leave both the reference and its default
