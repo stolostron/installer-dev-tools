@@ -1149,7 +1149,11 @@ def ensure_clustermanagementaddon_namespace(resource_data, resource_name, defaul
     
     cma_spec = resource_data.get('spec')  
     cma_install_strategy = cma_spec.get('installStrategy')
+    if not cma_install_strategy:
+        return
     cma_placements = cma_install_strategy.get('placements')
+    if not cma_placements:
+        return
 
     for placement in cma_placements:
         placement_namespace = placement.get('namespace', default_namespace)
@@ -1157,6 +1161,21 @@ def ensure_clustermanagementaddon_namespace(resource_data, resource_name, defaul
             placement_namespace = f"{{{{ default \"{placement_namespace}\" .Values.global.namespace }}}}"
             placement['namespace'] = placement_namespace
             logging.info(f"Namespace for Placement {placement['name']} for {resource_name} set to {placement_namespace}")
+
+        # Each placement can reference config objects (e.g. AddOnDeploymentConfig) that
+        # live in the same Helm-templated namespace as the placement itself. These were
+        # previously left as a hardcoded 'open-cluster-management', so overriding
+        # .Values.global.namespace would point the ClusterManagementAddOn at a config
+        # object in the wrong namespace. Template them the same way.
+        for config in placement.get('configs', []):
+            config_namespace = config.get('namespace')
+            if config_namespace == 'open-cluster-management':
+                config_namespace = f"{{{{ default \"{config_namespace}\" .Values.global.namespace }}}}"
+                config['namespace'] = config_namespace
+                logging.info(
+                    f"Namespace for config '{config.get('name')}' in Placement {placement['name']} "
+                    f"for {resource_name} set to {config_namespace}"
+                )
     
 
 def ensure_webhook_namespace(resource_data, resource_name, default_namespace):
