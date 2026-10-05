@@ -1641,6 +1641,72 @@ def fixImageReferencesForAddonTemplate(helmChart, imageKeyMapping):
     logging.info("Image references and pull policy in addon templates and values.yaml updated successfully.\n")
 
 
+# fixAddOnDeploymentConfigImageReferences identifies image references hardcoded in an
+# AddOnDeploymentConfig's `spec.customizedVariables` (e.g. a variable named "Image" that
+# the registered add-on agent consumes to know which image to run) and replaces them with
+# a reference to `.Values.global.imageOverrides.<key>`, using the same `imageMappings`
+# configured for the chart's Deployments.
+#
+# Unlike fixImageReferences/fixImageReferencesForAddonTemplate, a missing imageMappings
+# entry here only logs a warning and leaves the value untouched rather than failing the
+# whole generation run: `customizedVariables` is a free-form list and not every "Image"
+# entry is guaranteed to reference a chart-managed container image.
+def fixAddOnDeploymentConfigImageReferences(helmChart, imageKeyMapping):
+    logging.info("Fixing image references in AddOnDeploymentConfig customizedVariables ...")
+
+    addonDeploymentConfigs = find_templates_of_type(helmChart, 'AddOnDeploymentConfig')
+    imageKeys = []
+    for template_path in addonDeploymentConfigs:
+        with open(template_path, 'r') as f:
+            resource_data = yaml.safe_load(f)
+
+        customizedVariables = resource_data.get('spec', {}).get('customizedVariables', [])
+        changed = False
+        for variable in customizedVariables:
+            if variable.get('name') != 'Image':
+                continue
+
+            value = variable.get('value', '')
+            # Skip empty, already-templated, or clearly-not-an-image values.
+            if not value or '{{' in value or '/' not in value:
+                continue
+
+            image_key = parse_image_ref(value)["repository"]
+            try:
+                mapped_key = imageKeyMapping[image_key]
+            except KeyError:
+                logging.warning(
+                    "No image key mapping provided for AddOnDeploymentConfig image '%s' "
+                    "(repository '%s') in %s -- leaving value unchanged",
+                    value, image_key, template_path,
+                )
+                continue
+
+            imageKeys.append(mapped_key)
+            variable['value'] = "{{ .Values.global.imageOverrides." + mapped_key + " }}"
+            changed = True
+            logging.info(
+                "Replaced hardcoded image '%s' with '{{ .Values.global.imageOverrides.%s }}' in %s",
+                value, mapped_key, template_path,
+            )
+
+        if changed:
+            with open(template_path, 'w') as f:
+                yaml.dump(resource_data, f, width=float("inf"))
+
+    if len(imageKeys) == 0:
+        return
+
+    valuesYaml = os.path.join(helmChart, "values.yaml")
+    with open(valuesYaml, 'r') as f:
+        values = yaml.safe_load(f)
+    for imageKey in imageKeys:
+        values['global']['imageOverrides'].setdefault(imageKey, "")
+    with open(valuesYaml, 'w') as f:
+        yaml.dump(values, f, width=float("inf"))
+    logging.info("Image references in AddOnDeploymentConfig customizedVariables updated successfully.\n")
+
+
 # updateRBAC adds standard configuration to the RBAC resources (clusterroles, roles, clusterrolebindings, and rolebindings)
 def updateRBAC(helmChart, chartName):
     logging.info("Updating clusterroles, roles, clusterrolebindings, and rolebindings ...")
@@ -1765,6 +1831,7 @@ def injectRequirements(helm_chart_path, chart, branch):
     fixImageReferences(helm_chart_path, image_mappings)
     fixEnvVarImageReferences(helm_chart_path, image_mappings)
     fixImageReferencesForAddonTemplate(helm_chart_path, image_mappings)
+    fixAddOnDeploymentConfigImageReferences(helm_chart_path, image_mappings)
     injectAnnotationsForAddonTemplate(helm_chart_path)
     ensure_addontemplate_network_policies(helm_chart_path)
 
