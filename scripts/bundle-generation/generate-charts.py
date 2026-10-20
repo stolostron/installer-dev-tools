@@ -594,10 +594,18 @@ def find_templates_of_type(helmChart, kind):
             continue
     return resources
 
+def env_value_looks_like_image_ref(value):
+    """Return True when an env var value looks like a container image reference."""
+    if not isinstance(value, str) or not value:
+        return False
+    return "/" in value and (":" in value or "@" in value)
+
 # For each deployment, identify the image references if any exist in the environment variable fields, insert helm flow control code to reference it, and add image-key to the values.yaml file.
 # If the image-key referenced in the deployment does not exist in `imageMappings` in the Config.yaml, this will fail. Images must be explicitly defined
-def fixEnvVarImageReferences(helmChart, imageKeyMapping):
+# Env vars that do not end in `_IMAGE` can be opted in with an explicit `envImageMappings` entry (env var name -> image key).
+def fixEnvVarImageReferences(helmChart, imageKeyMapping, envImageMappings=None):
     logging.info("Fixing image references in container 'env' section in deployments and values.yaml ...")
+    envImageMappings = envImageMappings or {}
     
     # Path to the values.yaml file
     valuesYaml = os.path.join(helmChart, "values.yaml")
@@ -622,15 +630,36 @@ def fixEnvVarImageReferences(helmChart, imageKeyMapping):
                 continue
             
             for env in container['env']:
-                image_key = env['name']
-                if image_key.endswith('_IMAGE') == False:
+                env_var_name = env['name']
+                explicit_key = envImageMappings.get(env_var_name)
+                if explicit_key is None and env_var_name.endswith('_IMAGE') == False:
+                    if env_value_looks_like_image_ref(env.get('value')):
+                        logging.warning(
+                            "Skipping image-like env var '%s' in %s; add it to envImageMappings to template it",
+                            env_var_name,
+                            os.path.relpath(deployment, helmChart),
+                        )
                     continue
-                image_key = parse_image_ref(env['value'])['repository']
-                try:
-                    image_key = imageKeyMapping[image_key]
-                except KeyError:
-                    logging.critical("No image key mapping provided for imageKey: %s" % image_key)
-                    exit(1)
+                repository = parse_image_ref(env['value'])['repository']
+                if explicit_key is not None:
+                    if explicit_key not in imageKeyMapping.values():
+                        logging.critical(
+                            "envImageMappings entry '%s' maps to unknown image key '%s'; expected one of the "
+                            "imageMappings values", env_var_name, explicit_key)
+                        exit(1)
+                    repository_key = imageKeyMapping.get(repository)
+                    if repository_key is not None and repository_key != explicit_key:
+                        logging.warning(
+                            "envImageMappings entry '%s' -> '%s' overrides repository mapping '%s' for image '%s'",
+                            env_var_name, explicit_key, repository_key, repository,
+                        )
+                    image_key = explicit_key
+                else:
+                    try:
+                        image_key = imageKeyMapping[repository]
+                    except KeyError:
+                        logging.critical("No image key mapping provided for imageKey: %s" % repository)
+                        exit(1)
                 imageKeys.append(image_key)
                 env['value'] = "{{ .Values.global.imageOverrides." + image_key + " }}"
         with open(deployment, 'w') as f:
@@ -1757,13 +1786,14 @@ def injectRequirements(helm_chart_path, chart, branch):
 
     chart_name = chart.get("name")
     image_mappings = chart.get("imageMappings", {})
+    env_image_mappings = chart.get("envImageMappings", {})
     exclusions = chart.get("exclusions", [])
     inclusions = chart.get("inclusions", [])
     security_context_constraints = chart.get("security-context-constraints", [])
     skip_rbac_overrides = chart.get("skipRBACOverrides", False)
 
     fixImageReferences(helm_chart_path, image_mappings)
-    fixEnvVarImageReferences(helm_chart_path, image_mappings)
+    fixEnvVarImageReferences(helm_chart_path, image_mappings, env_image_mappings)
     fixImageReferencesForAddonTemplate(helm_chart_path, image_mappings)
     injectAnnotationsForAddonTemplate(helm_chart_path)
     ensure_addontemplate_network_policies(helm_chart_path)
