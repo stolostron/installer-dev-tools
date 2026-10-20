@@ -863,9 +863,16 @@ def find_templates_of_type(helmChart, kind, branch):
             continue
     return resources
 
+def env_value_looks_like_image_ref(value):
+    """Return True when an env var value looks like a container image reference."""
+    if not isinstance(value, str) or not value:
+        return False
+    return "/" in value and (":" in value or "@" in value)
+
 # For each deployment, identify the image references if any exist in the environment variable fields, insert helm flow control code to reference it, and add image-key to the values.yaml file.
 # If the image-key referenced in the deployment does not exist in `imageMappings` in the Config.yaml, this will fail. Images must be explicitly defined
-def fixEnvVarImageReferences(helmChart, imageKeyMapping, branch, operator_name, apply=True):
+# Env vars that do not end in `_IMAGE` can be opted in with an explicit `envImageMappings` entry (env var name -> image key).
+def fixEnvVarImageReferences(helmChart, imageKeyMapping, branch, operator_name, apply=True, envImageMappings=None):
     """_summary_
 
     Args:
@@ -874,8 +881,10 @@ def fixEnvVarImageReferences(helmChart, imageKeyMapping, branch, operator_name, 
         branch (_type_): _description_
         operator_name (_type_): _description_
         apply (bool): When False, validate mappings only without writing files.
+        envImageMappings (dict, optional): Explicit env var name -> image key mappings.
     """
     logging.info("Fixing image references in container 'env' section in deployments and values.yaml ...")
+    envImageMappings = envImageMappings or {}
     valuesYaml = os.path.join(helmChart, "values.yaml")
     deployments = find_templates_of_type(helmChart, 'Deployment', branch)
 
@@ -893,19 +902,48 @@ def fixEnvVarImageReferences(helmChart, imageKeyMapping, branch, operator_name, 
 
             for env in container['env']:
                 env_var_name = env['name']
-                if not env_var_name.endswith('_IMAGE'):
+                explicit_key = envImageMappings.get(env_var_name)
+                if explicit_key is None and not env_var_name.endswith('_IMAGE'):
+                    if env_value_looks_like_image_ref(env.get('value')):
+                        logging.warning(
+                            "[%s] Skipping image-like env var '%s' in %s; "
+                            "add it to envImageMappings to template it",
+                            operator_name,
+                            env_var_name,
+                            os.path.relpath(deployment, helmChart),
+                        )
                     continue
                 repository = parse_image_ref(env['value'])['repository']
-                image_key = lookup_image_key(repository, imageKeyMapping)
-                if image_key is None:
-                    errors.append(format_image_mapping_error(
-                        operator_name,
-                        os.path.relpath(deployment, helmChart),
-                        f"env.{env_var_name}",
-                        repository,
-                    ))
-                    logging.error(errors[-1])
-                    continue
+                if explicit_key is not None:
+                    if explicit_key not in imageKeyMapping.values():
+                        errors.append(
+                            f"[{operator_name}] envImageMappings entry '{env_var_name}' maps to unknown "
+                            f"image key '{explicit_key}' in {os.path.relpath(deployment, helmChart)}; "
+                            f"expected one of the imageMappings values"
+                        )
+                        logging.error(errors[-1])
+                        continue
+                    repository_key = lookup_image_key(repository, imageKeyMapping)
+                    if repository_key is not None and repository_key != explicit_key:
+                        logging.warning(
+                            "envImageMappings entry '%s' -> '%s' overrides repository mapping '%s' for image '%s'",
+                            env_var_name,
+                            explicit_key,
+                            repository_key,
+                            repository,
+                        )
+                    image_key = explicit_key
+                else:
+                    image_key = lookup_image_key(repository, imageKeyMapping)
+                    if image_key is None:
+                        errors.append(format_image_mapping_error(
+                            operator_name,
+                            os.path.relpath(deployment, helmChart),
+                            f"env.{env_var_name}",
+                            repository,
+                        ))
+                        logging.error(errors[-1])
+                        continue
                 imageKeys.append(image_key)
                 if apply:
                     env['value'] = "{{ .Values.global.imageOverrides." + image_key + " }}"
@@ -1463,6 +1501,7 @@ def injectRequirements(helm_chart_path, operator, sizes, branch):
     """
     logging.info("Updating Helm chart '%s' with onboarding requirements ...", helm_chart_path)
     image_key_mapping = operator.get("imageMappings", {})
+    env_image_mappings = operator.get("envImageMappings", {})
     operator_name = operator.get("name") or os.path.basename(helm_chart_path)
     exclusions = operator.get("exclusions")
     inclusions = operator.get("inclusions")
@@ -1474,7 +1513,7 @@ def injectRequirements(helm_chart_path, operator, sizes, branch):
 
     # Validate image mappings before making any chart updates.
     errors.extend(fixImageReferences(helm_chart_path, image_key_mapping, branch, operator_name, apply=False))
-    errors.extend(fixEnvVarImageReferences(helm_chart_path, image_key_mapping, branch, operator_name, apply=False))
+    errors.extend(fixEnvVarImageReferences(helm_chart_path, image_key_mapping, branch, operator_name, apply=False, envImageMappings=env_image_mappings))
     errors.extend(fixImageReferencesForAddonTemplate(helm_chart_path, image_key_mapping, branch, operator_name, apply=False))
     if errors:
         logging.warning(
@@ -1485,7 +1524,7 @@ def injectRequirements(helm_chart_path, operator, sizes, branch):
         return errors
 
     fixImageReferences(helm_chart_path, image_key_mapping, branch, operator_name, apply=True)
-    fixEnvVarImageReferences(helm_chart_path, image_key_mapping, branch, operator_name, apply=True)
+    fixEnvVarImageReferences(helm_chart_path, image_key_mapping, branch, operator_name, apply=True, envImageMappings=env_image_mappings)
     fixImageReferencesForAddonTemplate(helm_chart_path, image_key_mapping, branch, operator_name, apply=True)
     injectAnnotationsForAddonTemplate(helm_chart_path, branch)
 
@@ -2135,6 +2174,7 @@ def main():
             op = {
                "name": repo.get("name"),
                "imageMappings": repo["imageMappings"],
+               "envImageMappings": repo.get("envImageMappings", {}),
                "bundlePath": bundlePath
             }
             repo["operators"] = [op]
