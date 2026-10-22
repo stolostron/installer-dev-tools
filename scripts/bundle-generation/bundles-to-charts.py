@@ -21,7 +21,7 @@ import sys
 import tempfile
 
 import yaml
-from git import Git, Repo
+from git import Repo
 from packaging import version
 from utils.git_sha_fetcher import fetch_sha_from_git_remote
 from validate_csv import *
@@ -91,7 +91,7 @@ def parse_image_ref(image_ref):
         _type_: _description_
     """
     # Image ref:  [registry-and-ns/]repository-name[:tag][@digest]
-    parsed_ref = dict()
+    parsed_ref = {}
 
     remaining_ref = image_ref
     at_pos = remaining_ref.rfind("@")
@@ -271,11 +271,10 @@ def add_deployment(helmChart, deployment):
 
     deploy['spec'] = deployment['spec']
     ensure_container_port_protocols(deploy['spec'])
-    if 'spec' in deploy:
-        if 'template' in deploy['spec']:
-            if 'spec' in deploy['spec']['template']:
-                if 'imagePullPolicy' in deploy['spec']['template']['spec']:
-                    del deploy['spec']['template']['spec']['imagePullPolicy']
+    if 'spec' in deploy and 'template' in deploy['spec']:
+        if 'spec' in deploy['spec']['template']:
+            if 'imagePullPolicy' in deploy['spec']['template']['spec']:
+                del deploy['spec']['template']['spec']['imagePullPolicy']
     deploy['metadata']['name'] = name
     with open(deployYaml, 'w', encoding='utf-8') as f:
         yaml.dump(deploy, f)
@@ -511,7 +510,7 @@ def copy_additional_resources(helmChart, csvPath, branch):
     unsupported_resources = []
 
     for filename in os.listdir(dirPath):
-        if filename.endswith(".yaml") or filename.endswith(".yml"):
+        if filename.endswith((".yaml", ".yml")):
             filePath = os.path.join(dirPath, filename)
 
             # Try to load all documents to check if it's multi-document
@@ -735,7 +734,9 @@ def _represent_multiline_string(dumper, data):
 LiteralBlockDumper.add_representer(str, _represent_multiline_string)
 
 # updateHelmResources adds standard configuration to the generic kubernetes resources
-def update_helm_resources(chartName, helmChart, skip_rbac_overrides, exclusions, inclusions, branch, preserved_files=[]):
+def update_helm_resources(chartName, helmChart, skip_rbac_overrides, exclusions, inclusions, branch, preserved_files=None):
+    if preserved_files is None:
+        preserved_files = []
     logging.info(f"Updating resources chart: {chartName}")
 
     resource_kinds = [
@@ -847,7 +848,7 @@ def find_templates_of_type(helmChart, kind, branch):
     """
     resources = []
     for filename in os.listdir(os.path.join(helmChart, "templates")):
-        if filename.endswith(".yaml") or filename.endswith(".yml"):
+        if filename.endswith((".yaml", ".yml")):
             filePath = os.path.join(helmChart, "templates", filename)
             with open(filePath, 'r', encoding='utf-8') as f:
                 # Handle multi-document YAML files for ACM 2.16+, MCE 2.11+
@@ -1048,8 +1049,8 @@ def insertFlowControlIfAround(lines_list, first_line_index, last_line_index, if_
         last_line_index (_type_): _description_
         if_condition (_type_): _description_
     """
-    lines_list[first_line_index] = "{{- if %s }}\n%s" % (if_condition, lines_list[first_line_index])
-    lines_list[last_line_index] = "%s{{- end }}\n" % lines_list[last_line_index]
+    lines_list[first_line_index] = f"{{{{- if {if_condition} }}}}\n{lines_list[first_line_index]}"
+    lines_list[last_line_index] = f"{lines_list[last_line_index]}{{{{- end }}}}\n"
 
 def is_version_compatible(branch, min_release_version, min_backplane_version, min_ocm_version, enforce_master_check=True):
     """_summary_
@@ -1076,10 +1077,7 @@ def is_version_compatible(branch, min_release_version, min_backplane_version, mi
         pattern = r'(\d+\.\d+)'  # Matches versions like '2.12'
 
         if branch == "main" or branch == "master":
-            if enforce_master_check:
-                return True
-            else:
-                return False
+            return bool(enforce_master_check)
 
         match = re.search(pattern, branch)
         if match:
@@ -1106,14 +1104,7 @@ def is_version_compatible(branch, min_release_version, min_backplane_version, mi
             logging.error("Version not found in branch: %s", branch)
             return False
         
-    if acm_release_version and version.Version(acm_release_version) >= version.Version(min_release_version):
-        return True
-
-    elif mce_release_version and version.Version(mce_release_version) >= version.Version(min_backplane_version):
-        return True
-
-    else:
-        return False
+    return bool(acm_release_version and version.Version(acm_release_version) >= version.Version(min_release_version) or mce_release_version and version.Version(mce_release_version) >= version.Version(min_backplane_version))
 
 # injectHelmFlowControl injects advanced helm flow control which would typically make a .yaml file more difficult to parse. This should be called last.
 def injectHelmFlowControl(deployment, sizes, branch):
@@ -1220,7 +1211,6 @@ def injectHelmFlowControl(deployment, sizes, branch):
                 insertFlowControlIfAround(lines, i, i+1, "semverCompare \">=4.11.0\" .Values.hubconfig.ocpVersion")
                 if is_version_compatible(branch, '9.9', '2.7', '2.12'):
                     insertFlowControlIfAround(lines, i, i+1, ".Values.global.deployOnOCP")
-    #
     a_file = open(deployment, "w")
     a_file.writelines(lines)
     a_file.close()
@@ -2043,7 +2033,7 @@ def main():
             config = yaml.safe_load(f)
         logging.info("Loaded configuration from '%s'", config_yaml)
 
-    except Exception as e:
+    except Exception:
         logging.critical("Unexpected error while loading configuration '%s'", config_yaml)
         sys.exit(1)
 
@@ -2171,7 +2161,7 @@ def main():
             except KeyError:
                 logging.critical("branch and bundlePath are required for tool-generated bundles")
                 sys.exit(1)
-            cmd = "%s %s %s %s" % (repo["gen_command"], branch, sha, bundlePath)
+            cmd = "{} {} {} {}".format(repo["gen_command"], branch, sha, bundlePath)
 
             logging.info("Running bundle-gen tool: %s", cmd)
             rc = os.system(cmd)

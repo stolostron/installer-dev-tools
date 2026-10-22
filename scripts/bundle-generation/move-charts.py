@@ -4,15 +4,15 @@
 # Assumes: Python 3.6+
 
 import argparse
+import logging
 import os
 import re
 import shutil
-import yaml
-import logging
-import subprocess
-from git import Repo, exc
-from packaging import version
+import sys
 
+import yaml
+from git import Repo
+from packaging import version
 from validate_csv import *
 
 # Config Constants
@@ -68,13 +68,7 @@ def is_version_compatible(branch, min_release_version, min_backplane_version, mi
             logging.error("Version not found in branch: %s", branch)
             return False
 
-    if acm_release_version and version.Version(acm_release_version) >= version.Version(min_release_version):
-        return True
-
-    elif mce_release_version and version.Version(mce_release_version) >= version.Version(min_backplane_version):
-        return True
-
-    return False
+    return bool(acm_release_version and version.Version(acm_release_version) >= version.Version(min_release_version) or mce_release_version and version.Version(mce_release_version) >= version.Version(min_backplane_version))
 
 def inject_probe_config_helm_templates(deployment_file):
     """
@@ -261,12 +255,12 @@ def copyHelmChart(destinationChartPath, repo, chart, branch):
 def addCRDs(repo, chart, outputDir):
     if not 'chart-path' in chart:
         logging.critical("Could not validate chart path in given chart: " + chart)
-        exit(1)
+        sys.exit(1)
 
     chartPath = os.path.join(os.path.dirname(os.path.realpath(__file__)), "tmp", repo, chart["chart-path"])
     if not os.path.exists(chartPath):
         logging.critical("Could not validate chartPath at given path: " + chartPath)
-        exit(1)
+        sys.exit(1)
 
     # Use custom crd-path if specified (from repo root), otherwise default to chart-path/crds
     repoPath = os.path.join(os.path.dirname(os.path.realpath(__file__)), "tmp", repo)
@@ -275,7 +269,7 @@ def addCRDs(repo, chart, outputDir):
         logging.info(f"Using custom CRD path: {chart['crd-path']}")
     else:
         crdPath = os.path.join(chartPath, "crds")
-        logging.info(f"Using default CRD path: {os.path.join(chart["chart-path"], "crds")}")
+        logging.info(f"Using default CRD path: {os.path.join(chart['chart-path'], 'crds')}")
 
     if not os.path.exists(crdPath):
         logging.info(f"No CRDs for repo: {repo} at path: {crdPath}")
@@ -369,7 +363,7 @@ def main():
         for chart in repo["charts"]:
             if not chartConfigAcceptable(chart):
                 logging.critical("Unable to generate helm chart without configuration requirements.")
-                exit(1)
+                sys.exit(1)
 
             logging.info("Helm Chartifying -  %s!\n", chart["name"])
 

@@ -9,6 +9,7 @@ import json
 import logging
 import os
 import shutil
+import sys
 
 import yaml
 from git import Repo
@@ -135,33 +136,33 @@ def main():
     else:
         config_yaml = os.path.join(SCRIPT_DIR, "config.yaml")
 
-    logging.info("Loading configuration from: %s" % config_yaml)
+    logging.info(f"Loading configuration from: {config_yaml}")
     with open(config_yaml, 'r') as f:
         config = yaml.safe_load(f)
 
     # Clone pipeline repository into temporary directory path.
     repo_directory = os.path.join(os.path.dirname(os.path.realpath(__file__)), f"tmp/{args.repo}")
     if os.path.exists(repo_directory): # If path exists, remove and re-clone
-        logging.warning("The repository directory already exists, removing directory at: %s" % repo_directory)
+        logging.warning(f"The repository directory already exists, removing directory at: {repo_directory}")
         shutil.rmtree(repo_directory)
-    logging.info("Cloning pipeline repository: %s/%s (branch: %s)" % (args.org, args.repo, args.branch))
+    logging.info(f"Cloning pipeline repository: {args.org}/{args.repo} (branch: {args.branch})")
     clone_pipeline_repo(args.org, args.repo, args.branch, target_path=repo_directory, pat=os.getenv("GH_READ_PAT"))
 
     # Fetch latest manifest
     snapshots_path = os.path.join(repo_directory, ".")
     if not os.path.exists(snapshots_path):
-        logging.error("Snapshots directory does not exist in repository: %s" % args.repo)
-        exit(1)
+        logging.error(f"Snapshots directory does not exist in repository: {args.repo}")
+        sys.exit(1)
 
     logging.info("Fetching latest manifest from snapshots directory")
     manifest_file_path = fetch_latest_manifest(snapshots_path)
     if not manifest_file_path:
-        logging.error("Failed to fetch latest manifest file from snapshots in repository: %s" % args.repo)
-        exit(1)
-    logging.info("Latest manifest file fetched successfully from snapshots in repository: %s" % args.repo)
+        logging.error(f"Failed to fetch latest manifest file from snapshots in repository: {args.repo}")
+        sys.exit(1)
+    logging.info(f"Latest manifest file fetched successfully from snapshots in repository: {args.repo}")
 
     # Read manifest data
-    logging.info("Reading manifest data from file: %s" % manifest_file_path)
+    logging.info(f"Reading manifest data from file: {manifest_file_path}")
     manifest_data = read_json_file(manifest_file_path)
 
     # Normalize config into a list of components
@@ -176,7 +177,7 @@ def main():
 
     for repo in components:
         if "sha" in repo and "repo_name" in repo:
-            logging.info("Checking repository for updates: %s" % repo.get("repo_name"))
+            logging.info("Checking repository for updates: {}".format(repo.get("repo_name")))
             found_match = False
 
             # Compare git-sha256 values
