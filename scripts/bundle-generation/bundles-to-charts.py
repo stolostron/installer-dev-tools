@@ -728,6 +728,16 @@ def ensure_webhook_namespace(resource_data, resource_name, default_namespace):
         logging.info(f"  Namespace: {service_namespace}")
         logging.info(f"  Path: {service_path}\n")
 
+class LiteralBlockDumper(yaml.SafeDumper):
+    pass
+
+def _represent_multiline_string(dumper, data):
+    if "\n" in data and data.endswith("\n") and not any(line != line.rstrip() for line in data.splitlines()):
+        return dumper.represent_scalar("tag:yaml.org,2002:str", data, style="|")
+    return dumper.represent_scalar("tag:yaml.org,2002:str", data)
+
+LiteralBlockDumper.add_representer(str, _represent_multiline_string)
+
 # updateHelmResources adds standard configuration to the generic kubernetes resources
 def update_helm_resources(chartName, helmChart, skip_rbac_overrides, exclusions, inclusions, branch, preserved_files=[]):
     logging.info(f"Updating resources chart: {chartName}")
@@ -792,7 +802,7 @@ def update_helm_resources(chartName, helmChart, skip_rbac_overrides, exclusions,
                     ensure_webhook_namespace(resource_data, resource_name, default_namespace)
 
                 with open(template_path, 'w') as f:
-                    yaml.dump(resource_data, f, width=float("inf"), default_flow_style=False, allow_unicode=True)
+                    yaml.dump(resource_data, f, Dumper=LiteralBlockDumper, width=float("inf"), default_flow_style=False, allow_unicode=True)
                     logging.info(f"Succesfully updated resource: {resource_name}\n")
 
                 if kind == 'NetworkPolicy':
