@@ -1,39 +1,13 @@
-#!/usr/bin/env python3
 """
 Unit tests for the ensure_container_port_protocols function in bundles-to-charts.py.
 """
 
 import copy
-import importlib.util
-import os
-import sys
-import types
 import unittest
 
+from test_helpers import load_script_module
 
-def _load_bundles_to_charts():
-    """Loads bundles-to-charts.py as a module.
-
-    bundles-to-charts.py does `from validate_csv import *`, but `validate_csv`
-    is a module provided by the *consumer* repo (e.g.
-    multiclusterhub-operator/hack/bundle-automation/validate_csv.py) at
-    runtime via PYTHONPATH, not something that lives in this repo. Stub it
-    out here so the module under test can be imported standalone.
-    """
-    if 'validate_csv' not in sys.modules:
-        stub = types.ModuleType('validate_csv')
-        stub.validateCSV = lambda csvPath: []
-        stub.validateFieldMapping = lambda csv, ruleType, fieldMap: []
-        sys.modules['validate_csv'] = stub
-
-    module_path = os.path.join(os.path.dirname(os.path.realpath(__file__)), 'bundles-to-charts.py')
-    spec = importlib.util.spec_from_file_location('bundles_to_charts', module_path)
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
-
-
-bundles_to_charts = _load_bundles_to_charts()
+bundles_to_charts = load_script_module('bundles_to_charts', 'bundles-to-charts.py')
 
 
 class TestEnsureContainerPortProtocols(unittest.TestCase):

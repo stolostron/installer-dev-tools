@@ -1,50 +1,77 @@
-#!/usr/bin/env python3
 """
 Unit tests for the fetch_sha_from_git_remote function.
+
+All network access is mocked so the suite runs offline and on restricted
+CI runners.
 """
 
 import unittest
+from unittest.mock import patch
+
 from utils.git_sha_fetcher import fetch_sha_from_git_remote
+
+VALID_SHA = "a" * 40  # 40-char hex string
 
 
 class TestFetchShaFromGitRemote(unittest.TestCase):
     """Test cases for fetch_sha_from_git_remote function."""
 
-    def test_fetch_sha_from_hive_master(self):
-        """Test fetching SHA from openshift/hive master branch."""
-        git_url = "https://github.com/openshift/hive.git"
-        branch = "master"
+    @patch("utils.git_sha_fetcher.Git")
+    def test_returns_sha_for_valid_branch(self, mock_git_cls):
+        """Mocked ls-remote returning a valid SHA line."""
+        mock_git_cls.return_value.ls_remote.return_value = (
+            f"{VALID_SHA}\trefs/heads/master"
+        )
 
-        sha = fetch_sha_from_git_remote(git_url, branch)
+        sha = fetch_sha_from_git_remote(
+            "https://github.com/openshift/hive.git", "master"
+        )
 
-        # Verify SHA is a valid 40-character hex string
-        self.assertIsNotNone(sha)
-        self.assertEqual(len(sha), 40)
-        self.assertRegex(sha, r'^[a-f0-9]{40}$')
-        print(f"\n✓ Successfully fetched SHA from {git_url} branch {branch}: {sha}")
+        self.assertEqual(sha, VALID_SHA)
+        mock_git_cls.return_value.ls_remote.assert_called_once_with(
+            "https://github.com/openshift/hive.git", "refs/heads/master"
+        )
 
-    def test_invalid_branch_raises_error(self):
-        """Test that an invalid branch raises an appropriate error."""
-        git_url = "https://github.com/openshift/hive.git"
-        branch = "this-branch-does-not-exist-12345"
+    @patch("utils.git_sha_fetcher.Git")
+    def test_invalid_branch_raises_value_error(self, mock_git_cls):
+        """Empty ls-remote output → ValueError."""
+        mock_git_cls.return_value.ls_remote.return_value = ""
 
-        with self.assertRaises(ValueError) as context:
-            fetch_sha_from_git_remote(git_url, branch)
+        with self.assertRaises(ValueError) as ctx:
+            fetch_sha_from_git_remote(
+                "https://github.com/openshift/hive.git",
+                "this-branch-does-not-exist",
+            )
 
-        self.assertIn("No output from git ls-remote", str(context.exception))
-        print(f"\n✓ Correctly raised error for invalid branch")
+        self.assertIn("No output from git ls-remote", str(ctx.exception))
 
-    def test_invalid_repo_raises_error(self):
-        """Test that an invalid repository raises an appropriate error."""
-        git_url = "https://github.com/nonexistent/repository-12345.git"
-        branch = "master"
+    @patch("utils.git_sha_fetcher.Git")
+    def test_invalid_repo_raises_exception(self, mock_git_cls):
+        """git ls-remote itself raises → propagated."""
+        mock_git_cls.return_value.ls_remote.side_effect = Exception(
+            "fatal: repository not found"
+        )
 
-        with self.assertRaises(Exception):
-            fetch_sha_from_git_remote(git_url, branch)
+        with self.assertRaises(Exception):  # noqa: B017
+            fetch_sha_from_git_remote(
+                "https://github.com/nonexistent/repository-12345.git",
+                "master",
+            )
 
-        print(f"\n✓ Correctly raised error for invalid repository")
+    @patch("utils.git_sha_fetcher.Git")
+    def test_invalid_sha_format_raises_value_error(self, mock_git_cls):
+        """ls-remote returning malformed output → ValueError."""
+        mock_git_cls.return_value.ls_remote.return_value = (
+            "not-a-sha\trefs/heads/master"
+        )
+
+        with self.assertRaises(ValueError) as ctx:
+            fetch_sha_from_git_remote(
+                "https://github.com/openshift/hive.git", "master"
+            )
+
+        self.assertIn("Invalid SHA format", str(ctx.exception))
 
 
-if __name__ == '__main__':
-    # Run tests with verbose output
-    unittest.main(verbosity=2)
+if __name__ == "__main__":
+    unittest.main()

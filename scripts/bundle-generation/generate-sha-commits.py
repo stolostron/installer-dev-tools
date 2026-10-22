@@ -4,7 +4,6 @@
 # Assumes: Python 3.6+
 
 import argparse
-import coloredlogs
 import glob
 import json
 import logging
@@ -12,11 +11,7 @@ import os
 import shutil
 
 import yaml
-
 from git import Repo
-
-# Configure logging with coloredlogs
-coloredlogs.install(level='DEBUG')  # Set the logging level as needed
 
 # Config Constants
 SCRIPT_DIR = os.path.join(os.path.dirname(os.path.realpath(__file__)))
@@ -107,18 +102,23 @@ def read_json_file(file_path):
     return data
 
 def main():
-    logging.basicConfig(level=logging.INFO)
-    logging.info("Starting Pipeline Manifest Sha Sync script...")
-
+    """Entry point for the SHA commit sync script."""
     parser = argparse.ArgumentParser()
     parser.add_argument("--org", dest="org", default="stolostron", required=False, type=str, help="Organization of the repository")
     parser.add_argument("--repo", dest="repo", required=True, type=str, help="Destination repository of the pipeline manifest")
     parser.add_argument("--branch", dest="branch", required=True, type=str, help="Target branch of the pipeline manifest")
     parser.add_argument("--component", dest="component", type=str, required=False, help="If provided, only this component will be processed")
     parser.add_argument("--config", dest="config", type=str, required=False, help="If provided, this config file will be processed")
+    parser.add_argument("--debug", "-v", dest="debug", action="store_true", help="Enable DEBUG-level logging with coloredlogs")
+    parser.set_defaults(debug=False)
 
     # Parse the command line arguments.
     args = parser.parse_args()
+
+    # Configure logging — DEBUG when --debug/-v is passed, INFO otherwise.
+    import coloredlogs
+    coloredlogs.install(level='DEBUG' if args.debug else 'INFO')
+    logging.info("Starting Pipeline Manifest Sha Sync script...")
     component = args.component
     config_override = args.config
 
