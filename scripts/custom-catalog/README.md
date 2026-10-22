@@ -90,7 +90,7 @@ set of flags without building anything.
 | Recipe | Purpose | Key flags |
 |---|---|---|
 | `e2e-catalog` | Build + push operator, bundle, and catalog images end-to-end | `--username`, `--bundle-branch`, `--base-catalog-tag`, `--image-tag`, `--operator-branch`, `--mode`, `--operator-repo`, `--bundle-repo`, `--catalog-base`, `--use-https`, `--additional-images` |
-| `dev-branch-e2e` | Same as `e2e-catalog`, but first regenerates Helm charts in the operator repo with per-component branch/fork overrides | all `e2e-catalog` flags, plus `--component-branches`, `--component-forks`, `--org`, `--repo`, `--branch`, `--pipeline-repo`, `--pipeline-branch` |
+| `dev-branch-e2e` | Same as `e2e-catalog`, but first regenerates Helm charts in the operator repo (both bundle-sourced components from `config.yaml` and chart-sourced components from `charts-config.yaml`) with per-component branch/fork overrides | all `e2e-catalog` flags, plus `--component-branches`, `--component-forks`, `--org`, `--repo`, `--branch`, `--pipeline-repo`, `--pipeline-branch` |
 | `info` | Print resolved operator/bundle/catalog repo values for the given mode/overrides (no side effects) | `--mode`, `--operator-repo`, `--bundle-repo`, `--catalog-base`, `--use-https` |
 | `clone-operator` | Clone the operator repo (or update it if already cloned) | `--branch`, `--mode`, `--operator-repo`, `--use-https` |
 | `cleanup-operator` | Remove the cloned operator directory | `--mode` |
@@ -123,7 +123,7 @@ set of flags without building anything.
 
 | Recipe | Purpose | Key flags |
 |---|---|---|
-| `regenerate-charts` | Regenerate Helm charts via the bundle automation script, with optional per-component branch/fork overrides | `--org`, `--repo`, `--branch`, `--pipeline-repo`, `--pipeline-branch`, `--component-branches`, `--component-forks` |
+| `regenerate-charts` | Regenerate Helm charts via the bundle automation script — both bundle-sourced components (`--update-charts-from-bundles`, driven by `config.yaml`) and chart-sourced components (`--update-charts`, driven by `charts-config.yaml`) — with optional per-component branch/fork overrides | `--org`, `--repo`, `--branch`, `--pipeline-repo`, `--pipeline-branch`, `--component-branches`, `--component-forks` |
 | `copy-charts` | Copy existing Helm charts into `pkg/templates/` | `--org`, `--repo`, `--branch` |
 
 ## Common Flags
@@ -176,7 +176,10 @@ just e2e-catalog --mode MCE --username <username> --bundle-branch backplane-2.17
 ### Dev Workflow with Component Overrides
 
 Regenerate charts against branches/forks of specific components before building the
-full e2e catalog:
+full e2e catalog. `--component-branches`/`--component-forks` are applied against both
+the bundle-sourced components (`config.yaml`) and the chart-sourced components
+(`charts-config.yaml`), so it doesn't matter which of the two a given component is
+defined in — the override is honored either way:
 
 ```bash
 just dev-branch-e2e --username myuser --bundle-branch release-2.16 \
