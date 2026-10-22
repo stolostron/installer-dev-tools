@@ -14,14 +14,15 @@ See: https://redhat.atlassian.net/browse/ACM-31185
 """
 
 import argparse
+import glob
 import json
+import logging
 import os
 import re
 import sys
-import logging
-import yaml
-import glob
 from pathlib import Path
+
+import yaml
 
 try:
     import coloredlogs
@@ -55,7 +56,7 @@ def extract_required_image_keys(operator_path):
                 if data and 'global' in data and 'imageOverrides' in data['global']:
                     image_overrides = data['global']['imageOverrides']
                     if image_overrides:  # Check if not None
-                        for key in image_overrides.keys():
+                        for key in image_overrides:
                             if key:  # Skip empty keys
                                 if key not in required_keys:
                                     required_keys[key] = []

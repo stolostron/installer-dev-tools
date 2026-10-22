@@ -3,8 +3,8 @@
 # Copyright Contributors to the Open Cluster Management project
 # Assumes: Python 3.6+
 
-import sys
 import logging
+import sys
 
 REQUIRED_BUNDLE_FIELD_DESCRIPTION = "This is necessary for generating tool-specific bundles."
 

@@ -3,8 +3,9 @@
 Utility module for fetching git commit SHAs from remote repositories.
 """
 
-import re
 import logging
+import re
+
 from git import Git
 
 

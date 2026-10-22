@@ -9,9 +9,10 @@ import os
 import re
 import shutil
 import subprocess
+import sys
 
 import yaml
-from git import Repo, exc
+from git import Repo
 from packaging import version
 from validate_csv import *
 
@@ -45,7 +46,7 @@ def log_header(message, *args):
 # Parse an image reference, return dict containing image reference information
 def parse_image_ref(image_ref):
    # Image ref:  [registry-and-ns/]repository-name[:tag][@digest]
-   parsed_ref = dict()
+   parsed_ref = {}
 
    remaining_ref = image_ref
    at_pos = remaining_ref.rfind("@")
@@ -231,7 +232,7 @@ def ensure_operatorpolicy_value_templates(resource_data, extra_fields=None):
         harvested = {}
 
         for field in fields:
-            reference = '{{ .Values.global.%s.subscription.%s }}' % (key, field)
+            reference = f'{{{{ .Values.global.{key}.subscription.{field} }}}}'
             current = subscription.get(field)
 
             if current is None:
@@ -260,7 +261,7 @@ def ensure_operatorpolicy_value_templates(resource_data, extra_fields=None):
             policy_spec['subscription'] = subscription
 
         # spec.upgradeApproval is a sibling of subscription, not a member.
-        approval_reference = '{{ .Values.global.%s.upgradeApproval }}' % key
+        approval_reference = f'{{{{ .Values.global.{key}.upgradeApproval }}}}'
         approval = policy_spec.get('upgradeApproval')
         if approval is not None:
             if not is_helm_template(approval):
@@ -576,7 +577,7 @@ def copyHelmChart(destinationChartPath, repo, chart, chartVersion, branch):
 def find_templates_of_type(helmChart, kind):
     resources = []
     for filename in os.listdir(os.path.join(helmChart, "templates")):
-        if filename.endswith(".yaml") or filename.endswith(".yml"):
+        if filename.endswith((".yaml", ".yml")):
             filePath = os.path.join(helmChart, "templates", filename)
             with open(filePath, 'r') as f:
                 try:
@@ -642,7 +643,7 @@ def fixEnvVarImageReferences(helmChart, imageKeyMapping, envImageMappings=None):
                         logging.critical(
                             "envImageMappings entry '%s' maps to unknown image key '%s'; expected one of the "
                             "imageMappings values", env_var_name, explicit_key)
-                        exit(1)
+                        sys.exit(1)
                     repository_key = imageKeyMapping.get(repository)
                     if repository_key is not None and repository_key != explicit_key:
                         logging.warning(
@@ -654,8 +655,8 @@ def fixEnvVarImageReferences(helmChart, imageKeyMapping, envImageMappings=None):
                     try:
                         image_key = imageKeyMapping[repository]
                     except KeyError:
-                        logging.critical("No image key mapping provided for imageKey: %s" % repository)
-                        exit(1)
+                        logging.critical(f"No image key mapping provided for imageKey: {repository}")
+                        sys.exit(1)
                 imageKeys.append(image_key)
                 env['value'] = "{{ .Values.global.imageOverrides." + image_key + " }}"
         with open(deployment, 'w') as f:
@@ -698,8 +699,8 @@ def fixImageReferences(helmChart, imageKeyMapping):
                 try:
                     image_key = imageKeyMapping[image_key]
                 except KeyError:
-                    logging.critical("No image key mapping provided for imageKey: %s" % image_key)
-                    exit(1)
+                    logging.critical(f"No image key mapping provided for imageKey: {image_key}")
+                    sys.exit(1)
                 imageKeys.append(image_key)
                 container['image'] = "{{ .Values.global.imageOverrides." + image_key + " }}"
                 container['imagePullPolicy'] = "{{ .Values.global.pullPolicy }}"
@@ -712,8 +713,8 @@ def fixImageReferences(helmChart, imageKeyMapping):
                     try:
                         image_key = imageKeyMapping[image_key]
                     except KeyError:
-                        logging.critical("No image key mapping provided for imageKey: %s" % image_key)
-                        exit(1)
+                        logging.critical(f"No image key mapping provided for imageKey: {image_key}")
+                        sys.exit(1)
                     imageKeys.append(image_key)
                     container['image'] = "{{ .Values.global.imageOverrides." + image_key + " }}"
                     container['imagePullPolicy'] = "{{ .Values.global.pullPolicy }}"
@@ -744,8 +745,8 @@ def fixImageReferences(helmChart, imageKeyMapping):
 # insers Heml flow control if/end block around a first and last line without changing
 # the indexes of the lines list (so as to not mess up iteration across the lines).
 def insertFlowControlIfAround(lines_list, first_line_index, last_line_index, if_condition):
-   lines_list[first_line_index] = "{{- if %s }}\n%s" % (if_condition, lines_list[first_line_index])
-   lines_list[last_line_index] = "%s{{- end }}\n" % lines_list[last_line_index]
+   lines_list[first_line_index] = f"{{{{- if {if_condition} }}}}\n{lines_list[first_line_index]}"
+   lines_list[last_line_index] = f"{lines_list[last_line_index]}{{{{- end }}}}\n"
 
 def is_version_compatible(branch, min_release_version, min_backplane_version, min_ocm_version, enforce_master_check=True):
     """_summary_
@@ -772,10 +773,7 @@ def is_version_compatible(branch, min_release_version, min_backplane_version, mi
         pattern = r'(\d+\.\d+)'  # Matches versions like '2.12'
 
         if branch == "main" or branch == "master" or branch == "k8s-chart-fix":
-            if enforce_master_check:
-                return True
-            else:
-                return False
+            return bool(enforce_master_check)
 
         match = re.search(pattern, branch)
         if match:
@@ -802,14 +800,7 @@ def is_version_compatible(branch, min_release_version, min_backplane_version, mi
             logging.error("Version not found in branch: %s", branch)
             return False
 
-    if acm_release_version and version.Version(acm_release_version) >= version.Version(min_release_version):
-        return True
-
-    elif mce_release_version and version.Version(mce_release_version) >= version.Version(min_backplane_version):
-        return True
-
-    else:
-        return False
+    return bool(acm_release_version and version.Version(acm_release_version) >= version.Version(min_release_version) or mce_release_version and version.Version(mce_release_version) >= version.Version(min_backplane_version))
 
 # injectHelmFlowControl injects advanced helm flow control which would typically make a .yaml file more difficult to parse. This should be called last.
 def injectHelmFlowControl(deployment, branch):
@@ -1454,7 +1445,7 @@ def update_helm_resources(chartName, helmChart, skip_rbac_overrides, exclusions,
                         resource_data['metadata']['namespace'] = '{{ .Values.global.namespace  }}'
                         config_data = resource_data.get('data')
                         for key, value in config_data.items():
-                            if key.endswith(".yaml") or key.endswith(".yml"):
+                            if key.endswith((".yaml", ".yml")):
                                 value = re.sub(r": ([^'\"\n]*\{\{[^}]+\}\}[^'\"\n]*)$", r": '\1'", value, flags=re.MULTILINE)
                                 key_data = yaml.safe_load(value)
                                 # logging.warning(f"key_data={key_data.get('database').get('hostname')}")
@@ -1633,7 +1624,6 @@ def fixImageReferencesForAddonTemplate(helmChart, imageKeyMapping):
 
     addonTemplates = find_templates_of_type(helmChart, 'AddOnTemplate')
     imageKeys = []
-    temp = "" ## temporarily read image ref
     for addonTemplate in addonTemplates:
         with open(addonTemplate, 'r') as f:
             templateContent = yaml.safe_load(f)
@@ -1653,8 +1643,8 @@ def fixImageReferencesForAddonTemplate(helmChart, imageKeyMapping):
                         try:
                             image_key = imageKeyMapping[image_key]
                         except KeyError:
-                            logging.critical("No image key mapping provided for imageKey: %s" % image_key)
-                            exit(1)
+                            logging.critical(f"No image key mapping provided for imageKey: {image_key}")
+                            sys.exit(1)
                         imageKeys.append(image_key)
                         container['image'] = "{{ .Values.global.imageOverrides." + image_key + " }}"
                         # container['imagePullPolicy'] = "{{ .Values.global.pullPolicy }}"
@@ -1837,14 +1827,14 @@ def split_at(the_str, the_delim, favor_right=True):
 def addCRDs(repo, chart, outputDir):
     if not 'chart-path' in chart:
         logging.critical(f"Chart path missing in the provided chart configuration: {chart}")
-        exit(1) 
+        sys.exit(1) 
 
     chartPath = os.path.join(os.path.dirname(os.path.realpath(__file__)), "tmp", repo, chart["chart-path"])
     logging.debug(f"Chart path resolved to: '{chartPath}'")
 
     if not os.path.exists(chartPath):
         logging.critical(f"Chart path not found at: {chartPath}")
-        exit(1)
+        sys.exit(1)
         
     crdPath = os.path.join(chartPath, "crds")
     if not os.path.exists(crdPath):
@@ -1920,7 +1910,7 @@ def renderChart(chart_path):
     
     # Load the values from the values.yaml file
     with open(values_file_path, 'r') as f:
-        values = yaml.safe_load(f)
+        yaml.safe_load(f)
 
     try:
         # Use the Helm command to render the chart
@@ -1928,8 +1918,7 @@ def renderChart(chart_path):
         subprocess.run(
             ['helm', 'template', chart_path, '-f', values_file_path],
             check=True,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE
+            capture_output=True
         )
         logging.info("Chart rendered successfully.")
         return True
@@ -1990,7 +1979,7 @@ def main():
 
     if lint == False and not destination:
         logging.critical("Destination directory is required when not linting.")
-        exit(1)
+        sys.exit(1)
 
     logging.basicConfig(level=logging.DEBUG)
 
@@ -2012,7 +2001,7 @@ def main():
 
     if not config:
         logging.critical("No charts listed in config to be moved!")
-        exit(0)
+        sys.exit(0)
 
     # Normalize config into a list of components
     if isinstance(config, dict):
@@ -2068,7 +2057,7 @@ def main():
         for chart in repo["charts"]:
             if not chartConfigAcceptable(chart):
                 logging.critical("Unable to generate helm chart without configuration requirements.")
-                exit(1)
+                sys.exit(1)
 
             chart_name = chart.get("name", "")
             logging.info(f"Helm Chartifying: '{chart_name}'")
