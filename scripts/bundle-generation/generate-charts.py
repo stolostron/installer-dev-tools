@@ -31,6 +31,7 @@ from chart_utils import (
     inject_helm_flow_control as injectHelmFlowControl,
 )
 from git import Repo
+from utils.config_validator import validate_or_exit
 from validate_csv import *
 
 # Removed literal_str class - using post-processing instead
@@ -1561,9 +1562,11 @@ def main():
     parser.add_argument("--component-branch", dest="component_branch", action='append', type=str, required=False, help="Override branch for a specific component. Format: component_name:branch_name. Can be specified multiple times.")
     parser.add_argument("--component-fork", dest="component_fork", action='append', type=str, required=False, help="Override git repository URL for a specific component. Format: component_name:git_url. Can be specified multiple times.")
     parser.add_argument("--debug", "-v", dest="debug", action="store_true", help="Enable DEBUG-level logging with coloredlogs")
+    parser.add_argument("--skip-validation", dest="skip_validation", action="store_true", help="Skip config schema validation (not recommended)")
 
     parser.set_defaults(lint=False)
     parser.set_defaults(debug=False)
+    parser.set_defaults(skip_validation=False)
 
     args = parser.parse_args()
 
@@ -1624,6 +1627,11 @@ def main():
     if not config:
         logging.critical("No charts listed in config to be moved!")
         sys.exit(0)
+
+    # Fail fast on a malformed config instead of producing a partial chart tree.
+    validate_or_exit(
+        config, "charts", config_yaml, skip=args.skip_validation
+    )
 
     # Normalize config into a list of components
     if isinstance(config, dict):
