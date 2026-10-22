@@ -469,39 +469,79 @@ Legacy scripts for PR downstream status checking.
 
 ## Bundle Generation
 
-Scripts for generating Helm charts from operator bundles.
+Scripts for generating Helm charts from operator bundles/CSVs.
 
 **Location:** `scripts/bundle-generation/`
 
+There are **two independent chart generators**, each with its own config
+schema and entry-point mapping.  Both are invoked by the consumer operator
+repos (via `hack/bundle-automation/generate-shell.py`):
+
+| Make target (operator repo) | Script invoked | Config file | Top-level key |
+|-----------------------------|----------------|-------------|---------------|
+| `update-charts` | `generate-charts.py` | `charts-config.yaml` | `charts:` |
+| `update-charts-from-bundles` | `bundles-to-charts.py` | `config.yaml` | `operators:` |
+| `lint-bundles` | `bundles-to-charts.py --lint` | `config.yaml` | `operators:` |
+| `copy-charts` | `move-charts.py` | `charts-config.yaml` | `charts:` |
+
 ### generate-charts.py
 
-Main script for generating Helm charts from ACM/MCE operator bundles.
+Chart generator that clones component repos, runs `helm template`, and
+post-processes the output (image overrides, namespace templating, flow
+control, OperatorPolicy subscription templating).
 
 ```bash
 ./generate-charts.py --help
+./generate-charts.py --config charts-config.yaml --destination /path/to/charts
+./generate-charts.py --component my-operator --debug
 ```
 
 **Features:**
-- Converts operator bundles to Helm charts
-- CSV validation
-- Git repository integration
-- Version packaging
+- Converts pre-existing Helm charts into the operator repo layout
+- Rewrites image references to `{{ .Values.global.imageOverrides.<key> }}`
+- Injects Helm flow-control for node selectors, tolerations, proxy
+- OperatorPolicy subscription field templating (`operatorPolicySubscriptionFields`)
+- CSV validation via `validate_csv` (provided by consumer repo)
+- Version-gated feature toggles based on target ACM/MCE release
 
 ### bundles-to-charts.py
 
-Helper script for bundle-to-chart conversion.
+Chart generator that builds charts directly from OLM
+`ClusterServiceVersion` bundles rather than a pre-existing Helm chart.
+Supports the `gen_command` flow for custom bundle generation scripts.
+
+```bash
+./bundles-to-charts.py --help
+./bundles-to-charts.py --config config.yaml --destination /path/to/charts
+./bundles-to-charts.py --lint  # validate-only, no chart output
+./bundles-to-charts.py --component my-operator --debug
+```
+
+**Features:**
+- Converts OLM bundles/CSVs to Helm charts
+- Supports `gen_command` for component-specific bundle generators
+- SHA pinning via `git_remote` / `sha` config keys
+- Webhook manifest inlining (`webhook_paths`)
+- File preservation across regeneration (`preserve_files`)
+- Security context constraint injection (`security-context-constraints`)
+- `envImageMappings` for non-`_IMAGE` env var templating
 
 ### generate-sha-commits.py
 
-Generates SHA commits for bundle tracking.
+Syncs pinned component SHAs against a pipeline repo manifest.
+
+```bash
+./generate-sha-commits.py --repo pipeline-manifest --branch main --debug
+```
 
 ### move-charts.py
 
-Moves generated charts to appropriate directories.
+Copies pre-existing Helm charts into the `charts/{toggle,always}/<name>`
+layout expected by the operator repos.
 
-### helper.py
-
-Common utility functions for bundle generation scripts.
+```bash
+./move-charts.py --config charts-config.yaml --destination /path/to/charts
+```
 
 ### validate-image-keys.py
 
@@ -541,6 +581,44 @@ cd ~/stolostron/backplane-operator
 
 **Related Issues:**
 - https://redhat.atlassian.net/browse/ACM-31185
+
+### Adding a new config key (maintainer checklist)
+
+While `bundles-to-charts.py` and `generate-charts.py` remain as separate
+generators, a new config key must be wired into **both** to keep them in
+sync.  Follow this checklist:
+
+1. Add the key to the operator's per-component dict in the relevant config
+   template (`config/config.tpl` for `config.yaml`, `config/charts-config.tpl`
+   for `charts-config.yaml`, or both).
+2. Read the key with `.get("key", default)` in the operator-processing loop
+   of each generator that uses the config file.
+3. If the key changes chart output, add or extend a unit test in
+   `scripts/bundle-generation/test_*.py`.
+4. Document the key in this README under the appropriate generator section.
+5. Update `ARCHITECTURE.md` if the key changes data flow or conventions.
+
+### Config schemas
+
+The two generators use **different** config files with different top-level
+structures:
+
+| Generator | Config file | Top-level list key | Template |
+|-----------|-------------|-------------------|----------|
+| `bundles-to-charts.py` | `config.yaml` | `operators:` | `config/config.tpl` |
+| `generate-charts.py` / `move-charts.py` | `charts-config.yaml` | `charts:` | `config/charts-config.tpl` |
+
+Both share many per-component keys (`imageMappings`, `envImageMappings`,
+`skipRBACOverrides`, `escape-template-variables`, `security-context-constraints`),
+but some keys are generator-specific:
+
+- **`bundles-to-charts.py` only:** `bundlePath`, `bundles-directory`,
+  `channel`, `gen_command`, `git_remote`, `sha`, `webhook_paths`,
+  `preserve_files`
+- **`generate-charts.py` only:** `chart-path`, `always-or-toggle`,
+  `updateChartVersion`, `operatorPolicySubscriptionFields`
+
+See the config templates for inline documentation and examples.
 
 ---
 

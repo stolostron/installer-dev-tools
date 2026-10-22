@@ -53,15 +53,21 @@ expected to exist in the consuming operator repo at execution time.
 
 ### Bundle generation (`scripts/bundle-generation/`)
 
-- **`generate-charts.py`** — the main chart generator. Clones component
-  repos, runs `helm template`, then post-processes the output: rewrites
-  image references to `{{ .Values.global.imageOverrides.<key> }}`, injects
-  Helm flow-control for node selectors/tolerations/proxy settings, wraps
-  NetworkPolicies in conditionals, and applies version-gated feature
-  toggles based on the target ACM/MCE release.
-- **`bundles-to-charts.py`** — a sibling generator that builds charts
-  directly from the CSV (`ClusterServiceVersion`) rather than a
-  pre-existing Helm chart.
+Two independent chart generators, each with its own config schema:
+
+- **`generate-charts.py`** — chart generator for components that already
+  ship a Helm chart. Clones component repos, runs `helm template`, then
+  post-processes the output: rewrites image references to
+  `{{ .Values.global.imageOverrides.<key> }}`, injects Helm flow-control
+  for node selectors/tolerations/proxy settings, wraps NetworkPolicies in
+  conditionals, templates OperatorPolicy subscription fields, and applies
+  version-gated feature toggles. Uses `charts-config.yaml` (template:
+  `config/charts-config.tpl`).
+- **`bundles-to-charts.py`** — chart generator that builds charts directly
+  from OLM `ClusterServiceVersion` bundles. Supports `gen_command` for
+  custom bundle-generation scripts, SHA pinning via `git_remote`/`sha`,
+  webhook inlining, file preservation, and SCC injection. Uses
+  `config.yaml` (template: `config/config.tpl`).
 - **`move-charts.py`** — copies pre-existing Helm charts into the
   `charts/{toggle,always}/<name>` layout expected by the operator repos.
 - **`generate-sha-commits.py`** — syncs pinned component SHAs against a
