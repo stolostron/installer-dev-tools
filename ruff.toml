@@ -1,0 +1,29 @@
+# Ruff configuration for installer-dev-tools
+# https://docs.astral.sh/ruff/configuration/
+
+target-version = "py39"
+
+[lint]
+# Enable default rules plus isort
+extend-select = ["I"]
+
+# Ignore rules that produce too many pre-existing findings to fix at once.
+# These should be addressed incrementally in follow-up PRs.
+ignore = [
+    "LOG015",   # root-logger calls — pervasive in the generator scripts
+    "UP031",    # %-format strings — pervasive in legacy code
+    "UP022",    # capture_output preference — cosmetic
+    "PLR1722",  # exit() vs sys.exit() — requires careful review
+    "EXE001",   # shebang on non-executable files — pre-existing in generators
+    "SIM102",   # nested if collapse — pre-existing, risky auto-fix
+    "SIM103",   # return-bool simplification — pre-existing
+    "SIM114",   # combine if branches — pre-existing
+    "SIM115",   # context manager for open() — pre-existing, pervasive
+    "BLE001",   # blind Exception catches — pre-existing, needs careful review
+    "B006",     # mutable default arg — pre-existing
+    "C408",     # dict() vs {} — cosmetic
+    "PIE810",   # endswith tuple — pre-existing
+    "PLR2044",  # empty comment — pre-existing
+    "F841",     # unused variable — pre-existing in generator scripts
+    "F401",     # unused imports — pre-existing (git.exc, git.Git, validate_csv.*)
+]

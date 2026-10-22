@@ -11,7 +11,6 @@ import os
 import shutil
 
 import yaml
-
 from git import Repo
 
 # Config Constants

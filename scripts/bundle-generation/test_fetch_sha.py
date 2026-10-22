@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """
 Unit tests for the fetch_sha_from_git_remote function.
 
@@ -7,7 +6,7 @@ CI runners.
 """
 
 import unittest
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
 
 from utils.git_sha_fetcher import fetch_sha_from_git_remote
 
@@ -53,7 +52,7 @@ class TestFetchShaFromGitRemote(unittest.TestCase):
             "fatal: repository not found"
         )
 
-        with self.assertRaises(Exception):
+        with self.assertRaises(Exception):  # noqa: B017
             fetch_sha_from_git_remote(
                 "https://github.com/nonexistent/repository-12345.git",
                 "master",

@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """
 Unit tests for the OperatorPolicy subscription value templating in generate-charts.py.
 """
@@ -8,7 +7,6 @@ import tempfile
 import unittest
 
 import yaml
-
 from test_helpers import load_script_module
 
 generate_charts = load_script_module('generate_charts', 'generate-charts.py')
@@ -54,7 +52,7 @@ def policy_spec(resource_data, name):
     for manifest in resource_data['spec']['agentSpec']['workload']['manifests']:
         if manifest.get('kind') == 'OperatorPolicy' and manifest['metadata']['name'] == name:
             return manifest['spec']
-    raise AssertionError("OperatorPolicy '%s' not found" % name)
+    raise AssertionError(f"OperatorPolicy '{name}' not found")
 
 
 class TestOperatorPolicyValuesKey(unittest.TestCase):

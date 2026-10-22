@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """
 Unit tests for explicit env var image mappings (envImageMappings) in
 bundles-to-charts.py and generate-charts.py.
@@ -9,7 +8,6 @@ import tempfile
 import unittest
 
 import yaml
-
 from test_helpers import load_script_module
 
 bundles_to_charts = load_script_module('bundles_to_charts', 'bundles-to-charts.py')

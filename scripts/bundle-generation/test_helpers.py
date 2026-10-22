@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """
 Shared test helpers for bundle-generation unit tests.
 

@@ -4,15 +4,15 @@
 # Assumes: Python 3.6+
 
 import argparse
-import os
-import shutil
-import yaml
 import logging
-import subprocess
+import os
 import re
+import shutil
+import subprocess
+
+import yaml
 from git import Repo, exc
 from packaging import version
-
 from validate_csv import *
 
 # Removed literal_str class - using post-processing instead

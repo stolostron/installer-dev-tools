@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """
 Unit tests for the ensure_container_port_protocols function in bundles-to-charts.py.
 """
