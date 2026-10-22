@@ -19,16 +19,12 @@ import logging
 import re
 import sys
 import tempfile
-import coloredlogs
 import yaml
 
 from git import Repo, Git
 from packaging import version
 from validate_csv import *
 from utils.git_sha_fetcher import fetch_sha_from_git_remote
-
-# Configure logging with coloredlogs
-coloredlogs.install(level='DEBUG')  # Set the logging level as needed
 
 # Removed literal_str class - using post-processing instead
 
@@ -1971,11 +1967,7 @@ def cleanup_operator_backup(backup):
     shutil.rmtree(backup["backup_root"], ignore_errors=True)
 
 def main():
-    """_summary_
-    """
-    logging.basicConfig(level=logging.INFO)
-    logging.info("Script started.")
-
+    """Entry point for the bundles-to-charts generator."""
     ## Initialize ArgParser
     parser = argparse.ArgumentParser()
     parser.add_argument("--component", dest="component", type=str, required=False, help="If provided, only this component will be processed")
@@ -1985,10 +1977,18 @@ def main():
     parser.add_argument("--lint", dest="lint", action='store_true', help="If true, bundles will only be linted to ensure they can be transformed successfully. Default is False.")
     parser.add_argument("--component-branch", dest="component_branch", action='append', type=str, required=False, help="Override branch for a specific component. Format: component_name:branch_name. Can be specified multiple times.")
     parser.add_argument("--component-fork", dest="component_fork", action='append', type=str, required=False, help="Override git repository URL for a specific component. Format: component_name:git_url. Can be specified multiple times.")
+    parser.add_argument("--debug", "-v", dest="debug", action="store_true", help="Enable DEBUG-level logging with coloredlogs")
     parser.set_defaults(skipOverrides=False)
     parser.set_defaults(lint=False)
+    parser.set_defaults(debug=False)
 
     args = parser.parse_args()
+
+    # Configure logging — DEBUG when --debug/-v is passed, INFO otherwise.
+    import coloredlogs
+    coloredlogs.install(level='DEBUG' if args.debug else 'INFO')
+    logging.info("Script started.")
+
     component = args.component
     config_override = args.config
     destination = args.destination

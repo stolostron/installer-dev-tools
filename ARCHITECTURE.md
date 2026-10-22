@@ -122,13 +122,18 @@ CSV and (optionally) Jira issues via `component-squad.yaml` mapping.
   level — this is a script collection, not a compiled artifact.
 - **No `.tekton/` directory** — Tekton/Konflux pipelines live in the
   operator/component repos; this repo only reads/monitors them.
-- **CI (`.github/workflows/`)**: Pylint on changed Python files, ShellCheck
-  + `shfmt` on changed shell scripts, a scheduled image-mirroring workflow
-  (`sync-images.yml`), and a stale-issue/PR closer.
+- **CI (`.github/workflows/`)**: Ruff lint on changed Python files
+  (`lint-py.yml`), unit tests for `scripts/bundle-generation/` on PRs
+  touching that directory (`test-bundle-generation.yml`), ShellCheck +
+  `shfmt` on changed shell scripts (`lint-shell.yml`), a scheduled
+  image-mirroring workflow (`sync-images.yml`), and a stale-issue/PR
+  closer (`stale.yml`).
 - **Packaging**: `jira-pr-cli/setup.py` is the only formally packaged
-  component (`pip install -e .`); bundle-generation scripts depend on
-  `GitPython`, `PyYAML`, `coloredlogs`, `packaging`, and the external `helm`
-  CLI (installed by the consuming repo, not vendored here).
+  component (`pip install -e .`); bundle-generation scripts declare their
+  runtime dependencies in `scripts/bundle-generation/requirements.txt`
+  (`GitPython`, `PyYAML`, `coloredlogs`, `packaging`) and also require
+  the external `helm` CLI (installed by the consuming repo, not vendored
+  here).
 
 ## Dependencies & Integrations
 

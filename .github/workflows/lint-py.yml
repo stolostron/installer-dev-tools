@@ -2,49 +2,38 @@ name: Python Linter
 
 on:
   workflow_dispatch: {}
-  pull_request_target:
+  pull_request:
     types: [opened, synchronize, reopened]
     paths:
-      - "**.py" # Only trigger when .py files are modified
+      - "**.py"
 
 jobs:
-  shellcheck:
-    name: Run Pylint on Updated Python Scripts
+  ruff:
+    name: Ruff lint on changed Python files
     runs-on: ubuntu-latest
 
     steps:
       - name: Checkout Code
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
-      - name: Install Python and Pylint
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y python3-pip
-          pip3 install pylint
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
 
-      - name: Find Modified Python Scripts
+      - name: Install Ruff
+        run: pip install ruff
+
+      - name: Find modified Python files
         id: changed-files
         uses: tj-actions/changed-files@v46
         with:
           files: "**.py"
 
-      # Debugging step to check the modified files in the PR branch
-      - name: Debug Modified Files
+      - name: Run Ruff on changed files
+        if: steps.changed-files.outputs.any_changed == 'true'
         run: |
-          echo "Modified files: ${{ steps.changed-files.outputs.all_changed_files }}"
-
-      # - name: Run Pylint
-      #   if: steps.changed-files.outputs.any_changed == 'true'
-      #   run: |
-      #     IFS=' '  # Set IFS to space to split the list correctly
-      #     for file in ${{ steps.changed-files.outputs.all_changed_files }}; do
-      #         echo "🔍 Running Pylint on $file..."
-      #         pylint "$file"
-      #     done
-
-        # This step will only run if any previous step failed
-      - name: Fail Job if There Were Errors
-        if: failure()
-        run: |
-          echo "There were errors detected in the scripts. Please review the output above."
-          exit 1
+          echo "Linting changed Python files..."
+          ruff check ${{ steps.changed-files.outputs.all_changed_files }}

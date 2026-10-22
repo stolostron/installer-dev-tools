@@ -4,38 +4,16 @@ Unit tests for explicit env var image mappings (envImageMappings) in
 bundles-to-charts.py and generate-charts.py.
 """
 
-import importlib.util
 import os
-import sys
 import tempfile
-import types
 import unittest
 
 import yaml
 
+from test_helpers import load_script_module
 
-def _load_module(name, filename):
-    """Loads a generator script as a module.
-
-    Both scripts do `from validate_csv import *`, but `validate_csv` is
-    provided by the *consumer* repo at runtime via PYTHONPATH. Stub it out
-    here so the modules under test can be imported standalone.
-    """
-    if 'validate_csv' not in sys.modules:
-        stub = types.ModuleType('validate_csv')
-        stub.validateCSV = lambda csvPath: []
-        stub.validateFieldMapping = lambda csv, ruleType, fieldMap: []
-        sys.modules['validate_csv'] = stub
-
-    module_path = os.path.join(os.path.dirname(os.path.realpath(__file__)), filename)
-    spec = importlib.util.spec_from_file_location(name, module_path)
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
-
-
-bundles_to_charts = _load_module('bundles_to_charts', 'bundles-to-charts.py')
-generate_charts = _load_module('generate_charts', 'generate-charts.py')
+bundles_to_charts = load_script_module('bundles_to_charts', 'bundles-to-charts.py')
+generate_charts = load_script_module('generate_charts', 'generate-charts.py')
 
 
 IMAGE_MAPPINGS = {
