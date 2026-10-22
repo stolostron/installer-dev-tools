@@ -1,0 +1,9 @@
+# credentials - never commit these!
+.env
+authorization.txt
+
+# Data directories
+data/
+logs/
+diffs/
+cache/

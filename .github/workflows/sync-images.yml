@@ -1,0 +1,92 @@
+name: Sync Container Images
+
+on:
+  # Run every Monday at 2:00 AM UTC
+  schedule:
+    - cron: '0 2 * * 1'
+
+  # Allow manual triggering
+  workflow_dispatch:
+
+jobs:
+  sync-images:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install yq
+        run: |
+          wget -qO /usr/local/bin/yq https://github.com/mikefarah/yq/releases/latest/download/yq_linux_amd64
+          chmod +x /usr/local/bin/yq
+
+      - name: Login to source registry
+        run: |
+          echo "${{ secrets.SOURCE_REGISTRY_PASSWORD }}" | \
+            podman login quay.io \
+            --username "${{ secrets.SOURCE_REGISTRY_USER }}" \
+            --password-stdin
+
+      - name: Login to target registry
+        run: |
+          echo "${{ secrets.TARGET_REGISTRY_PASSWORD }}" | \
+            podman login quay.io \
+            --username "${{ secrets.TARGET_REGISTRY_USER }}" \
+            --password-stdin
+
+      - name: Sync images
+        run: |
+          set -e
+
+          # Parse config file and sync each image
+          config_file="config/image-sync.yaml"
+
+          if [[ ! -f "$config_file" ]]; then
+            echo "Error: Config file $config_file not found"
+            exit 1
+          fi
+
+          # Get the number of images in the config
+          image_count=$(yq eval '.images | length' "$config_file")
+
+          echo "Found $image_count image(s) to sync"
+
+          # Loop through each image configuration
+          for i in $(seq 0 $((image_count - 1))); do
+            source=$(yq eval ".images[$i].source" "$config_file")
+            target=$(yq eval ".images[$i].target" "$config_file")
+            tag=$(yq eval ".images[$i].tag" "$config_file")
+
+            echo ""
+            echo "========================================="
+            echo "Syncing image $((i + 1))/$image_count"
+            echo "Source: ${source}:${tag}"
+            echo "Target: ${target}:${tag}"
+            echo "========================================="
+
+            # Pull from source
+            echo "Pulling ${source}:${tag}..."
+            podman pull "${source}:${tag}"
+
+            # Tag for target
+            echo "Tagging as ${target}:${tag}..."
+            podman tag "${source}:${tag}" "${target}:${tag}"
+
+            # Push to target
+            echo "Pushing ${target}:${tag}..."
+            podman push "${target}:${tag}"
+
+            # Clean up local images to save space
+            podman rmi "${source}:${tag}" "${target}:${tag}" || true
+
+            echo "Successfully synced ${source}:${tag} -> ${target}:${tag}"
+          done
+
+          echo ""
+          echo "All images synced successfully!"
+
+      - name: Logout from registries
+        if: always()
+        run: |
+          podman logout quay.io || true

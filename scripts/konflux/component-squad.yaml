@@ -1,0 +1,182 @@
+# Konflux Component to Squad mapping configuration
+# The jira-component info can be found at https://issues.redhat.com/projects/ACM?selectedItem=com.atlassian.jira.jira-projects-plugin:components-page
+
+squads:
+  server-foundation:
+    jira-component: "Server Foundation"
+    components:
+      - addon-manager-mce
+      - cluster-proxy-addon-mce
+      - cluster-proxy-mce
+      - clusterlifecycle-state-metrics-mce
+      - managed-serviceaccount-mce
+      - managedcluster-import-controller-mce
+      - multicloud-manager-mce
+      - placement-mce
+      - registration-mce
+      - registration-operator-mce
+      - work-mce
+      - klusterlet-addon-controller-acm
+
+  install:
+    jira-component: "Installer"
+    components:
+      - backplane-must-gather-mce
+      - backplane-operator-mce
+      - discovery-operator-mce
+      - mce-operator-bundle-mce
+      - acm-operator-bundle-acm
+      - multiclusterhub-operator-acm
+
+  hypershift:
+    jira-component: "HyperShift"
+    components:
+      - cluster-api-provider-agent-mce
+      - cluster-api-provider-kubevirt-mce
+      - hypershift-addon-operator-mce
+      - hypershift-cli-mce
+      - hypershift-release-mce
+      - kube-rbac-proxy-mce
+
+  capi:
+    jira-component: "CAPI"
+    components:
+      - cluster-api-provider-aws-mce
+      - cluster-api-webhook-config-mce
+      - ose-cluster-api-rhel9
+      - ose-aws-cluster-api-controllers-rhel9
+      - ose-baremetal-cluster-api-controllers-rhel9
+
+  assisted-installer:
+    jira-component: "Infrastructure Operator"
+    components:
+      - cluster-api-provider-openshift-assisted-bootstrap-mce
+      - cluster-api-provider-openshift-assisted-control-plane-mce
+      - assisted-image-service
+      - assisted-installer
+      - assisted-installer-agent
+      - assisted-installer-controller
+      - assisted-service-8
+      - assisted-service-9
+      - postgresql-12
+
+  cluster-lifecycle:
+    jira-component: "Cluster Lifecycle"
+    components:
+      - cluster-curator-controller-mce
+      - cluster-image-set-controller-mce
+      - clusterclaims-controller-mce
+      - provider-credential-controller-mce
+
+  console:
+    jira-component: "Console"
+    components:
+      - console-mce-mce
+      - console-acm
+
+  hive:
+    jira-component: "Hive"
+    components:
+      - hive-mce
+
+  ibio:
+    jira-component: "Image Based Install Operator"
+    components:
+      - image-based-install-operator-mce
+
+  grc:
+    jira-component: "GRC"
+    components:
+      - acm-cli-acm
+      - cert-policy-controller-acm
+      - config-policy-controller-acm
+      - governance-policy-addon-controller-acm
+      - governance-policy-framework-addon-acm
+      - governance-policy-propagator-acm
+      - multicluster-role-assignment-acm
+      - must-gather-acm
+
+  business-continuity:
+    components:
+      - cluster-backup-operator-acm
+      - volsync-addon-controller-acm
+      - volsync
+
+  application-lifecycle:
+    jira-component: "Application Lifecycle"
+    components:
+      - cluster-permission-acm
+      - multicloud-integrations-acm
+      - multicluster-operators-application-acm
+      - multicluster-operators-channel-acm
+      - multicluster-operators-subscription-acm
+
+  observability:
+    jira-component: "Observability"
+    components:
+      - endpoint-monitoring-operator-acm
+      - grafana-acm
+      - grafana-dashboard-loader-acm
+      - kube-rbac-proxy-acm
+      - kube-state-metrics-acm
+      - memcached-exporter-acm
+      - metrics-collector-acm
+      - multicluster-observability-addon-acm
+      - multicluster-observability-operator-acm
+      - node-exporter-acm
+      - observatorium-acm
+      - observatorium-operator-acm
+      - prometheus-acm
+      - prometheus-alertmanager-acm
+      - prometheus-config-reloader-acm
+      - prometheus-operator-acm
+      - rbac-query-proxy-acm
+      - thanos-acm
+      - thanos-receive-controller-acm
+      - configmap-reloader
+      - memcached
+      - ose-kube-rbac-proxy
+      - kube-rbac-proxy-mce
+
+  search:
+    jira-component: "Search"
+    components:
+      - insights-client-acm
+      - insights-metrics-acm
+      - search-collector-acm
+      - search-indexer-acm
+      - search-v2-api-acm
+      - search-v2-operator-acm
+      - postgresql-16
+
+  virtualization:
+    jira-component: "Container Native Virtualization"
+    components:
+      - mtv-integrations-acm
+
+  siteconfig:
+    jira-component: "SiteConfig Operator"
+    components:
+      - siteconfig-acm
+
+  submariner:
+    name: "Submariner"
+    jira-component: "submariner"
+    components:
+      - submariner-addon-acm
+
+  edge-manager:
+    jira-component: "Edge Manager"
+    components:
+      - flightctl-api
+      - flightctl-ocp-ui
+      - flightctl-periodic
+      - flightctl-ui
+      - flightctl-worker
+      - flightctl-cli-artifacts
+      - flightctl-alert-exporter
+      - flightctl-alertmanager-proxy
+      - flightctl-db-setup
+      - flightctl-db-userinfo-proxy
+      - origin-cli
+      - redis-7-c9s

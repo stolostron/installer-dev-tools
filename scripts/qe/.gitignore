@@ -1,0 +1,10 @@
+authorization.txt
+authorization2.txt
+venv/
+tmp/
+latest-acm.txt
+latest-mce.txt
+diff-acm.txt
+diff-mce.txt
+cache/
+diffs/
