@@ -129,7 +129,6 @@ def fillChartYaml(helmChart, name, csvPath):
     with open(chartYml, 'r', encoding='utf-8') as f:
         chart = yaml.safe_load(f)
 
-    # logging.info("%s", csvPath)
     # Read CSV
     with open(csvPath, 'r', encoding='utf-8') as f:
         csv = yaml.safe_load(f)
@@ -145,7 +144,6 @@ def fillChartYaml(helmChart, name, csvPath):
             if 'description' in csv["metadata"]["annotations"]:
                 logging.info("Description: %s", csv["metadata"]["annotations"]["description"])
                 chart['description'] = csv["metadata"]["annotations"]["description"]
-    # chart['version'] = csv['metadata']['name'].split(".", 1)[1][1:]
     with open(chartYml, 'w', encoding='utf-8') as f:
         yaml.dump(chart, f, sort_keys=True)
     logging.info("'%s' Chart.yaml updated successfully.\n", helmChart)
@@ -219,7 +217,6 @@ def add_cluster_scoped_rbac(helmChart, rbacMap):
         rbacMap (_type_): _description_
     """
     name = rbacMap["serviceAccountName"]
-    # name = "not-default"
 
     logging.info("Setting cluster scoped RBAC ...")
     logging.info("Templating clusterrole '%s-clusterrole.yaml' ...", name)
@@ -273,7 +270,6 @@ def add_namespace_scoped_rbac(helmChart, rbacMap):
         rbacMap (_type_): _description_
     """
     name = rbacMap["serviceAccountName"]
-    # name = "not-default"
     logging.info("Setting namespaced scoped RBAC ...")
     logging.info("Templating role '%s-role.yaml' ...", name)
     # Create role
@@ -585,7 +581,6 @@ def copy_webhook_configuration_manifests(dest_helm_chart_path, webhook_path):
             kind = yaml_content.get('kind')
             name = yaml_content.get('metadata', {}).get('name')
 
-            # if not kind or not name:
             logging.warning(
                 f"YAML content is missing a kind or name attribute. Skipping resource processing: {yaml_content}")
 
