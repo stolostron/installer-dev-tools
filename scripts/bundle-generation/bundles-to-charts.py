@@ -552,12 +552,6 @@ def copy_additional_resources(helmChart, csvPath, branch):
             ", ".join(set(unsupported_resources)))  # Use `set` to avoid duplicates
         sys.exit(1)
 
-def print_title(title: str):
-    separator = '-' * (len(title) + 10)
-    logging.info(separator)
-    logging.info(f"{title.center(len(separator))}")
-    logging.info(separator)
-
 # Copies webhook resources from the target directory to the Helm chart
 def copy_webhook_configuration_manifests(dest_helm_chart_path, webhook_path):
     """_summary_

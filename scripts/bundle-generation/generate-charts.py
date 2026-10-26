@@ -687,37 +687,6 @@ def updateDeployments(chartName, helmChart, exclusions, inclusions, branch):
         if 'pullSecretOverride' in inclusions:
             addPullSecretOverride(deployment)
 
-def ensure_addon_deployment_config_namespace(resource_data, resource_name, default_namespace):
-    resource_namespace = resource_data.get('namespace')
-
-    if resource_namespace is None:
-        # Use the default Helm namespace if not specified
-        resource_namespace = default_namespace
-
-    else:
-        # Update Helm templating to override existing namespace
-        resource_namespace = f"{{{{ default \"{resource_namespace}\" .Values.global.namespace }}}}"
-
-    resource_data['metadata']['namespace'] = resource_namespace
-    logging.info(f"AddonDeploymentConfig namespace for '{resource_name}' set to: '{resource_namespace}'.\n")
-
-def ensure_clusterrole_binding_subject_namespace(resource_data, resource_name, default_namespace):
-    if 'subjects' not in resource_data:
-        return
-    
-    for subject in resource_data.get('subjects', []):
-        subject_namespace = subject.get('namespace')
-        
-        if subject_namespace is None:
-            # Use the default Helm namespace if not specified
-            subject_namespace = default_namespace            
-        else:
-            # Update Helm templating to override existing namespace
-            subject_namespace = f"{{{{ default \"{subject_namespace}\" .Values.global.namespace }}}}"
-    
-        subject['namespace'] = subject_namespace
-    logging.info(f"Subject namespace for '{resource_name}' set to: '{subject_namespace}'\n")
-
 def ensure_stateful_set_storage_class(resource_data, resource_name):
     """
     Ensures that a StatefulSet has a storageClassName set.
