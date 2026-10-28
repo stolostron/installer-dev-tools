@@ -1,0 +1,15 @@
+# ShellCheck configuration
+# https://github.com/koalaman/shellcheck/wiki/Directive
+#
+# Severity gate: keep warnings and errors visible while suppressing the
+# info-level findings that dominate the existing script set, so adoption
+# starts from a clean baseline.
+severity=warning
+
+# Existing scripts are not POSIX-portable and use bashisms.
+shell=bash
+
+# Sourced files cannot be followed statically in CI.
+external-sources=false
+
+disable=SC1091,SC2034,SC2155

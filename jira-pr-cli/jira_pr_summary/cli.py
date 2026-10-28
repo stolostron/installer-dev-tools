@@ -31,6 +31,7 @@ import subprocess
 import sys
 from datetime import datetime, timedelta, timezone
 from typing import Dict, List, Optional
+from urllib.parse import urlparse
 from urllib.request import urlopen
 from urllib.error import URLError
 
@@ -294,15 +295,13 @@ class JiraPRSummary:
         # SSH: git@github.com:owner/repo.git
         # HTTPS: https://github.com/owner/repo.git
 
-        if 'github.com' not in url:
-            return None
-
         if url.startswith('git@github.com:'):
             path = url.replace('git@github.com:', '').replace('.git', '')
             return path
-        elif 'github.com/' in url:
-            path = url.split('github.com/')[-1].replace('.git', '')
-            return path
+
+        parsed = urlparse(url)
+        if parsed.netloc == 'github.com' and parsed.path:
+            return parsed.path.strip('/').removesuffix('.git')
 
         return None
 
@@ -4305,10 +4304,13 @@ Report issues: https://github.com/stolostron/installer-dev-tools/issues
                 continue
             for pr_num, pr_info in prs.items():
                 pr_url = pr_info.get('pr_url', '')
-                if pr_url and 'github.com' in pr_url:
-                    parts = pr_url.split('github.com/')
-                    if len(parts) > 1:
-                        repo = parts[1].split('/pull/')[0]
+                if pr_url:
+                    parsed = urlparse(pr_url)
+                    parts = parsed.path.strip('/').split('/')
+                    if (parsed.netloc == 'github.com'
+                            and len(parts) >= 4
+                            and parts[2] == 'pull'):
+                        repo = f"{parts[0]}/{parts[1]}"
                         if repo not in cache_lookup:
                             cache_lookup[repo] = {}
                         cache_lookup[repo][int(pr_num)] = issue_key

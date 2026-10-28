@@ -1,0 +1,26 @@
+[MAIN]
+fail-under=7.0
+ignore=CVS,.git,__pycache__,build,dist,.venv,venv
+
+[MESSAGES CONTROL]
+# Start permissive and tighten as the codebase is cleaned up.
+disable=
+    missing-module-docstring,
+    missing-class-docstring,
+    missing-function-docstring,
+    too-few-public-methods,
+    too-many-arguments,
+    too-many-locals,
+    too-many-branches,
+    too-many-statements,
+    duplicate-code,
+    fixme
+
+[FORMAT]
+max-line-length=120
+
+[DESIGN]
+max-args=8
+max-locals=20
+max-branches=20
+max-statements=60
