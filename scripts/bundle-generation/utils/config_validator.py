@@ -89,7 +89,10 @@ _OPERATOR_ENTRY_KEYS = {
     "ignore-webhook-definitions",
 }
 
-_OPERATOR_ENTRY_REQUIRED = {"name", "bundlePath", "imageMappings"}
+# ``bundlePath`` is not listed here: it is only required when the alternate
+# ``bundles-directory`` + ``channel`` flow is not used. See
+# ``_validate_operator_entry``.
+_OPERATOR_ENTRY_REQUIRED = {"name", "imageMappings"}
 
 # --- charts-config.yaml / copy-config.yaml --------------------------------
 
@@ -159,7 +162,7 @@ def _check_keys(entry, known_keys, required_keys, path, errors, warnings):
         if key not in known_keys:
             warnings.append(f"{path}: unknown key '{key}'")
     for key in required_keys:
-        if key not in entry:
+        if key not in entry or entry[key] is None:
             errors.append(f"{path}: missing required key '{key}'")
 
 
@@ -216,6 +219,15 @@ def _validate_operator_entry(entry, path, errors, warnings):
     _check_keys(
         entry, _OPERATOR_ENTRY_KEYS, _OPERATOR_ENTRY_REQUIRED, path, errors, warnings
     )
+    # ``bundles-to-charts.py`` resolves the bundle path either from an explicit
+    # ``bundlePath`` or by scanning ``bundles-directory`` for ``channel``.
+    if entry.get("bundlePath") is None and not (
+        entry.get("bundles-directory") and entry.get("channel")
+    ):
+        errors.append(
+            f"{path}: missing required key 'bundlePath' "
+            "(or both 'bundles-directory' and 'channel')"
+        )
     _check_types(entry, path, errors)
 
 
@@ -282,15 +294,31 @@ def validate_operators_config(config, errors, warnings):
                     errors.append(
                         f"{comp_path}: gen_command flow requires 'imageMappings'"
                     )
+                # bundles-to-charts.py reads repo["bundlePath"] to locate the
+                # generated bundle, so it is required on this flow.
+                if "gen_command" in comp and comp.get("bundlePath") is None:
+                    errors.append(
+                        f"{comp_path}: gen_command flow requires 'bundlePath'"
+                    )
 
 
-def _validate_chart_components(config, errors, warnings):
+def _validate_chart_components(
+    config, errors, warnings, require_github_ref=False, require_branch=True
+):
     """Shared chart-component validation for charts-config and copy-config.
 
     Both shapes are accepted: a mapping with ``components:`` (canonical for
     charts-config.yaml) and a bare root-level list (canonical for
     copy-config.yaml). ``move-charts.py`` and ``generate-charts.py`` both
     handle either, so rejecting one would produce false positives.
+
+    ``require_github_ref`` / ``require_branch`` differ per caller:
+      - ``move-charts.py`` always clone from ``github_ref`` (no override
+        mechanism) but fall back to the repository default branch when
+        ``branch`` is absent.
+      - ``generate-charts.py`` can supply the clone URL via
+        ``--component-fork`` and the branch via ``--component-branch``, so
+        the validator cannot require ``github_ref`` there.
     """
     components, top_level = _extract_components(config, errors)
 
@@ -312,7 +340,9 @@ def _validate_chart_components(config, errors, warnings):
 
         if "repo_name" not in comp:
             errors.append(f"{comp_path}: missing required key 'repo_name'")
-        if "branch" not in comp:
+        if require_github_ref and comp.get("github_ref") is None:
+            errors.append(f"{comp_path}: missing required key 'github_ref'")
+        if require_branch and comp.get("branch") is None:
             errors.append(f"{comp_path}: missing required key 'branch'")
 
         charts = comp.get("charts")
@@ -342,7 +372,11 @@ def validate_charts_config(config, errors, warnings):
 
 def validate_copy_config(config, errors, warnings):
     """Validate a copy-config.yaml (copy / move-charts.py)."""
-    _validate_chart_components(config, errors, warnings)
+    # move-charts.py always uses ``github_ref`` for the clone URL and clones
+    # the repository default branch when ``branch`` is omitted.
+    _validate_chart_components(
+        config, errors, warnings, require_github_ref=True, require_branch=False
+    )
 
 
 _VALIDATORS = {

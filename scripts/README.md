@@ -658,6 +658,14 @@ unknown keys as warnings (`--strict` promotes warnings to errors). Both the
 `components:` mapping form and a bare root-level list are accepted, matching
 what the generators themselves accept.
 
+Two required keys are conditional, mirroring generator behavior:
+
+- Operator entries need `bundlePath`, **or** both `bundles-directory` and
+  `channel` (from which `bundles-to-charts.py` derives the bundle path).
+  The `gen_command` flow always requires `bundlePath`.
+- `copy-config.yaml` components need `github_ref` (used for the clone URL)
+  but may omit `branch` (falls back to the repository default branch).
+
 ---
 
 ## Release Scripts
