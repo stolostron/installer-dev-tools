@@ -1584,7 +1584,7 @@ def addCRDs(repo, operator, outputDir, branch, preservedFiles=None, overwrite=Fa
 
     skipped_files = []
 
-    if 'bundlePath' in operator:
+    if operator.get('bundlePath'):
         manifestsPath = os.path.join(os.path.dirname(os.path.realpath(__file__)), "tmp", repo, operator["bundlePath"])
         if not os.path.exists(manifestsPath):
             raise ValueError("Could not validate bundlePath at given path: " + operator["bundlePath"])
@@ -1669,7 +1669,7 @@ def getBundleManifestsPath(repo, operator):
     getBundleManifestsPath returns the path to the manifests directory
     of the latest operator bundle available in the desired channel
     """
-    if 'bundlePath' in operator:
+    if operator.get('bundlePath'):
         bundlePath = os.path.join(os.path.dirname(os.path.realpath(__file__)), "tmp", repo, operator["bundlePath"])
         if not os.path.exists(bundlePath):
             logging.critical("Could not validate bundlePath at given path: %s", operator["bundlePath"])
@@ -1717,7 +1717,7 @@ def get_csv_path(repo, operator, branch):
     Returns:
         _type_: _description_
     """
-    if 'bundlePath' in operator:
+    if operator.get('bundlePath'):
         manifests_path = os.path.join(os.path.dirname(os.path.realpath(__file__)), "tmp", repo, operator["bundlePath"])
         if not os.path.exists(manifests_path):
             logging.critical("Could not validate bundlePath at given path: %s", operator["bundlePath"])
