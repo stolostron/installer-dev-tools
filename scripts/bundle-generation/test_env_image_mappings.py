@@ -135,7 +135,9 @@ class TestGenerateChartsEnvImageMappings(unittest.TestCase):
     def run_fix(self, env_vars, env_image_mappings=None):
         with tempfile.TemporaryDirectory() as tmpdir:
             chart = build_chart(tmpdir, env_vars)
-            errors = generate_charts.fixEnvVarImageReferences(chart, IMAGE_MAPPINGS, env_image_mappings)
+            errors = generate_charts.fixEnvVarImageReferences(
+                chart, IMAGE_MAPPINGS, envImageMappings=env_image_mappings,
+            )
             return errors, read_chart(chart)
 
     def test_explicit_mapping_is_templated(self):

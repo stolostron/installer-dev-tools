@@ -12,8 +12,25 @@ import subprocess
 import sys
 
 import yaml
+from chart_utils import (
+    NAMESPACE_SCOPED_KINDS,
+    RESOURCE_KINDS,
+    find_templates_of_type,
+    is_version_compatible,
+)
+from chart_utils import (
+    fix_addon_template_image_references as fixImageReferencesForAddonTemplate,
+)
+from chart_utils import (
+    fix_env_var_image_references as fixEnvVarImageReferences,
+)
+from chart_utils import (
+    fix_image_references as fixImageReferences,
+)
+from chart_utils import (
+    inject_helm_flow_control as injectHelmFlowControl,
+)
 from git import Repo
-from packaging import version
 from validate_csv import *
 
 # Removed literal_str class - using post-processing instead
@@ -42,49 +59,6 @@ def log_header(message, *args):
     logging.info(separator)
     logging.info(formatted_message)
     logging.info(separator)
-
-# Parse an image reference, return dict containing image reference information
-def parse_image_ref(image_ref):
-   # Image ref:  [registry-and-ns/]repository-name[:tag][@digest]
-   parsed_ref = {}
-
-   remaining_ref = image_ref
-   at_pos = remaining_ref.rfind("@")
-   if at_pos > 0:
-      parsed_ref["digest"] = remaining_ref[at_pos+1:]
-      remaining_ref = remaining_ref[0:at_pos]
-   else:
-      parsed_ref["digest"] = None
-   colon_pos = remaining_ref.rfind(":")
-   if colon_pos > 0:
-      parsed_ref["tag"] = remaining_ref[colon_pos+1:]
-      remaining_ref = remaining_ref[0:colon_pos]
-   else:
-      parsed_ref["tag"] = None
-   slash_pos = remaining_ref.rfind("/")
-   if slash_pos > 0:
-      parsed_ref["repository"] = remaining_ref[slash_pos+1:]
-      rgy_and_ns = remaining_ref[0:slash_pos]
-   else:
-      parsed_ref["repository"] = remaining_ref
-      rgy_and_ns = "localhost"
-   parsed_ref["registry_and_namespace"] = rgy_and_ns
-
-   rgy, ns = split_at(rgy_and_ns, "/", favor_right=False)
-   if not ns:
-      ns = ""
-
-   parsed_ref["registry"] = rgy
-   parsed_ref["namespace"] = ns
-
-   slash_pos = image_ref.rfind("/")
-   if slash_pos > 0:
-      repo_and_suffix = image_ref[slash_pos+1:]
-   else:
-      repo_and_suffix = image_ref
-   parsed_ref["repository_and_suffix"]  = repo_and_suffix
-
-   return parsed_ref
 
 
 def updateAddOnDeploymentConfig(yamlContent):
@@ -573,335 +547,11 @@ def copyHelmChart(destinationChartPath, repo, chart, chartVersion, branch):
 
     logging.info(f"Finished processing chart: '{chartName}'\n")
 
-# Given a resource Kind, return all filepaths of that resource type in a chart directory
-def find_templates_of_type(helmChart, kind, branch=None):
-    resources = []
-    for filename in os.listdir(os.path.join(helmChart, "templates")):
-        if filename.endswith((".yaml", ".yml")):
-            filePath = os.path.join(helmChart, "templates", filename)
-            with open(filePath, 'r', encoding='utf-8') as f:
-                try:
-                    # Handle multi-document YAML files for ACM 2.16+, MCE 2.11+
-                    if branch is not None and is_version_compatible(branch, '2.16', '2.11', '2.16'):
-                        docs = list(yaml.safe_load_all(f))
-                    else:
-                        single_doc = yaml.safe_load(f)
-                        docs = [single_doc] if single_doc else []
-                    for doc in docs:
-                        if doc and 'kind' in doc and doc['kind'] == kind:
-                            resources.append(filePath)
-                            break  # File matches, no need to check other docs
-                except yaml.YAMLError:
-                    continue
-        else:
-            continue
-    return resources
-
-def env_value_looks_like_image_ref(value):
-    """Return True when an env var value looks like a container image reference."""
-    if not isinstance(value, str) or not value:
-        return False
-    return "/" in value and (":" in value or "@" in value)
-
-# For each deployment, identify the image references if any exist in the environment variable fields, insert helm flow control code to reference it, and add image-key to the values.yaml file.
-# If the image-key referenced in the deployment does not exist in `imageMappings` in the Config.yaml, this will fail. Images must be explicitly defined
-# Env vars that do not end in `_IMAGE` can be opted in with an explicit `envImageMappings` entry (env var name -> image key).
-def fixEnvVarImageReferences(helmChart, imageKeyMapping, envImageMappings=None):
-    logging.info("Fixing image references in container 'env' section in deployments and values.yaml ...")
-    envImageMappings = envImageMappings or {}
-
-    # Path to the values.yaml file
-    valuesYaml = os.path.join(helmChart, "values.yaml")
-
-    # Check if the values.yaml file exists
-    if not os.path.exists(valuesYaml):
-        logging.error(f"{valuesYaml} does not exist. Skipping environment variable image reference updates.")
-        return []
-
-    with open(valuesYaml, 'r') as f:
-        values = yaml.safe_load(f)
-    deployments = find_templates_of_type(helmChart, 'Deployment')
-
-    errors = []
-    imageKeys = []
-    for deployment in deployments:
-        with open(deployment, 'r') as f:
-            deploy = yaml.safe_load(f)
-
-        containers = deploy['spec']['template']['spec']['containers']
-        for container in containers:
-            if 'env' not in container:
-                continue
-
-            for env in container['env']:
-                env_var_name = env['name']
-                # Skip env vars that use valueFrom (e.g. fieldRef, secretKeyRef)
-                # instead of a literal value — they have no image reference to rewrite.
-                if 'value' not in env:
-                    if 'valueFrom' in env:
-                        logging.info(
-                            "Skipping env var '%s' in %s — uses valueFrom, not a literal value",
-                            env_var_name,
-                            os.path.relpath(deployment, helmChart),
-                        )
-                    continue
-                explicit_key = envImageMappings.get(env_var_name)
-                if explicit_key is None and env_var_name.endswith('_IMAGE') == False:
-                    if env_value_looks_like_image_ref(env.get('value')):
-                        logging.warning(
-                            "Skipping image-like env var '%s' in %s; add it to envImageMappings to template it",
-                            env_var_name,
-                            os.path.relpath(deployment, helmChart),
-                        )
-                    continue
-                repository = parse_image_ref(env['value'])['repository']
-                if explicit_key is not None:
-                    if explicit_key not in imageKeyMapping.values():
-                        err = (
-                            f"envImageMappings entry '{env_var_name}' maps to unknown image key "
-                            f"'{explicit_key}'; expected one of the imageMappings values"
-                        )
-                        errors.append(err)
-                        logging.error(err)
-                        continue
-                    repository_key = imageKeyMapping.get(repository)
-                    if repository_key is not None and repository_key != explicit_key:
-                        logging.warning(
-                            "envImageMappings entry '%s' -> '%s' overrides repository mapping '%s' for image '%s'",
-                            env_var_name, explicit_key, repository_key, repository,
-                        )
-                    image_key = explicit_key
-                else:
-                    image_key = imageKeyMapping.get(repository)
-                    if image_key is None:
-                        err = f"No image key mapping provided for imageKey: {repository}"
-                        errors.append(err)
-                        logging.error(err)
-                        continue
-                imageKeys.append(image_key)
-                env['value'] = "{{ .Values.global.imageOverrides." + image_key + " }}"
-
-        if not errors:
-            with open(deployment, 'w') as f:
-                yaml.dump(deploy, f, width=float("inf"), sort_keys=False)
-
-    if not errors:
-        for imageKey in imageKeys:
-            values['global']['imageOverrides'][imageKey] = ""
-        with open(valuesYaml, 'w') as f:
-            yaml.dump(values, f, width=float("inf"), sort_keys=False)
-    logging.info("Image container env references in deployments and values.yaml updated successfully.\n")
-    return errors
-
-# For each deployment, identify the image references if any exist in the image field, insert helm flow control code to reference it, and add image-key to the values.yaml file.
-# If the image-key referenced in the deployment does not exist in `imageMappings` in the Config.yaml, this will fail. Images must be explicitly defined
-def fixImageReferences(helmChart, imageKeyMapping):
-    logging.info("Fixing image and pull policy references in deployments and values.yaml ...")
-
-    # Path to the values.yaml file
-    valuesYaml = os.path.join(helmChart, "values.yaml")
-
-    # Check if the values.yaml file exists
-    if not os.path.exists(valuesYaml):
-        logging.error(f"{valuesYaml} does not exist. Skipping image and pull policy updates.")
-        return []
-
-    with open(valuesYaml, 'r') as f:
-        values = yaml.safe_load(f)
-
-    resource_kinds = ["Deployment", "Job", "StatefulSet"]
-    errors = []
-    imageKeys = []
-    for kind in resource_kinds:
-        resource_templates = find_templates_of_type(helmChart, kind)
-
-        for template_path in resource_templates:
-            with open(template_path, 'r') as f:
-                resource_data = yaml.safe_load(f)
-
-            containers = resource_data['spec']['template']['spec']['containers']
-            for container in containers:
-                image_key = parse_image_ref(container['image'])["repository"]
-                mapped_key = imageKeyMapping.get(image_key)
-                if mapped_key is None:
-                    err = f"No image key mapping provided for imageKey: {image_key}"
-                    errors.append(err)
-                    logging.error(err)
-                    continue
-                image_key = mapped_key
-                imageKeys.append(image_key)
-                container['image'] = "{{ .Values.global.imageOverrides." + image_key + " }}"
-                container['imagePullPolicy'] = "{{ .Values.global.pullPolicy }}"
-
-            if 'initContainers' in resource_data['spec']['template']['spec']:
-
-                containers = resource_data['spec']['template']['spec']['initContainers']
-                for container in containers:
-                    image_key = parse_image_ref(container['image'])["repository"]
-                    mapped_key = imageKeyMapping.get(image_key)
-                    if mapped_key is None:
-                        err = f"No image key mapping provided for imageKey: {image_key}"
-                        errors.append(err)
-                        logging.error(err)
-                        continue
-                    image_key = mapped_key
-                    imageKeys.append(image_key)
-                    container['image'] = "{{ .Values.global.imageOverrides." + image_key + " }}"
-                    container['imagePullPolicy'] = "{{ .Values.global.pullPolicy }}"
-
-                if kind == "Deployment":
-                    args = container.get('args', [])
-                    refreshed_args = []
-                    for arg in args:
-                        if "--agent-image-name" not in arg:
-                            refreshed_args.append(arg)
-                        else:
-                            refreshed_args.append("--agent-image-name="+"{{ .Values.global.imageOverrides." + image_key + " }}")
-                    container['args'] = refreshed_args
-
-            if not errors:
-                with open(template_path, 'w') as f:
-                    yaml.dump(resource_data, f, width=float("inf"), sort_keys=False)
-
-    if not errors:
-        if 'imageOverride' in values['global']['imageOverrides']:
-            del values['global']['imageOverrides']['imageOverride']
-
-        for imageKey in imageKeys:
-            values['global']['imageOverrides'][imageKey] = ""
-
-        with open(valuesYaml, 'w') as f:
-            yaml.dump(values, f, width=float("inf"), sort_keys=False)
-    logging.info("Image references and pull policy in deployments and values.yaml updated successfully.\n")
-    return errors
-
-# insers Heml flow control if/end block around a first and last line without changing
-# the indexes of the lines list (so as to not mess up iteration across the lines).
-def insertFlowControlIfAround(lines_list, first_line_index, last_line_index, if_condition):
-   lines_list[first_line_index] = f"{{{{- if {if_condition} }}}}\n{lines_list[first_line_index]}"
-   lines_list[last_line_index] = f"{lines_list[last_line_index]}{{{{- end }}}}\n"
-
-def is_version_compatible(branch, min_release_version, min_backplane_version, min_ocm_version, enforce_master_check=True):
-    """_summary_
-
-    Args:
-        branch (_type_): _description_
-        min_release_version (_type_): _description_
-        min_backplane_version (_type_): _description_
-        min_ocm_version (_type_): _description_
-        enforce_master_check (bool, optional): _description_. Defaults to True.
-
-    Returns:
-        _type_: _description_
-    """
-
-    # Retrieve the release versions from environment variables
-    acm_release_version = os.getenv('ACM_RELEASE_VERSION')
-    mce_release_version = os.getenv('MCE_RELEASE_VERSION')
-
-    if not acm_release_version and not mce_release_version:
-        logging.error("Neither ACM nor MCE release version is set in environment variables.")
-
-        # Extract the version part from the branch name (e.g., '2.12-integration' -> '2.12')
-        pattern = r'(\d+\.\d+)'  # Matches versions like '2.12'
-
-        if branch == "main" or branch == "master":
-            return bool(enforce_master_check)
-
-        match = re.search(pattern, branch)
-        if match:
-            v = match.group(1)  # Extract the version
-            branch_version = version.Version(v)  # Create a Version object
-
-            if "release-ocm" in branch:
-                min_branch_version = version.Version(min_ocm_version)  # Use the minimum release version
-
-            elif "release" in branch:
-                min_branch_version = version.Version(min_release_version)  # Use the minimum release version
-
-            elif "backplane" in branch or "mce" in branch:
-                min_branch_version = version.Version(min_backplane_version)  # Use the minimum backplane version
-
-            else:
-                logging.error("Unrecognized branch type for branch: %s", branch)
-                return False
-
-            # Check if the branch version is compatible with the specified minimum branch
-            return branch_version >= min_branch_version
-
-        else:
-            logging.error("Version not found in branch: %s", branch)
-            return False
-
-    return bool(acm_release_version and version.Version(acm_release_version) >= version.Version(min_release_version) or mce_release_version and version.Version(mce_release_version) >= version.Version(min_backplane_version))
-
-# injectHelmFlowControl injects advanced helm flow control which would typically make a .yaml file more difficult to parse. This should be called last.
-def injectHelmFlowControl(deployment, branch):
-    logging.info("Adding Helm flow control for NodeSelector, Proxy Overrides, and SeccompProfile ...")
-    deploy = open(deployment, "r")
-    lines = deploy.readlines()
-    for i, line in enumerate(lines):
-        if line.strip() == "nodeSelector: \'\'":
-            lines[i] = """{{- with .Values.hubconfig.nodeSelector }}
-      nodeSelector:
-{{ toYaml . | indent 8 }}
-{{- end }}
-"""     
-        if line.strip() == "imagePullSecrets: \'\'":
-            lines[i] = """{{- if .Values.global.pullSecret }}
-      imagePullSecrets:
-      - name: {{ .Values.global.pullSecret }}
-{{- end }}
-"""
-        if line.strip() == "tolerations: \'\'":
-            lines[i] = """{{- with .Values.hubconfig.tolerations }}
-      tolerations:
-      {{- range . }}
-      - {{ if .Key }} key: {{ .Key }} {{- end }}
-        {{ if .Operator }} operator: {{ .Operator }} {{- end }}
-        {{ if .Value }} value: {{ .Value }} {{- end }}
-        {{ if .Effect }} effect: {{ .Effect }} {{- end }}
-        {{ if .TolerationSeconds }} tolerationSeconds: {{ .TolerationSeconds }} {{- end }}
-        {{- end }}
-{{- end }}
-"""
-
-
-        if line.strip() == "env:" or line.strip() == "- env:" or line.strip() == "env: {}" or line.strip() == "env: []":
-            lines[i] = """        env:
-{{- if .Values.hubconfig.proxyConfigs }}
-        - name: HTTP_PROXY
-          value: {{ .Values.hubconfig.proxyConfigs.HTTP_PROXY }}
-        - name: HTTPS_PROXY
-          value: {{ .Values.hubconfig.proxyConfigs.HTTPS_PROXY }}
-        - name: NO_PROXY
-          value: {{ .Values.hubconfig.proxyConfigs.NO_PROXY }}
-{{- end }}
-"""
-
-        if is_version_compatible(branch, '9.9', '9.9', '9.9', False):
-            if 'replicas:' in line.strip():
-                lines[i] = """  replicas: {{ .Values.hubconfig.replicaCount }}
-"""
-
-        if line.strip() == "seccompProfile:":
-            next_line = lines[i+1]  # Ignore possible reach beyond end-of-list, not really possible
-            prev_line = lines[i-1]
-            if next_line.strip() == "type: RuntimeDefault" and "semverCompare" not in prev_line:
-                insertFlowControlIfAround(lines, i, i+1, "semverCompare \">=4.11.0\" .Values.hubconfig.ocpVersion")
-                if is_version_compatible(branch, '9.9', '2.7', '2.12'):
-                    insertFlowControlIfAround(lines, i, i+1, ".Values.global.deployOnOCP")
-
-        a_file = open(deployment, "w")
-        a_file.writelines(lines)
-        a_file.close()
-    logging.info("Added Helm flow control for NodeSelector, Proxy, and SeccompProfile Overrides.\n")
-
 def addPullSecretOverride(deployment):
-    deploy = open(deployment, "r")
-    lines = deploy.readlines()
+    with open(deployment, "r", encoding='utf-8') as f:
+        lines = f.readlines()
     for i, line in enumerate(lines):
-        if line.strip() == "env:" or line.strip() == "- env:" or line.strip() == "env: {}":
+        if line.strip() in ("env:", "- env:", "env: {}"):
             logging.info("Adding image pull secret environment variable to managed-serviceaccount deployment")
             lines[i] = """        env:
 {{- if .Values.global.pullSecret }}
@@ -909,9 +559,8 @@ def addPullSecretOverride(deployment):
           value: {{ .Values.global.pullSecret }}
 {{- end }}
 """
-        a_file = open(deployment, "w")
-        a_file.writelines(lines)
-        a_file.close()
+    with open(deployment, "w", encoding='utf-8') as f:
+        f.writelines(lines)
 
 # inject_probe_config_helm_templates injects conditional probeConfig templates (ACM 2.17+)
 def inject_probe_config_helm_templates(deployment_file):
@@ -1349,16 +998,8 @@ def update_helm_resources(chartName, helmChart, skip_rbac_overrides, exclusions,
     if not template_operatorpolicy_subscriptions:
         logging.info("Skipping OperatorPolicy subscription templating for branch %s: requires 5.0 or later", branch)
 
-    resource_kinds = [
-        "AddOnTemplate", "Certificate", "ClusterManagementAddOn", "ClusterRole", "ClusterRoleBinding", "ConfigMap", "ConsolePlugin", "Deployment", "Issuer", "Job",
-        "ManagedClusterSetBinding", "MulticlusterRoleAssignment", "MutatingWebhookConfiguration", "NetworkPolicy", "PersistentVolumeClaim", "Placement", "PodDisruptionBudget", "Role", "RoleBinding",
-        "Route", "Secret", "Service", "StatefulSet", "ValidatingWebhookConfiguration", "VerticalPodAutoscaler",
-    ]
-
-    namespace_scoped_kinds = [
-        "Certificate", "ConfigMap", "Deployment", "Issuer", "Job", "ManagedClusterSetBinding", "MulticlusterRoleAssignment", "NetworkPolicy", "PersistentVolumeClaim", "Placement",
-        "PodDisruptionBudget", "Role", "RoleBinding", "Route", "Secret", "Service", "StatefulSet", "VerticalPodAutoscaler"
-    ]
+    resource_kinds = RESOURCE_KINDS
+    namespace_scoped_kinds = NAMESPACE_SCOPED_KINDS
 
     network_policy_templates = []
     operator_policy_defaults = {}
@@ -1653,62 +1294,6 @@ def injectAnnotationsForAddonTemplate(helmChart):
                 logging.info("Annotations injected successfully. \n")
 
 
-# fixImageReferencesForAddonTemplate identify the image references for every deployment in addontemplates, if any exist
-# in the image field, insert helm flow control code to reference it, and add image-key to the values.yaml file.
-# If the image-key referenced in the addon template deployment does not exist in `imageMappings` in the Config.yaml,
-# this will fail. Images must be explicitly defined
-def fixImageReferencesForAddonTemplate(helmChart, imageKeyMapping):
-    logging.info("Fixing image references in addon templates and values.yaml ...")
-
-    addonTemplates = find_templates_of_type(helmChart, 'AddOnTemplate')
-    errors = []
-    imageKeys = []
-    for addonTemplate in addonTemplates:
-        with open(addonTemplate, 'r') as f:
-            templateContent = yaml.safe_load(f)
-            agentSpec = templateContent.get('spec', {}).get('agentSpec', {})
-            if 'workload' not in agentSpec:
-                continue
-            workload = agentSpec['workload']
-            if 'manifests' not in workload:
-                continue
-            manifests = workload['manifests']
-            for manifest in manifests:
-                if manifest['kind'] == 'Deployment':
-                    containers = manifest['spec']['template']['spec']['containers']
-                    for container in containers:
-                        image_key = parse_image_ref(container['image'])["repository"]
-                        mapped_key = imageKeyMapping.get(image_key)
-                        if mapped_key is None:
-                            err = f"No image key mapping provided for imageKey: {image_key}"
-                            errors.append(err)
-                            logging.error(err)
-                            continue
-                        image_key = mapped_key
-                        imageKeys.append(image_key)
-                        container['image'] = "{{ .Values.global.imageOverrides." + image_key + " }}"
-        if not errors:
-            with open(addonTemplate, 'w') as f:
-                yaml.dump(templateContent, f, width=float("inf"), sort_keys=False)
-                logging.info("AddOnTemplate updated with image override successfully. \n")
-
-    if errors or len(imageKeys) == 0:
-        return errors
-    valuesYaml = os.path.join(helmChart, "values.yaml")
-    with open(valuesYaml, 'r') as f:
-        values = yaml.safe_load(f)
-    if 'imageOverride' in values['global']['imageOverrides']:
-        del values['global']['imageOverrides']['imageOverride']
-    for imageKey in imageKeys:
-        values['global']['imageOverrides'][imageKey] = ""
-    with open(valuesYaml, 'w') as f:
-        yaml.dump(values, f, width=float("inf"), sort_keys=False)
-    logging.info("Image references and pull policy in addon templates and values.yaml updated successfully.\n")
-    return errors
-
-
-# updateRBAC adds standard configuration to the RBAC resources (clusterroles, roles, clusterrolebindings, and rolebindings)
-def updateRBAC(helmChart, chartName):
     logging.info("Updating clusterroles, roles, clusterrolebindings, and rolebindings ...")
     clusterroles = find_templates_of_type(helmChart, 'ClusterRole')
     roles = find_templates_of_type(helmChart, 'Role')
@@ -1832,7 +1417,7 @@ def injectRequirements(helm_chart_path, chart, branch):
 
     errors = []
     errors.extend(fixImageReferences(helm_chart_path, image_mappings) or [])
-    errors.extend(fixEnvVarImageReferences(helm_chart_path, image_mappings, env_image_mappings) or [])
+    errors.extend(fixEnvVarImageReferences(helm_chart_path, image_mappings, envImageMappings=env_image_mappings) or [])
     errors.extend(fixImageReferencesForAddonTemplate(helm_chart_path, image_mappings) or [])
     if errors:
         logging.warning(
@@ -1858,22 +1443,6 @@ def injectRequirements(helm_chart_path, chart, branch):
 
     logging.info("Updated Chart '%s' successfully", helm_chart_path)
     return errors
-
-def split_at(the_str, the_delim, favor_right=True):
-
-   split_pos = the_str.find(the_delim)
-   if split_pos > 0:
-      left_part  = the_str[0:split_pos]
-      right_part = the_str[split_pos+1:]
-   else:
-      if favor_right:
-         left_part  = None
-         right_part = the_str
-      else:
-         left_part  = the_str
-         right_part = None
-
-   return (left_part, right_part)
 
 def addCRDs(repo, chart, outputDir):
     if not 'chart-path' in chart:
