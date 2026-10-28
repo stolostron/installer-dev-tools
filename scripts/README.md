@@ -482,7 +482,7 @@ repos (via `hack/bundle-automation/generate-shell.py`):
 | `update-charts` | `generate-charts.py` | `charts-config.yaml` | `charts:` |
 | `update-charts-from-bundles` | `bundles-to-charts.py` | `config.yaml` | `operators:` |
 | `lint-bundles` | `bundles-to-charts.py --lint` | `config.yaml` | `operators:` |
-| `copy-charts` | `move-charts.py` | `charts-config.yaml` | `charts:` |
+| `copy-charts` | `move-charts.py` | `copy-config.yaml` | root list (no wrapper) |
 
 ### generate-charts.py
 
@@ -537,10 +537,13 @@ Syncs pinned component SHAs against a pipeline repo manifest.
 ### move-charts.py
 
 Copies pre-existing Helm charts into the `charts/{toggle,always}/<name>`
-layout expected by the operator repos.
+layout expected by the operator repos. Uses `copy-config.yaml` by default
+(a root-level YAML list, unlike the dict-wrapped `charts-config.yaml`).
+Also accepts a dict config with a `components:` key.
 
 ```bash
-./move-charts.py --config charts-config.yaml --destination /path/to/charts
+./move-charts.py --config copy-config.yaml --destination /path/to/charts
+./move-charts.py --destination /path/to/charts  # defaults to copy-config.yaml
 ```
 
 ### validate-image-keys.py
@@ -600,25 +603,73 @@ sync.  Follow this checklist:
 
 ### Config schemas
 
-The two generators use **different** config files with different top-level
-structures:
+The three config files use different top-level structures:
 
-| Generator | Config file | Top-level list key | Template |
-|-----------|-------------|-------------------|----------|
-| `bundles-to-charts.py` | `config.yaml` | `operators:` | `config/config.tpl` |
-| `generate-charts.py` / `move-charts.py` | `charts-config.yaml` | `charts:` | `config/charts-config.tpl` |
+| Generator | Config file | Structure | Template |
+|-----------|-------------|-----------|----------|
+| `bundles-to-charts.py` | `config.yaml` | dict with `components:` → `operators:` | `config/config.tpl` |
+| `generate-charts.py` | `charts-config.yaml` | dict with `components:` → `charts:` | `config/charts-config.tpl` |
+| `move-charts.py` | `copy-config.yaml` | root-level list → `charts:` | `config/copy-config.tpl` |
 
-Both share many per-component keys (`imageMappings`, `envImageMappings`,
-`skipRBACOverrides`, `escape-template-variables`, `security-context-constraints`),
-but some keys are generator-specific:
+All three share many per-component chart keys (`imageMappings`, `skipRBACOverrides`,
+`escape-template-variables`), but some keys are generator-specific:
 
 - **`bundles-to-charts.py` only:** `bundlePath`, `bundles-directory`,
   `channel`, `gen_command`, `git_remote`, `sha`, `webhook_paths`,
   `preserve_files`
 - **`generate-charts.py` only:** `chart-path`, `always-or-toggle`,
   `updateChartVersion`, `operatorPolicySubscriptionFields`
+- **`move-charts.py` / `copy-config.yaml`:** uses the same chart keys as
+  `charts-config.yaml` but with a root-level list instead of a
+  `components:` wrapper; supports `crd-path` for custom CRD location
 
 See the config templates for inline documentation and examples.
+
+### Config schema validation
+
+The schema lives in `utils/config_validator.py`. Each generator validates
+its own config at startup and **exits non-zero on a malformed config**
+before cloning anything or writing any charts — so a typo fails fast
+instead of producing a partial chart tree.
+
+| Script | Config type | Validated automatically |
+|--------|-------------|------------------------|
+| `bundles-to-charts.py` | `operators` | yes |
+| `generate-charts.py` | `charts` | yes |
+| `move-charts.py` | `copy` | yes |
+
+Bypass (not recommended, e.g. to test a deliberately odd config):
+
+```bash
+./generate-charts.py --config charts-config.yaml --skip-validation
+```
+
+To validate manually without running a generator:
+
+```bash
+python validate-config.py --config config.yaml --type operators
+python validate-config.py --config charts-config.yaml --type charts
+python validate-config.py --config copy-config.yaml --type copy
+python validate-config.py --config config.yaml --type operators --strict  # warnings → errors
+```
+
+Validation reports missing required keys and type mismatches as errors, and
+unknown keys as warnings (`--strict` promotes warnings to errors). Both the
+`components:` mapping form and a bare root-level list are accepted, matching
+what the generators themselves accept.
+
+Two required keys are conditional, mirroring generator behavior:
+
+- Operator entries need `bundlePath`, **or** both `bundles-directory` and
+  `channel` (from which `bundles-to-charts.py` derives the bundle path). A
+  null or empty `bundlePath` counts as absent, so it never reaches
+  `os.path.join`. The `gen_command` flow always requires `bundlePath`, even
+  when the component also has an `operators` list, because
+  `bundles-to-charts.py` selects that flow whenever `github_ref` is absent.
+- `copy-config.yaml` components need `github_ref` (used for the clone URL)
+  but may omit `branch` (falls back to the repository default branch).
+- `charts-config.yaml` components may omit `branch` for the same reason;
+  `--component-branch` can also supply it at run time.
 
 ---
 
