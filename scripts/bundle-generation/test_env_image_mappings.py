@@ -135,35 +135,43 @@ class TestGenerateChartsEnvImageMappings(unittest.TestCase):
     def run_fix(self, env_vars, env_image_mappings=None):
         with tempfile.TemporaryDirectory() as tmpdir:
             chart = build_chart(tmpdir, env_vars)
-            generate_charts.fixEnvVarImageReferences(chart, IMAGE_MAPPINGS, env_image_mappings)
-            return read_chart(chart)
+            errors = generate_charts.fixEnvVarImageReferences(chart, IMAGE_MAPPINGS, env_image_mappings)
+            return errors, read_chart(chart)
 
     def test_explicit_mapping_is_templated(self):
-        env, overrides = self.run_fix(
+        errors, (env, overrides) = self.run_fix(
             [{'name': 'DATABASE_IMAGE_PG15', 'value': 'quay.io/sclorg/postgresql-15-c9s:latest'}],
             {'DATABASE_IMAGE_PG15': 'postgresql_15'},
         )
+        self.assertEqual(errors, [])
         self.assertEqual(env['DATABASE_IMAGE_PG15'], '{{ .Values.global.imageOverrides.postgresql_15 }}')
         self.assertEqual(overrides['postgresql_15'], '')
 
     def test_image_suffix_fallback_still_works(self):
-        env, overrides = self.run_fix(
+        errors, (env, overrides) = self.run_fix(
             [{'name': 'DATABASE_IMAGE', 'value': 'quay.io/sclorg/postgresql-16-c9s:latest'}],
         )
+        self.assertEqual(errors, [])
         self.assertEqual(env['DATABASE_IMAGE'], '{{ .Values.global.imageOverrides.postgresql_16 }}')
         self.assertEqual(overrides['postgresql_16'], '')
 
-    def test_unknown_explicit_key_exits(self):
-        with self.assertRaises(SystemExit):
-            self.run_fix(
-                [{'name': 'DATABASE_IMAGE_PG15', 'value': 'quay.io/sclorg/postgresql-15-c9s:latest'}],
-                {'DATABASE_IMAGE_PG15': 'postgresql_99'},
-            )
+    def test_unknown_explicit_key_returns_errors(self):
+        errors, (env, overrides) = self.run_fix(
+            [{'name': 'DATABASE_IMAGE_PG15', 'value': 'quay.io/sclorg/postgresql-15-c9s:latest'}],
+            {'DATABASE_IMAGE_PG15': 'postgresql_99'},
+        )
+        # Error contract: returns errors instead of sys.exit(1)
+        self.assertEqual(len(errors), 1)
+        self.assertIn('postgresql_99', errors[0])
+        # Check that the env var was NOT rewritten (errors prevent writes)
+        self.assertEqual(env['DATABASE_IMAGE_PG15'], 'quay.io/sclorg/postgresql-15-c9s:latest')
+        self.assertEqual(overrides, {})
 
     def test_undeclared_image_like_env_var_is_untouched(self):
-        env, overrides = self.run_fix(
+        errors, (env, overrides) = self.run_fix(
             [{'name': 'DATABASE_IMAGE_PG15', 'value': 'quay.io/sclorg/postgresql-15-c9s:latest'}],
         )
+        self.assertEqual(errors, [])
         self.assertEqual(env['DATABASE_IMAGE_PG15'], 'quay.io/sclorg/postgresql-15-c9s:latest')
         self.assertEqual(overrides, {})
 
