@@ -7,6 +7,10 @@ on:
     paths:
       - "**.sh" # Only trigger when .sh files are modified
 
+permissions:
+  contents: read
+  pull-requests: read
+
 jobs:
   shellcheck:
     name: Run ShellCheck on Updated Bash Scripts
