@@ -150,6 +150,22 @@ class TestValidateOperatorsConfig(unittest.TestCase):
         errors, _ = self._run(config)
         self.assertTrue(any("'name'" in e for e in errors))
 
+    def test_gen_command_missing_bundle_path(self):
+        # bundles-to-charts.py reads repo["bundlePath"] on the gen_command flow.
+        config = {
+            "components": [
+                {
+                    "repo_name": "x",
+                    "branch": "main",
+                    "gen_command": "./gen.sh",
+                    "name": "x-operator",
+                    "imageMappings": {"a": "b"},
+                }
+            ],
+        }
+        errors, _ = self._run(config)
+        self.assertTrue(any("requires 'bundlePath'" in e for e in errors))
+
     # --- Unknown keys ---
 
     def test_unknown_top_level_key(self):
@@ -246,6 +262,62 @@ class TestValidateOperatorsConfig(unittest.TestCase):
             ]
         )
         self.assertEqual(errors, [])
+
+    def test_bundles_directory_channel_flow_without_bundle_path(self):
+        # bundles-to-charts.py derives the bundle path from bundles-directory
+        # + channel, so bundlePath is optional in that flow.
+        config = {
+            "components": [
+                {
+                    "repo_name": "x",
+                    "branch": "main",
+                    "operators": [
+                        {
+                            "name": "x",
+                            "bundles-directory": "bundles/",
+                            "channel": "stable",
+                            "imageMappings": {},
+                        }
+                    ],
+                }
+            ]
+        }
+        errors, _ = self._run(config)
+        self.assertEqual(errors, [])
+
+    def test_bundles_directory_without_channel_rejected(self):
+        config = {
+            "components": [
+                {
+                    "repo_name": "x",
+                    "branch": "main",
+                    "operators": [
+                        {
+                            "name": "x",
+                            "bundles-directory": "bundles/",
+                            "imageMappings": {},
+                        }
+                    ],
+                }
+            ]
+        }
+        errors, _ = self._run(config)
+        self.assertTrue(any("'bundlePath'" in e for e in errors))
+
+    def test_null_required_key_rejected(self):
+        config = {
+            "components": [
+                {
+                    "repo_name": "x",
+                    "branch": "main",
+                    "operators": [
+                        {"name": None, "bundlePath": "b/", "imageMappings": {}}
+                    ],
+                }
+            ]
+        }
+        errors, _ = self._run(config)
+        self.assertTrue(any("'name'" in e for e in errors))
 
 
 # ---------------------------------------------------------------------------
@@ -398,6 +470,37 @@ class TestValidateCopyConfig(unittest.TestCase):
         errors, _ = self._run({"components": []})
         self.assertEqual(errors, [])
 
+    def test_missing_github_ref(self):
+        # move-charts.py clones from repo["github_ref"], so it is required.
+        config = [
+            {
+                "repo_name": "x",
+                "branch": "main",
+                "charts": [],
+            }
+        ]
+        errors, _ = self._run(config)
+        self.assertTrue(any("missing required key 'github_ref'" in e for e in errors))
+
+    def test_branch_optional(self):
+        # move-charts.py falls back to the repository default branch.
+        config = [
+            {
+                "repo_name": "x",
+                "github_ref": "https://github.com/org/repo.git",
+                "charts": [
+                    {
+                        "name": "x",
+                        "chart-path": "c/",
+                        "always-or-toggle": "toggle",
+                        "imageMappings": {},
+                    }
+                ],
+            }
+        ]
+        errors, _ = self._run(config)
+        self.assertEqual(errors, [])
+
     def test_scalar_top_level_rejected(self):
         errors, _ = self._run("not-a-config")
         self.assertTrue(any("expected a mapping or list" in e for e in errors))
@@ -505,7 +608,7 @@ class TestValidateEndToEnd(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             path = os.path.join(tmp, "bad.yaml")
             with open(path, "w") as f:
-                f.write(":::bad yaml:::")
+                f.write("components: [unclosed")
             self.assertFalse(validate_config.validate(path, "operators"))
 
     def test_strict_mode_fails_on_warnings(self):
@@ -544,6 +647,7 @@ class TestConfigShapes(unittest.TestCase):
     def _chart_component(self):
         return {
             "repo_name": "x",
+            "github_ref": "https://github.com/org/repo.git",
             "branch": "main",
             "charts": [
                 {
@@ -589,7 +693,14 @@ class TestConfigShapes(unittest.TestCase):
 class TestValidateOrExit(unittest.TestCase):
 
     def test_passes_silently_on_valid_config(self):
-        config = [{"repo_name": "x", "branch": "main", "charts": []}]
+        config = [
+            {
+                "repo_name": "x",
+                "github_ref": "https://github.com/org/repo.git",
+                "branch": "main",
+                "charts": [],
+            }
+        ]
         with self.assertLogs("utils.config_validator", level="INFO"):
             validate_config.validate_or_exit(config, "copy", "copy-config.yaml")
 
@@ -609,7 +720,15 @@ class TestValidateOrExit(unittest.TestCase):
             )
 
     def test_strict_promotes_warnings_to_exit(self):
-        config = [{"repo_name": "x", "branch": "main", "charts": [], "typo": 1}]
+        config = [
+            {
+                "repo_name": "x",
+                "github_ref": "https://github.com/org/repo.git",
+                "branch": "main",
+                "charts": [],
+                "typo": 1,
+            }
+        ]
         with self.assertLogs("utils.config_validator", level="WARNING"):
             validate_config.validate_or_exit(config, "copy", "copy-config.yaml")
         with self.assertLogs("utils.config_validator", level="WARNING"), self.assertRaises(
