@@ -219,9 +219,10 @@ def _validate_operator_entry(entry, path, errors, warnings):
     _check_keys(
         entry, _OPERATOR_ENTRY_KEYS, _OPERATOR_ENTRY_REQUIRED, path, errors, warnings
     )
-    # ``bundles-to-charts.py`` resolves the bundle path either from an explicit
-    # ``bundlePath`` or by scanning ``bundles-directory`` for ``channel``.
-    if entry.get("bundlePath") is None and not (
+    # ``bundles-to-charts.py`` resolves the bundle path either from a truthy
+    # ``bundlePath`` or by scanning ``bundles-directory`` for ``channel``. A
+    # null or empty ``bundlePath`` counts as absent, matching the generator.
+    if not entry.get("bundlePath") and not (
         entry.get("bundles-directory") and entry.get("channel")
     ):
         errors.append(
@@ -294,12 +295,16 @@ def validate_operators_config(config, errors, warnings):
                     errors.append(
                         f"{comp_path}: gen_command flow requires 'imageMappings'"
                     )
-                # bundles-to-charts.py reads repo["bundlePath"] to locate the
-                # generated bundle, so it is required on this flow.
-                if "gen_command" in comp and comp.get("bundlePath") is None:
-                    errors.append(
-                        f"{comp_path}: gen_command flow requires 'bundlePath'"
-                    )
+
+        # ``bundles-to-charts.py`` selects the gen_command flow whenever
+        # ``github_ref`` is absent, so this requirement applies even when an
+        # ``operators`` list is configured alongside ``gen_command``.
+        if (
+            "gen_command" in comp
+            and not comp.get("github_ref")
+            and not comp.get("bundlePath")
+        ):
+            errors.append(f"{comp_path}: gen_command flow requires 'bundlePath'")
 
 
 def _validate_chart_components(
@@ -367,7 +372,9 @@ def _validate_chart_components(
 
 def validate_charts_config(config, errors, warnings):
     """Validate a charts-config.yaml (charts / generate-charts.py)."""
-    _validate_chart_components(config, errors, warnings)
+    # generate-charts.py clones the repository default branch when ``branch``
+    # is omitted, and ``--component-branch`` can supply it at run time.
+    _validate_chart_components(config, errors, warnings, require_branch=False)
 
 
 def validate_copy_config(config, errors, warnings):

@@ -166,6 +166,41 @@ class TestValidateOperatorsConfig(unittest.TestCase):
         errors, _ = self._run(config)
         self.assertTrue(any("requires 'bundlePath'" in e for e in errors))
 
+    def test_gen_command_with_operators_missing_bundle_path(self):
+        # The gen_command flow is selected whenever github_ref is absent, so
+        # the bundlePath requirement also applies when operators is present.
+        config = {
+            "components": [
+                {
+                    "repo_name": "x",
+                    "branch": "main",
+                    "gen_command": "./gen.sh",
+                    "operators": [
+                        {"name": "x-operator", "imageMappings": {}}
+                    ],
+                }
+            ],
+        }
+        errors, _ = self._run(config)
+        self.assertTrue(any("requires 'bundlePath'" in e for e in errors))
+
+    def test_gen_command_with_operators_and_bundle_path_accepted(self):
+        config = {
+            "components": [
+                {
+                    "repo_name": "x",
+                    "branch": "main",
+                    "gen_command": "./gen.sh",
+                    "bundlePath": "bundle/",
+                    "operators": [
+                        {"name": "x-operator", "bundlePath": "b/", "imageMappings": {}}
+                    ],
+                }
+            ],
+        }
+        errors, _ = self._run(config)
+        self.assertEqual(errors, [])
+
     # --- Unknown keys ---
 
     def test_unknown_top_level_key(self):
@@ -304,6 +339,29 @@ class TestValidateOperatorsConfig(unittest.TestCase):
         errors, _ = self._run(config)
         self.assertTrue(any("'bundlePath'" in e for e in errors))
 
+    def test_null_bundle_path_with_directory_channel_accepted(self):
+        # A null bundlePath is treated as absent, so the bundles-directory +
+        # channel flow is accepted and the generator does not join a null path.
+        config = {
+            "components": [
+                {
+                    "repo_name": "x",
+                    "branch": "main",
+                    "operators": [
+                        {
+                            "name": "x",
+                            "bundlePath": None,
+                            "bundles-directory": "bundles/",
+                            "channel": "stable",
+                            "imageMappings": {},
+                        }
+                    ],
+                }
+            ]
+        }
+        errors, _ = self._run(config)
+        self.assertEqual(errors, [])
+
     def test_null_required_key_rejected(self):
         config = {
             "components": [
@@ -359,6 +417,28 @@ class TestValidateChartsConfig(unittest.TestCase):
         errors, warnings = self._run(config)
         self.assertEqual(errors, [])
         self.assertEqual(warnings, [])
+
+    def test_branch_optional_for_charts(self):
+        # generate-charts.py clones the repository default branch when branch
+        # is omitted, and --component-branch can supply it at run time.
+        config = {
+            "components": [
+                {
+                    "repo_name": "x",
+                    "github_ref": "https://github.com/stolostron/x.git",
+                    "charts": [
+                        {
+                            "name": "x",
+                            "chart-path": "charts",
+                            "always-or-toggle": "toggle",
+                            "imageMappings": {},
+                        }
+                    ],
+                }
+            ],
+        }
+        errors, _ = self._run(config)
+        self.assertEqual(errors, [])
 
     def test_missing_chart_required_keys(self):
         config = {
