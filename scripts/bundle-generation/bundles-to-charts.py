@@ -147,7 +147,7 @@ def fillChartYaml(helmChart, name, csvPath):
                 chart['description'] = csv["metadata"]["annotations"]["description"]
     # chart['version'] = csv['metadata']['name'].split(".", 1)[1][1:]
     with open(chartYml, 'w', encoding='utf-8') as f:
-        yaml.dump(chart, f, sort_keys=False)
+        yaml.dump(chart, f, sort_keys=True)
     logging.info("'%s' Chart.yaml updated successfully.\n", helmChart)
 
 def ensure_container_port_protocols(deployment_spec):
@@ -207,7 +207,7 @@ def add_deployment(helmChart, deployment):
                 del deploy['spec']['template']['spec']['imagePullPolicy']
     deploy['metadata']['name'] = name
     with open(deployYaml, 'w', encoding='utf-8') as f:
-        yaml.dump(deploy, f, sort_keys=False)
+        yaml.dump(deploy, f, sort_keys=True)
     logging.info("Deployment '%s.yaml' updated successfully.\n", name)
 
 # Copy chart-templates/clusterrole,clusterrolebinding,serviceaccount.yaml update it with CSV information, and add to chart
@@ -234,7 +234,7 @@ def add_cluster_scoped_rbac(helmChart, rbacMap):
     clusterrole["metadata"]["name"] = name
     # Save Clusterrole
     with open(clusterroleYaml, 'w', encoding='utf-8') as f:
-        yaml.dump(clusterrole, f, sort_keys=False)
+        yaml.dump(clusterrole, f, sort_keys=True)
     logging.info("Clusterrole '%s-clusterrole.yaml' updated successfully.", name)
 
     logging.info("Templating serviceaccount '%s-serviceaccount.yaml' ...", name)
@@ -247,7 +247,7 @@ def add_cluster_scoped_rbac(helmChart, rbacMap):
     serviceAccount["metadata"]["name"] = name
     # Save Serviceaccount
     with open(serviceAccountYaml, 'w', encoding='utf-8') as f:
-        yaml.dump(serviceAccount, f, sort_keys=False)
+        yaml.dump(serviceAccount, f, sort_keys=True)
     logging.info("Serviceaccount '%s-serviceaccount.yaml' updated successfully.", name)
 
     logging.info("Templating clusterrolebinding '%s-clusterrolebinding.yaml' ...", name)
@@ -260,7 +260,7 @@ def add_cluster_scoped_rbac(helmChart, rbacMap):
     clusterrolebinding['roleRef']['name'] = clusterrole["metadata"]["name"]
     clusterrolebinding['subjects'][0]['name'] = name
     with open(clusterrolebindingYaml, 'w', encoding='utf-8') as f:
-        yaml.dump(clusterrolebinding, f, sort_keys=False)
+        yaml.dump(clusterrolebinding, f, sort_keys=True)
     logging.info("Clusterrolebinding '%s-clusterrolebinding.yaml' updated successfully.", name)
     logging.info("Cluster scoped RBAC created.\n")
 
@@ -286,7 +286,7 @@ def add_namespace_scoped_rbac(helmChart, rbacMap):
     role["metadata"]["name"] = name
     # Save role
     with open(roleYaml, 'w', encoding='utf-8') as f:
-        yaml.dump(role, f, sort_keys=False)
+        yaml.dump(role, f, sort_keys=True)
     logging.info("Role '%s-role.yaml' updated successfully.", name)
 
     # Create Serviceaccount
@@ -300,7 +300,7 @@ def add_namespace_scoped_rbac(helmChart, rbacMap):
         serviceAccount["metadata"]["name"] = name
         # Save Serviceaccount
         with open(serviceAccountYaml, 'w', encoding='utf-8') as f:
-            yaml.dump(serviceAccount, f, sort_keys=False)
+            yaml.dump(serviceAccount, f, sort_keys=True)
         logging.info("Serviceaccount '%s-serviceaccount.yaml' updated successfully.", name)
 
     logging.info("Templating rolebinding '%s-rolebinding.yaml' ...", name)
@@ -313,7 +313,7 @@ def add_namespace_scoped_rbac(helmChart, rbacMap):
     rolebinding['roleRef']['name'] = role["metadata"]["name"] = name
     rolebinding['subjects'][0]['name'] = name
     with open(rolebindingYaml, 'w', encoding='utf-8') as f:
-        yaml.dump(rolebinding, f, sort_keys=False)
+        yaml.dump(rolebinding, f, sort_keys=True)
     logging.info("Rolebinding '%s-rolebinding.yaml' updated successfully.", name)
     logging.info("Namespace scoped RBAC created.\n")
 
@@ -521,7 +521,7 @@ def copy_additional_resources(helmChart, csvPath, branch):
                                      resourceKind, resource_name, filename, new_filename)
 
                         with open(dest_file_path, 'w', encoding='utf-8') as f:
-                            yaml.dump(doc, f, width=float("inf"), default_flow_style=False, allow_unicode=True, sort_keys=False)
+                            yaml.dump(doc, f, width=float("inf"), default_flow_style=False, allow_unicode=True, sort_keys=True)
                         continue
 
                     # Handle expected resources (both required and optional)
@@ -539,7 +539,7 @@ def copy_additional_resources(helmChart, csvPath, branch):
                                      resourceKind, resource_name, filename, new_filename)
 
                         with open(dest_file_path, 'w', encoding='utf-8') as f:
-                            yaml.dump(doc, f, width=float("inf"), default_flow_style=False, allow_unicode=True, sort_keys=False)
+                            yaml.dump(doc, f, width=float("inf"), default_flow_style=False, allow_unicode=True, sort_keys=True)
                         continue
 
                     # Log unsupported resources
@@ -606,7 +606,7 @@ def copy_webhook_configuration_manifests(dest_helm_chart_path, webhook_path):
 
             # Write the YAML content to the new file
             with open(new_file_path, 'w') as new_file:
-                yaml.dump(yaml_content, new_file, default_flow_style=False, sort_keys=False)
+                yaml.dump(yaml_content, new_file, default_flow_style=False, sort_keys=True)
 
         except Exception as e:
             logging.warning(f"Unexpected error occurred while processing yaml content: {e}")
@@ -721,7 +721,7 @@ def update_helm_resources(chartName, helmChart, skip_rbac_overrides, exclusions,
                     ensure_webhook_namespace(resource_data, resource_name, default_namespace)
 
                 with open(template_path, 'w') as f:
-                    yaml.dump(resource_data, f, Dumper=LiteralBlockDumper, width=float("inf"), default_flow_style=False, allow_unicode=True, sort_keys=False)
+                    yaml.dump(resource_data, f, Dumper=LiteralBlockDumper, width=float("inf"), default_flow_style=False, allow_unicode=True, sort_keys=True)
                     logging.info(f"Succesfully updated resource: {resource_name}\n")
 
                 if kind == 'NetworkPolicy':
@@ -891,7 +891,7 @@ def updateDeployments(helmChart, operator, exclusions, sizes, branch):
         pod_template_spec['imagePullSecrets'] = ''
 
         with open(deployment, 'w', encoding='utf-8') as f:
-            yaml.dump(deploy, f, width=float("inf"), sort_keys=False)
+            yaml.dump(deploy, f, width=float("inf"), sort_keys=True)
 
         logging.info("Deployments updated with antiaffinity, security policies, and tolerations successfully. \n")
 
@@ -923,7 +923,7 @@ def updateRBAC(helmChart, branch):
         if rbac['kind'] in ['RoleBinding', 'ClusterRoleBinding']:
             rbac['roleRef']['name'] = "{{ .Values.org }}:{{ .Chart.Name }}:" + rbac['roleRef']['name']
         with open(rbacFile, 'w', encoding='utf-8') as f:
-            yaml.dump(rbac, f, sort_keys=False)
+            yaml.dump(rbac, f, sort_keys=True)
     logging.info("Clusterroles, roles, clusterrolebindings, and rolebindings updated. \n")
 
 def inject_security_context_constraints(resource, constraints_override):
@@ -1013,7 +1013,7 @@ def update_security_contexts(template_chart_path, constraints_override, branch):
 
                 inject_security_context_constraints(resource, constraints)
                 with open(template, 'w', encoding="utf-8") as f:
-                    yaml.dump(resource, f, width=float("inf"), sort_keys=False)
+                    yaml.dump(resource, f, width=float("inf"), sort_keys=True)
 
             except Exception as e:
                 logging.error(f"Error injecting security context for {template}: {e}")
@@ -1348,7 +1348,7 @@ def injectAnnotationsForAddonTemplate(helmChart, branch):
 
         if modified:
             with open(addonTemplate, 'w', encoding='utf-8') as f:
-                yaml.dump_all(docs, f, width=float("inf"), sort_keys=False)
+                yaml.dump_all(docs, f, width=float("inf"), sort_keys=True)
                 logging.info("Annotations injected successfully. \n")
 
 def backup_operator_output(output_dir, operator_name):

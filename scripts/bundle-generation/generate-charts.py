@@ -319,7 +319,7 @@ def merge_operatorpolicy_values(values_path, defaults):
         global_block[key] = existing
 
     with open(values_path, 'w') as f:
-        yaml.dump(values, f, width=float("inf"), default_flow_style=False, allow_unicode=True, sort_keys=False)
+        yaml.dump(values, f, width=float("inf"), default_flow_style=False, allow_unicode=True, sort_keys=True)
 
     logging.info("Seeded OperatorPolicy defaults for %s in %s", ', '.join(sorted(defaults)), values_path)
 
@@ -420,7 +420,7 @@ def updateResources(outputDir, repo, chart):
 
         try:
             with open(filePath, 'w') as f:
-                yaml.dump(yamlContent, f, width=float("inf"), sort_keys=False)
+                yaml.dump(yamlContent, f, width=float("inf"), sort_keys=True)
             logging.info(f"Successfully updated {filePath}")
         except Exception as e:
             logging.error(f"Error writing YAML content to {filePath}: {e}")
@@ -463,7 +463,7 @@ def updateValues(overwrite, original):
 
     # Write the updated dictionary back to values.yaml
     with open(original, 'w') as values_file:
-        yaml.dump(originalValues, values_file, default_flow_style=False, sort_keys=False)
+        yaml.dump(originalValues, values_file, default_flow_style=False, sort_keys=True)
 
 
 # Copy chart-templates to a new helmchart directory
@@ -496,7 +496,7 @@ def copyHelmChart(destinationChartPath, repo, chart, chartVersion, branch):
             chartYaml = yaml.safe_load(f)
         chartYaml['version'] = chartVersion
         with open(chartYamlPath, 'w') as f:
-            yaml.dump(chartYaml, f, width=float("inf"), sort_keys=False)
+            yaml.dump(chartYaml, f, width=float("inf"), sort_keys=True)
 
     overwriteValues = os.path.join(os.path.dirname(os.path.realpath(__file__)), "chart-values", chart['name'], "overwriteValues.yaml")
     specificValues = os.path.join(os.path.dirname(os.path.realpath(__file__)), "chart-values", chart['name'], "values.yaml")
@@ -673,7 +673,7 @@ def updateDeployments(chartName, helmChart, exclusions, inclusions, branch):
         deploy['spec']['template']['spec']['imagePullSecrets'] = ''
 
         with open(deployment, 'w') as f:
-            yaml.dump(deploy, f, width=float("inf"), sort_keys=False)
+            yaml.dump(deploy, f, width=float("inf"), sort_keys=True)
 
         logging.info("Deployments updated with antiaffinity, security policies, and tolerations successfully. \n")
 
@@ -1132,7 +1132,7 @@ def update_helm_resources(chartName, helmChart, skip_rbac_overrides, exclusions,
                                 key_data = replace_default(key_data, 'PLACEHOLDER_NAMESPACE', '{{ .Values.global.namespace }}')
                                 key_data = replace_default(key_data, 'placeholder_apiurl', '{{ .Values.global.apiUrl }}')
                                 key_data = replace_default(key_data, 'placeholder_basedomain', '{{ .Values.global.baseDomain }}')
-                                updated_yaml = yaml.dump(key_data, default_flow_style=False, allow_unicode=True, width=float("inf"), sort_keys=False)
+                                updated_yaml = yaml.dump(key_data, default_flow_style=False, allow_unicode=True, width=float("inf"), sort_keys=True)
                                 updated_yaml = re.sub(r": (?!['\"])(.*\{\{[^}]+\}\}.*?)$", r": '\1'", updated_yaml, flags=re.MULTILINE)
                                 config_data[key] = updated_yaml
                                 resource_data['data'] = config_data
@@ -1171,7 +1171,7 @@ def update_helm_resources(chartName, helmChart, skip_rbac_overrides, exclusions,
                 resource_data = replace_default(resource_data, 'PLACEHOLDER_NAMESPACE', '{{ .Values.global.namespace }}')
 
                 with open(template_path, 'w') as f:
-                    yaml.dump(resource_data, f, Dumper=LiteralBlockDumper, width=float("inf"), default_flow_style=False, allow_unicode=True, sort_keys=False)
+                    yaml.dump(resource_data, f, Dumper=LiteralBlockDumper, width=float("inf"), default_flow_style=False, allow_unicode=True, sort_keys=True)
                     logging.info(f"Succesfully updated resource: {resource_name}\n")
 
                 if kind == 'NetworkPolicy':
@@ -1290,7 +1290,7 @@ def injectAnnotationsForAddonTemplate(helmChart):
                         injected = True
         if injected:
             with open(addonTemplate, 'w') as f:
-                yaml.dump(templateContent, f, width=float("inf"), sort_keys=False)
+                yaml.dump(templateContent, f, width=float("inf"), sort_keys=True)
                 logging.info("Annotations injected successfully. \n")
 
 
@@ -1307,7 +1307,7 @@ def injectAnnotationsForAddonTemplate(helmChart):
         if rbac['kind'] in ['RoleBinding', 'ClusterRoleBinding']:
             rbac['roleRef']['name'] = "{{ .Values.org }}:{{ .Chart.Name }}:" + chartName
         with open(rbacFile, 'w') as f:
-            yaml.dump(rbac, f, width=float("inf"), sort_keys=False)
+            yaml.dump(rbac, f, width=float("inf"), sort_keys=True)
     logging.info("Clusterroles, roles, clusterrolebindings, and rolebindings updated. \n")
 
 def inject_security_context_constraints(resource, constraints_override):
@@ -1396,7 +1396,7 @@ def update_security_contexts(template_chart_path, constraints_override):
 
                 inject_security_context_constraints(resource, constraints)
                 with open(template, 'w', encoding="utf-8") as f:
-                    yaml.dump(resource, f, width=float("inf"), sort_keys=False)
+                    yaml.dump(resource, f, width=float("inf"), sort_keys=True)
 
             except Exception as e:
                 logging.error(f"Error injecting security context for {template}: {e}")

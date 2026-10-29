@@ -290,7 +290,7 @@ def fix_image_references(helmChart, imageKeyMapping, branch=None,
 
     for template_path, resource_data in pending_updates:
         with open(template_path, 'w', encoding='utf-8') as f:
-            yaml.dump(resource_data, f, width=float("inf"), sort_keys=False)
+            yaml.dump(resource_data, f, width=float("inf"), sort_keys=True)
 
     try:
         del values['global']['imageOverrides']['imageOverride']
@@ -299,7 +299,7 @@ def fix_image_references(helmChart, imageKeyMapping, branch=None,
     for imageKey in imageKeys:
         values['global']['imageOverrides'][imageKey] = ""
     with open(valuesYaml, 'w', encoding='utf-8') as f:
-        yaml.dump(values, f, width=float("inf"), sort_keys=False)
+        yaml.dump(values, f, width=float("inf"), sort_keys=True)
     logging.info("Image references and pull policy in deployments and values.yaml updated successfully.\n")
     return errors
 
@@ -396,14 +396,14 @@ def fix_env_var_image_references(helmChart, imageKeyMapping, branch=None,
 
     for deployment, deploy in pending_updates:
         with open(deployment, 'w', encoding='utf-8') as f:
-            yaml.dump(deploy, f, width=float("inf"), sort_keys=False)
+            yaml.dump(deploy, f, width=float("inf"), sort_keys=True)
 
     with open(valuesYaml, 'r', encoding='utf-8') as f:
         values = yaml.safe_load(f)
     for imageKey in imageKeys:
         values['global']['imageOverrides'][imageKey] = ""
     with open(valuesYaml, 'w', encoding='utf-8') as f:
-        yaml.dump(values, f, width=float("inf"), sort_keys=False)
+        yaml.dump(values, f, width=float("inf"), sort_keys=True)
     logging.info("Image container env references in deployments and values.yaml updated successfully.\n")
     return errors
 
@@ -481,7 +481,7 @@ def fix_addon_template_image_references(helmChart, imageKeyMapping, branch=None,
 
     for addonTemplate, docs in pending_updates:
         with open(addonTemplate, 'w', encoding='utf-8') as f:
-            yaml.dump_all(docs, f, width=float("inf"), sort_keys=False)
+            yaml.dump_all(docs, f, width=float("inf"), sort_keys=True)
         logging.info("AddOnTemplate updated with image override successfully.")
 
     valuesYaml = os.path.join(helmChart, "values.yaml")
@@ -494,7 +494,7 @@ def fix_addon_template_image_references(helmChart, imageKeyMapping, branch=None,
     for imageKey in all_imageKeys:
         values['global']['imageOverrides'][imageKey] = ""
     with open(valuesYaml, 'w', encoding='utf-8') as f:
-        yaml.dump(values, f, width=float("inf"), sort_keys=False)
+        yaml.dump(values, f, width=float("inf"), sort_keys=True)
     logging.info("Image references in addon templates and values.yaml updated successfully.\n")
     return errors
 
