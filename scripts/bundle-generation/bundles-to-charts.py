@@ -217,7 +217,7 @@ def fillChartYaml(helmChart, name, csvPath):
                 chart['description'] = csv["metadata"]["annotations"]["description"]
     # chart['version'] = csv['metadata']['name'].split(".", 1)[1][1:]
     with open(chartYml, 'w', encoding='utf-8') as f:
-        yaml.dump(chart, f)
+        yaml.dump(chart, f, sort_keys=False)
     logging.info("'%s' Chart.yaml updated successfully.\n", helmChart)
 
 def ensure_container_port_protocols(deployment_spec):
@@ -277,7 +277,7 @@ def add_deployment(helmChart, deployment):
                 del deploy['spec']['template']['spec']['imagePullPolicy']
     deploy['metadata']['name'] = name
     with open(deployYaml, 'w', encoding='utf-8') as f:
-        yaml.dump(deploy, f)
+        yaml.dump(deploy, f, sort_keys=False)
     logging.info("Deployment '%s.yaml' updated successfully.\n", name)
 
 # Copy chart-templates/clusterrole,clusterrolebinding,serviceaccount.yaml update it with CSV information, and add to chart
@@ -304,7 +304,7 @@ def add_cluster_scoped_rbac(helmChart, rbacMap):
     clusterrole["metadata"]["name"] = name
     # Save Clusterrole
     with open(clusterroleYaml, 'w', encoding='utf-8') as f:
-        yaml.dump(clusterrole, f)
+        yaml.dump(clusterrole, f, sort_keys=False)
     logging.info("Clusterrole '%s-clusterrole.yaml' updated successfully.", name)
 
     logging.info("Templating serviceaccount '%s-serviceaccount.yaml' ...", name)
@@ -317,7 +317,7 @@ def add_cluster_scoped_rbac(helmChart, rbacMap):
     serviceAccount["metadata"]["name"] = name
     # Save Serviceaccount
     with open(serviceAccountYaml, 'w', encoding='utf-8') as f:
-        yaml.dump(serviceAccount, f)
+        yaml.dump(serviceAccount, f, sort_keys=False)
     logging.info("Serviceaccount '%s-serviceaccount.yaml' updated successfully.", name)
 
     logging.info("Templating clusterrolebinding '%s-clusterrolebinding.yaml' ...", name)
@@ -330,7 +330,7 @@ def add_cluster_scoped_rbac(helmChart, rbacMap):
     clusterrolebinding['roleRef']['name'] = clusterrole["metadata"]["name"]
     clusterrolebinding['subjects'][0]['name'] = name
     with open(clusterrolebindingYaml, 'w', encoding='utf-8') as f:
-        yaml.dump(clusterrolebinding, f)
+        yaml.dump(clusterrolebinding, f, sort_keys=False)
     logging.info("Clusterrolebinding '%s-clusterrolebinding.yaml' updated successfully.", name)
     logging.info("Cluster scoped RBAC created.\n")
 
@@ -356,7 +356,7 @@ def add_namespace_scoped_rbac(helmChart, rbacMap):
     role["metadata"]["name"] = name
     # Save role
     with open(roleYaml, 'w', encoding='utf-8') as f:
-        yaml.dump(role, f)
+        yaml.dump(role, f, sort_keys=False)
     logging.info("Role '%s-role.yaml' updated successfully.", name)
 
     # Create Serviceaccount
@@ -370,7 +370,7 @@ def add_namespace_scoped_rbac(helmChart, rbacMap):
         serviceAccount["metadata"]["name"] = name
         # Save Serviceaccount
         with open(serviceAccountYaml, 'w', encoding='utf-8') as f:
-            yaml.dump(serviceAccount, f)
+            yaml.dump(serviceAccount, f, sort_keys=False)
         logging.info("Serviceaccount '%s-serviceaccount.yaml' updated successfully.", name)
 
     logging.info("Templating rolebinding '%s-rolebinding.yaml' ...", name)
@@ -383,7 +383,7 @@ def add_namespace_scoped_rbac(helmChart, rbacMap):
     rolebinding['roleRef']['name'] = role["metadata"]["name"] = name
     rolebinding['subjects'][0]['name'] = name
     with open(rolebindingYaml, 'w', encoding='utf-8') as f:
-        yaml.dump(rolebinding, f)
+        yaml.dump(rolebinding, f, sort_keys=False)
     logging.info("Rolebinding '%s-rolebinding.yaml' updated successfully.", name)
     logging.info("Namespace scoped RBAC created.\n")
 
@@ -591,7 +591,7 @@ def copy_additional_resources(helmChart, csvPath, branch):
                                      resourceKind, resource_name, filename, new_filename)
 
                         with open(dest_file_path, 'w', encoding='utf-8') as f:
-                            yaml.dump(doc, f, width=float("inf"), default_flow_style=False, allow_unicode=True)
+                            yaml.dump(doc, f, width=float("inf"), default_flow_style=False, allow_unicode=True, sort_keys=False)
                         continue
 
                     # Handle expected resources (both required and optional)
@@ -609,7 +609,7 @@ def copy_additional_resources(helmChart, csvPath, branch):
                                      resourceKind, resource_name, filename, new_filename)
 
                         with open(dest_file_path, 'w', encoding='utf-8') as f:
-                            yaml.dump(doc, f, width=float("inf"), default_flow_style=False, allow_unicode=True)
+                            yaml.dump(doc, f, width=float("inf"), default_flow_style=False, allow_unicode=True, sort_keys=False)
                         continue
 
                     # Log unsupported resources
@@ -676,7 +676,7 @@ def copy_webhook_configuration_manifests(dest_helm_chart_path, webhook_path):
 
             # Write the YAML content to the new file
             with open(new_file_path, 'w') as new_file:
-                yaml.dump(yaml_content, new_file, default_flow_style=False, sort_keys=True)
+                yaml.dump(yaml_content, new_file, default_flow_style=False, sort_keys=False)
 
         except Exception as e:
             logging.warning(f"Unexpected error occurred while processing yaml content: {e}")
@@ -799,7 +799,7 @@ def update_helm_resources(chartName, helmChart, skip_rbac_overrides, exclusions,
                     ensure_webhook_namespace(resource_data, resource_name, default_namespace)
 
                 with open(template_path, 'w') as f:
-                    yaml.dump(resource_data, f, Dumper=LiteralBlockDumper, width=float("inf"), default_flow_style=False, allow_unicode=True)
+                    yaml.dump(resource_data, f, Dumper=LiteralBlockDumper, width=float("inf"), default_flow_style=False, allow_unicode=True, sort_keys=False)
                     logging.info(f"Succesfully updated resource: {resource_name}\n")
 
                 if kind == 'NetworkPolicy':
@@ -909,6 +909,17 @@ def fixEnvVarImageReferences(helmChart, imageKeyMapping, branch, operator_name, 
 
             for env in container['env']:
                 env_var_name = env['name']
+                # Skip env vars that use valueFrom (e.g. fieldRef, secretKeyRef)
+                # instead of a literal value — they have no image reference to rewrite.
+                if 'value' not in env:
+                    if 'valueFrom' in env:
+                        logging.info(
+                            "[%s] Skipping env var '%s' in %s — uses valueFrom, not a literal value",
+                            operator_name,
+                            env_var_name,
+                            os.path.relpath(deployment, helmChart),
+                        )
+                    continue
                 explicit_key = envImageMappings.get(env_var_name)
                 if explicit_key is None and not env_var_name.endswith('_IMAGE'):
                     if env_value_looks_like_image_ref(env.get('value')):
@@ -963,14 +974,14 @@ def fixEnvVarImageReferences(helmChart, imageKeyMapping, branch, operator_name, 
 
     for deployment, deploy in pending_updates:
         with open(deployment, 'w', encoding='utf-8') as f:
-            yaml.dump(deploy, f)
+            yaml.dump(deploy, f, sort_keys=False)
 
     with open(valuesYaml, 'r', encoding='utf-8') as f:
         values = yaml.safe_load(f)
     for imageKey in imageKeys:
         values['global']['imageOverrides'][imageKey] = ""
     with open(valuesYaml, 'w', encoding='utf-8') as f:
-        yaml.dump(values, f)
+        yaml.dump(values, f, sort_keys=False)
     logging.info("Image container env references in deployments and values.yaml updated successfully.\n")
     return errors
 
@@ -1023,7 +1034,7 @@ def fixImageReferences(helmChart, imageKeyMapping, branch, operator_name, apply=
 
     for deployment, deploy in pending_updates:
         with open(deployment, 'w', encoding='utf-8') as f:
-            yaml.dump(deploy, f)
+            yaml.dump(deploy, f, sort_keys=False)
 
     with open(valuesYaml, 'r', encoding='utf-8') as f:
         values = yaml.safe_load(f)
@@ -1034,7 +1045,7 @@ def fixImageReferences(helmChart, imageKeyMapping, branch, operator_name, apply=
     for imageKey in imageKeys:
         values['global']['imageOverrides'][imageKey] = "" # set to temp to debug
     with open(valuesYaml, 'w', encoding='utf-8') as f:
-        yaml.dump(values, f)
+        yaml.dump(values, f, sort_keys=False)
     logging.info("Image references and pull policy in deployments and values.yaml updated successfully.\n")
     return errors
 
@@ -1356,7 +1367,7 @@ def updateDeployments(helmChart, operator, exclusions, sizes, branch):
         pod_template_spec['imagePullSecrets'] = ''
 
         with open(deployment, 'w', encoding='utf-8') as f:
-            yaml.dump(deploy, f, width=float("inf"))
+            yaml.dump(deploy, f, width=float("inf"), sort_keys=False)
 
         logging.info("Deployments updated with antiaffinity, security policies, and tolerations successfully. \n")
 
@@ -1388,7 +1399,7 @@ def updateRBAC(helmChart, branch):
         if rbac['kind'] in ['RoleBinding', 'ClusterRoleBinding']:
             rbac['roleRef']['name'] = "{{ .Values.org }}:{{ .Chart.Name }}:" + rbac['roleRef']['name']
         with open(rbacFile, 'w', encoding='utf-8') as f:
-            yaml.dump(rbac, f)
+            yaml.dump(rbac, f, sort_keys=False)
     logging.info("Clusterroles, roles, clusterrolebindings, and rolebindings updated. \n")
 
 def inject_security_context_constraints(resource, constraints_override):
@@ -1478,7 +1489,7 @@ def update_security_contexts(template_chart_path, constraints_override, branch):
 
                 inject_security_context_constraints(resource, constraints)
                 with open(template, 'w', encoding="utf-8") as f:
-                    yaml.dump(resource, f, width=float("inf"))
+                    yaml.dump(resource, f, width=float("inf"), sort_keys=False)
 
             except Exception as e:
                 logging.error(f"Error injecting security context for {template}: {e}")
@@ -1813,7 +1824,7 @@ def injectAnnotationsForAddonTemplate(helmChart, branch):
 
         if modified:
             with open(addonTemplate, 'w', encoding='utf-8') as f:
-                yaml.dump_all(docs, f, width=float("inf"))
+                yaml.dump_all(docs, f, width=float("inf"), sort_keys=False)
                 logging.info("Annotations injected successfully. \n")
 
 # fixImageReferencesForAddonTemplate identify the image references for every deployment in addontemplates, if any exist
@@ -1893,7 +1904,7 @@ def fixImageReferencesForAddonTemplate(helmChart, imageKeyMapping, branch, opera
 
     for addonTemplate, docs in pending_updates:
         with open(addonTemplate, 'w', encoding='utf-8') as f:
-            yaml.dump_all(docs, f, width=float("inf"))
+            yaml.dump_all(docs, f, width=float("inf"), sort_keys=False)
         logging.info("AddOnTemplate updated with image override successfully. \n")
 
     valuesYaml = os.path.join(helmChart, "values.yaml")
@@ -1904,7 +1915,7 @@ def fixImageReferencesForAddonTemplate(helmChart, imageKeyMapping, branch, opera
     for imageKey in all_imageKeys:
         values['global']['imageOverrides'][imageKey] = "" # set to temp to debug
     with open(valuesYaml, 'w', encoding='utf-8') as f:
-        yaml.dump(values, f, width=float("inf"))
+        yaml.dump(values, f, width=float("inf"), sort_keys=False)
     logging.info("Image references and pull policy in addon templates and values.yaml updated successfully.\n")
     return errors
 
@@ -1963,12 +1974,11 @@ def main():
     parser.add_argument("--component", dest="component", type=str, required=False, help="If provided, only this component will be processed")
     parser.add_argument("--config", dest="config", type=str, required=False, help="If provided, this config file will be processed")
     parser.add_argument("--destination", dest="destination", type=str, required=False, help="Destination directory of the created helm chart")
-    parser.add_argument("--skipOverrides", dest="skipOverrides", type=bool, help="If true, overrides such as helm flow control will not be applied")
+    parser.add_argument("--skipOverrides", dest="skipOverrides", action="store_true", help="If true, overrides such as helm flow control will not be applied")
     parser.add_argument("--lint", dest="lint", action='store_true', help="If true, bundles will only be linted to ensure they can be transformed successfully. Default is False.")
     parser.add_argument("--component-branch", dest="component_branch", action='append', type=str, required=False, help="Override branch for a specific component. Format: component_name:branch_name. Can be specified multiple times.")
     parser.add_argument("--component-fork", dest="component_fork", action='append', type=str, required=False, help="Override git repository URL for a specific component. Format: component_name:git_url. Can be specified multiple times.")
     parser.add_argument("--debug", "-v", dest="debug", action="store_true", help="Enable DEBUG-level logging with coloredlogs")
-    parser.set_defaults(skipOverrides=False)
     parser.set_defaults(lint=False)
     parser.set_defaults(debug=False)
 
@@ -2268,7 +2278,7 @@ def main():
                 logging.info("Resources added from CSV successfully.\n")
 
                 if not skipOverrides:
-                    logging.info("Adding Overrides to helm chart '%s' (set --skipOverrides=true to skip) ...", operator["name"])
+                    logging.info("Adding Overrides to helm chart '%s' (set --skipOverrides to skip) ...", operator["name"])
                     chart_errors = injectRequirements(helmChart, operator, sizes, effective_branch)
                     errors.extend(chart_errors)
                     if chart_errors:
