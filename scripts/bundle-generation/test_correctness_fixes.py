@@ -6,7 +6,7 @@ Covers:
   2. valueFrom env vars no longer crash fixEnvVarImageReferences (both scripts)
   3. --skipOverrides parsing uses store_true (not type=bool)
   4. preserve_files honored by generate-charts update_helm_resources
-  7. yaml.dump sort_keys=False preserves key order
+  7. yaml.dump sort_keys=True sorts keys deterministically
 """
 
 import argparse
@@ -290,14 +290,14 @@ class TestPreserveFilesGenerateCharts(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
-# 7. yaml.dump sort_keys=False preserves key order
+# 7. yaml.dump sort_keys=True sorts keys deterministically
 # ---------------------------------------------------------------------------
 
-class TestYamlSortKeysDisabled(unittest.TestCase):
-    """yaml.dump with sort_keys=False must preserve insertion order."""
+class TestYamlSortKeysEnabled(unittest.TestCase):
+    """yaml.dump with sort_keys=True must emit keys in sorted order."""
 
-    def test_key_order_preserved_in_generate_charts(self):
-        """fixImageReferences should not reorder keys in the output YAML."""
+    def test_key_order_sorted_in_generate_charts(self):
+        """fixImageReferences should emit keys in sorted order."""
         ordered_deployment = {
             'apiVersion': 'apps/v1',
             'kind': 'Deployment',
@@ -321,17 +321,17 @@ class TestYamlSortKeysDisabled(unittest.TestCase):
             with open(os.path.join(chart, 'templates', 'deploy.yaml')) as f:
                 content = f.read()
 
-            # The keys should appear in insertion order, not alphabetical
+            # Keys should be emitted alphabetically: apiVersion, kind, metadata, spec
             api_pos = content.find('apiVersion')
             kind_pos = content.find('kind')
             meta_pos = content.find('metadata')
             spec_pos = content.find('spec')
-            self.assertGreater(kind_pos, api_pos, "kind should come after apiVersion")
-            self.assertGreater(meta_pos, kind_pos, "metadata should come after kind")
-            self.assertGreater(spec_pos, meta_pos, "spec should come after metadata")
+            self.assertLess(api_pos, kind_pos, "apiVersion should come before kind")
+            self.assertLess(kind_pos, meta_pos, "kind should come before metadata")
+            self.assertLess(meta_pos, spec_pos, "metadata should come before spec")
 
-    def test_key_order_preserved_in_bundles_to_charts(self):
-        """fixImageReferences in bundles-to-charts should not reorder keys."""
+    def test_key_order_sorted_in_bundles_to_charts(self):
+        """fixImageReferences in bundles-to-charts should emit sorted keys."""
         ordered_deployment = {
             'apiVersion': 'apps/v1',
             'kind': 'Deployment',
@@ -363,9 +363,9 @@ class TestYamlSortKeysDisabled(unittest.TestCase):
             kind_pos = content.find('kind')
             meta_pos = content.find('metadata')
             spec_pos = content.find('spec')
-            self.assertGreater(kind_pos, api_pos, "kind should come after apiVersion")
-            self.assertGreater(meta_pos, kind_pos, "metadata should come after kind")
-            self.assertGreater(spec_pos, meta_pos, "spec should come after metadata")
+            self.assertLess(api_pos, kind_pos, "apiVersion should come before kind")
+            self.assertLess(kind_pos, meta_pos, "kind should come before metadata")
+            self.assertLess(meta_pos, spec_pos, "metadata should come before spec")
 
 
 if __name__ == '__main__':
