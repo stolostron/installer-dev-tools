@@ -1294,6 +1294,8 @@ def injectAnnotationsForAddonTemplate(helmChart):
                 logging.info("Annotations injected successfully. \n")
 
 
+# updateRBAC adds standard configuration to the RBAC resources (clusterroles, roles, clusterrolebindings, and rolebindings)
+def updateRBAC(helmChart, chartName):
     logging.info("Updating clusterroles, roles, clusterrolebindings, and rolebindings ...")
     clusterroles = find_templates_of_type(helmChart, 'ClusterRole')
     roles = find_templates_of_type(helmChart, 'Role')
