@@ -327,5 +327,83 @@ class TestEnvListMarkerPreserved(unittest.TestCase):
                     break
 
 
+class TestRBACInjectionSplit(unittest.TestCase):
+    """updateRBAC must stay separate from injectAnnotationsForAddonTemplate.
+
+    Regression for the ACM-48518 convergence refactor, which merged the
+    updateRBAC body into injectAnnotationsForAddonTemplate without adding
+    its ``chartName`` argument (NameError: name 'chartName' is not defined).
+    """
+
+    def test_inject_annotations_does_not_require_chart_name(self):
+        addon_template = {
+            'apiVersion': 'addon.open-cluster-management.io/v1alpha1',
+            'kind': 'AddOnTemplate',
+            'metadata': {'name': 'test-addon'},
+            'spec': {
+                'agentSpec': {
+                    'workload': {
+                        'manifests': [{
+                            'kind': 'Deployment',
+                            'metadata': {'name': 'agent'},
+                            'spec': {'template': {'metadata': {}, 'spec': {'containers': []}}},
+                        }],
+                    },
+                },
+            },
+        }
+        cluster_role = {
+            'apiVersion': 'rbac.authorization.k8s.io/v1',
+            'kind': 'ClusterRole',
+            'metadata': {'name': 'agent'},
+            'rules': [],
+        }
+        with tempfile.TemporaryDirectory() as tmpdir:
+            chart = _build_chart(tmpdir, {
+                'addon.yaml': addon_template,
+                'role.yaml': cluster_role,
+            })
+
+            generate_charts.injectAnnotationsForAddonTemplate(chart)
+
+            with open(os.path.join(chart, 'templates', 'addon.yaml')) as f:
+                content = yaml.safe_load(f)
+            annotations = content['spec']['agentSpec']['workload']['manifests'][0][
+                'spec']['template']['metadata']['annotations']
+            self.assertIn('target.workload.openshift.io/management', annotations)
+
+    def test_update_rbac_prefixes_names_with_chart_name(self):
+        cluster_role = {
+            'apiVersion': 'rbac.authorization.k8s.io/v1',
+            'kind': 'ClusterRole',
+            'metadata': {'name': 'agent'},
+            'rules': [],
+        }
+        role_binding = {
+            'apiVersion': 'rbac.authorization.k8s.io/v1',
+            'kind': 'RoleBinding',
+            'metadata': {'name': 'agent', 'namespace': 'test'},
+            'roleRef': {'apiGroup': 'rbac.authorization.k8s.io', 'kind': 'Role', 'name': 'agent'},
+            'subjects': [],
+        }
+        with tempfile.TemporaryDirectory() as tmpdir:
+            chart = _build_chart(tmpdir, {
+                'role.yaml': cluster_role,
+                'binding.yaml': role_binding,
+            })
+
+            generate_charts.updateRBAC(chart, 'test-chart')
+
+            prefix = '{{ .Values.org }}:{{ .Chart.Name }}:test-chart'
+            with open(os.path.join(chart, 'templates', 'role.yaml')) as f:
+                role = yaml.safe_load(f)
+            self.assertEqual(role['metadata']['name'], prefix)
+
+            with open(os.path.join(chart, 'templates', 'binding.yaml')) as f:
+                binding = yaml.safe_load(f)
+            self.assertEqual(binding['metadata']['name'], prefix)
+            self.assertEqual(binding['roleRef']['name'], prefix)
+
+
 if __name__ == '__main__':
     unittest.main()
