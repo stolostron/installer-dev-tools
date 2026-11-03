@@ -4,6 +4,7 @@
 # Assumes: Python 3.6+
 
 import argparse
+import copy
 import logging
 import os
 import re
@@ -17,6 +18,8 @@ from chart_utils import (
     RESOURCE_KINDS,
     find_templates_of_type,
     is_version_compatible,
+    load_template_documents,
+    write_template_documents,
 )
 from chart_utils import (
     fix_addon_template_image_references as fixImageReferencesForAddonTemplate,
@@ -104,7 +107,7 @@ def installAddonForAllClusters(yamlContent):
 
 
 def updateServiceAccount(yamlContent):
-    yamlContent['metadata'].pop('namespace')
+    yamlContent['metadata'].pop('namespace', None)
 
 def updateClusterRoleBinding(yamlContent):
     subjectsList = yamlContent['subjects']
@@ -346,8 +349,8 @@ def ensure_addontemplate_namespace(resource_data, resource_name, default_namespa
                 manifest['metadata']['namespace'] = manifest_namespace
                 logging.info(f"AddOnTemplate manifest {manifest.get('kind', 'Unknown')} namespace for '{resource_name}' set to: '{manifest_namespace}'")
 
-def escapeTemplateVariables(helmChart, variables):
-    addonTemplates = find_templates_of_type(helmChart, 'AddOnTemplate')
+def escapeTemplateVariables(helmChart, variables, branch=None):
+    addonTemplates = find_templates_of_type(helmChart, 'AddOnTemplate', branch)
     for addonTemplate in addonTemplates:
         for variable in variables:
             logging.info("Start to escape vriable %s", variable)
@@ -365,8 +368,9 @@ def escapeTemplateVariables(helmChart, variables):
     logging.info("Escaped template variables.\n")
 
 # Copy chart-templates to a new helmchart directory
-def updateResources(outputDir, repo, chart):
+def updateResources(outputDir, repo, chart, branch):
     logging.info("Starting resource update process ...")
+    errors = []
 
     # Create main folder
     always_or_toggle = chart['always-or-toggle']
@@ -375,66 +379,76 @@ def updateResources(outputDir, repo, chart):
 
     # Check if template directory exists
     if not os.path.exists(templateDir):
-        logging.error(f"Template directory {templateDir} does not exist. Exiting update process.")
-        return # Exit early if the template directory doesn't exist
+        message = f"Template directory {templateDir} does not exist. Exiting update process."
+        logging.error(message)
+        return [message]
 
     for tempFile in os.listdir(templateDir):
         filePath = os.path.join(templateDir, tempFile)
 
         try:
-            with open(filePath, 'r') as f:
-                yamlContent = yaml.safe_load(f)
+            documents = load_template_documents(filePath, branch)
         except Exception as e:
-            logging.error(f"Error reading YAML content from {filePath}: {e}")
-            return
+            errors.append(f"Error reading YAML content from {filePath}: {e}")
+            logging.error(errors[-1])
+            continue
 
-        # Log the kind of resource being processed   
-        kind = yamlContent.get("kind")
-        logging.info(f"Found resource of kind: {kind} in {filePath}")
+        changed = False
+        for yamlContent in documents:
+            if not isinstance(yamlContent, dict):
+                continue
 
-        # Perform the appropriate update action based on the kind
-        if kind == "AddOnDeploymentConfig":
-            logging.info(f"Updating AddOnDeploymentConfig in {filePath}")
-            updateAddOnDeploymentConfig(yamlContent)
+            # Log the kind of resource being processed
+            kind = yamlContent.get("kind")
+            logging.info(f"Found resource of kind: {kind} in {filePath}")
 
-        elif kind == "ClusterManagementAddOn":
-            logging.info(f"Updating ClusterManagementAddOn in {filePath}")
-            updateClusterManagementAddOn(yamlContent)
-            if chart.get('auto-install-for-all-clusters', False):
-                installAddonForAllClusters(yamlContent)
+            # Perform the appropriate update action based on the kind
+            if kind == "AddOnDeploymentConfig":
+                logging.info(f"Updating AddOnDeploymentConfig in {filePath}")
+                updateAddOnDeploymentConfig(yamlContent)
+                changed = True
 
-        elif kind == "ServiceAccount":
-            logging.info(f"Updating ServiceAccount in {filePath}")
-            updateServiceAccount(yamlContent)
+            elif kind == "ClusterManagementAddOn":
+                logging.info(f"Updating ClusterManagementAddOn in {filePath}")
+                updateClusterManagementAddOn(yamlContent)
+                if chart.get('auto-install-for-all-clusters', False):
+                    installAddonForAllClusters(yamlContent)
+                changed = True
 
-        elif kind == "ClusterRoleBinding":
-            skip_rbac_override = chart.get('skipRBACOverrides', False)
-            if not skip_rbac_override:
-                logging.info(f"Updating ClusterRoleBinding in {filePath}")
-                updateClusterRoleBinding(yamlContent)
-            else:
-                logging.warning(f"Skipping ClusterRoleBinding update (RBAC override is disabled) in {filePath}")
+            elif kind == "ServiceAccount":
+                logging.info(f"Updating ServiceAccount in {filePath}")
+                updateServiceAccount(yamlContent)
+                changed = True
 
-        else:
+            elif kind == "ClusterRoleBinding":
+                skip_rbac_override = chart.get('skipRBACOverrides', False)
+                if not skip_rbac_override:
+                    logging.info(f"Updating ClusterRoleBinding in {filePath}")
+                    updateClusterRoleBinding(yamlContent)
+                    changed = True
+                else:
+                    logging.warning(f"Skipping ClusterRoleBinding update (RBAC override is disabled) in {filePath}")
+
+        if not changed:
             continue
 
         try:
-            with open(filePath, 'w') as f:
-                yaml.dump(yamlContent, f, width=float("inf"), sort_keys=True)
+            write_template_documents(filePath, documents, width=float("inf"), sort_keys=True)
             logging.info(f"Successfully updated {filePath}")
         except Exception as e:
-            logging.error(f"Error writing YAML content to {filePath}: {e}")
-            return
+            errors.append(f"Error writing YAML content to {filePath}: {e}")
+            logging.error(errors[-1])
 
     try:
         # Escape template variables
-        escapeTemplateVariables(chartDir, chart["escape-template-variables"])
+        escapeTemplateVariables(chartDir, chart.get("escape-template-variables", []), branch)
         logging.info(f"Template variables escaped successfully for {chartDir}.")
     except Exception as e:
-        logging.error(f"Error escaping template variables in {chartDir}: {e}")
-        return
+        errors.append(f"Error escaping template variables in {chartDir}: {e}")
+        logging.error(errors[-1])
 
     logging.info("All resources updated successfully.")
+    return errors
 
 def deep_update(overwrite, original):
     """
@@ -654,26 +668,32 @@ def updateDeployments(chartName, helmChart, exclusions, inclusions, branch):
     with open(deploySpecYaml, 'r') as f:
         deploySpec = yaml.safe_load(f)
     
-    deployments = find_templates_of_type(helmChart, 'Deployment')
+    deployments = find_templates_of_type(helmChart, 'Deployment', branch)
     for deployment in deployments:
-        with open(deployment, 'r') as f:
-            deploy = yaml.safe_load(f)
-        deploy['metadata'].pop('namespace')
-        affinityList = deploySpec['affinity']['podAntiAffinity']['preferredDuringSchedulingIgnoredDuringExecution']
-        for antiaffinity in affinityList:
-            antiaffinity['podAffinityTerm']['labelSelector']['matchExpressions'][0]['values'][0] = deploy['metadata']['name']
-        deploy['spec']['template']['spec']['affinity'] = deploySpec['affinity']
-        deploy['spec']['template']['spec']['tolerations'] = ''
-        deploy['spec']['template']['spec']['hostNetwork'] = False
-        deploy['spec']['template']['spec']['hostPID'] = False
-        deploy['spec']['template']['spec']['hostIPC'] = False
+        documents = load_template_documents(deployment, branch)
+        changed = False
+        for deploy in documents:
+            if not isinstance(deploy, dict) or deploy.get('kind') != 'Deployment':
+                continue
 
-        deploy['spec']['template']['metadata']['labels']['ocm-antiaffinity-selector'] = deploy['metadata']['name']
-        deploy['spec']['template']['spec']['nodeSelector'] = ""
-        deploy['spec']['template']['spec']['imagePullSecrets'] = ''
+            deploy['metadata'].pop('namespace', None)
+            affinity = copy.deepcopy(deploySpec['affinity'])
+            affinityList = affinity['podAntiAffinity']['preferredDuringSchedulingIgnoredDuringExecution']
+            for antiaffinity in affinityList:
+                antiaffinity['podAffinityTerm']['labelSelector']['matchExpressions'][0]['values'][0] = deploy['metadata']['name']
+            deploy['spec']['template']['spec']['affinity'] = affinity
+            deploy['spec']['template']['spec']['tolerations'] = ''
+            deploy['spec']['template']['spec']['hostNetwork'] = False
+            deploy['spec']['template']['spec']['hostPID'] = False
+            deploy['spec']['template']['spec']['hostIPC'] = False
 
-        with open(deployment, 'w') as f:
-            yaml.dump(deploy, f, width=float("inf"), sort_keys=True)
+            deploy['spec']['template']['metadata']['labels']['ocm-antiaffinity-selector'] = deploy['metadata']['name']
+            deploy['spec']['template']['spec']['nodeSelector'] = ""
+            deploy['spec']['template']['spec']['imagePullSecrets'] = ''
+            changed = True
+
+        if changed:
+            write_template_documents(deployment, documents, width=float("inf"), sort_keys=True)
 
         logging.info("Deployments updated with antiaffinity, security policies, and tolerations successfully. \n")
 
@@ -1005,7 +1025,7 @@ def update_helm_resources(chartName, helmChart, skip_rbac_overrides, exclusions,
     operator_policy_defaults = {}
 
     for kind in resource_kinds:
-        resource_templates = find_templates_of_type(helmChart, kind)
+        resource_templates = find_templates_of_type(helmChart, kind, branch)
         if not resource_templates:
             logging.info("------------------------------------------")
             logging.warning(f"No {kind} templates found in the Helm chart [Skipping]")
@@ -1017,16 +1037,24 @@ def update_helm_resources(chartName, helmChart, skip_rbac_overrides, exclusions,
 
         # Set the default namespace for the chart.
         default_namespace = """{{ .Values.global.namespace }}"""
+        target_namespace = default_namespace
 
         for template_path in resource_templates:
             if os.path.basename(template_path) in preserved_files:
                 logging.warning("File '%s' is marked as preserved, skipping template update.", template_path)
                 continue  # Skip this file
             try:
-                with open(template_path, 'r') as f:
-                    resource_data = yaml.safe_load(f)
-                    resource_name = resource_data['metadata'].get('name')
-                    logging.info(f"Processing resource: {resource_name} from template: {template_path}")
+                documents = load_template_documents(template_path, branch)
+            except Exception as e:
+                logging.error(f"Error reading template '{template_path}': {e}")
+                continue
+
+            changed = False
+            for resource_data in documents:
+                if not isinstance(resource_data, dict) or resource_data.get('kind') != kind:
+                    continue
+                resource_name = resource_data.get('metadata', {}).get('name')
+                logging.info(f"Processing resource: {resource_name} from template: {template_path}")
                 resource_data = replace_default(resource_data, 'PLACEHOLDER_NAMESPACE', '{{ .Values.global.namespace }}')
 
                 if chartName == 'flight-control':
@@ -1081,7 +1109,7 @@ def update_helm_resources(chartName, helmChart, skip_rbac_overrides, exclusions,
                 # defaulting to Helm values if not specified.
                 if kind == 'Placement':
                     ensure_placement_namespace(resource_data, resource_name, default_namespace)
-                
+            
                 # Ensure AddOnTemplate has namespace set for nested manifests,
                 # defaulting to Helm values if not specified.
                 if kind == 'AddOnTemplate':
@@ -1102,7 +1130,7 @@ def update_helm_resources(chartName, helmChart, skip_rbac_overrides, exclusions,
                 # defaulting to Helm values if not specified.
                 if kind == 'ClusterManagementAddOn':
                     ensure_clustermanagementaddon_namespace(resource_data, resource_name, default_namespace)
-                
+            
                 # Ensure the StatefulSet has a storageClassName set,
                 # defaulting to Helm values if not specified.
                 if kind == 'StatefulSet':
@@ -1112,7 +1140,7 @@ def update_helm_resources(chartName, helmChart, skip_rbac_overrides, exclusions,
                 # defaulting to Helm values if not specified.
                 if kind == 'PersistentVolumeClaim':
                     ensure_pvc_storage_class(resource_data, resource_name)
-                
+            
                 if chartName == 'flight-control':
                     if kind == 'Route':
                         if resource_name == 'flightctl-api-route':
@@ -1137,7 +1165,7 @@ def update_helm_resources(chartName, helmChart, skip_rbac_overrides, exclusions,
                                 config_data[key] = updated_yaml
                                 resource_data['data'] = config_data
                         resource_data['data'] = replace_default(resource_data['data'], 'PLACEHOLDER_NAMESPACE', '{{ .Values.global.namespace }}')
-                
+            
                     if kind == "ClusterRoleBinding":
                         resource_data = replace_default(resource_data, 'PLACEHOLDER_NAMESPACE', '{{ .Values.global.namespace }}')
                     if kind == "ClusterRole":
@@ -1170,15 +1198,20 @@ def update_helm_resources(chartName, helmChart, skip_rbac_overrides, exclusions,
                             logging.info(f"Subject namespace for {resource_name} set to: {target_namespace} (Helm default used).\n")
                 resource_data = replace_default(resource_data, 'PLACEHOLDER_NAMESPACE', '{{ .Values.global.namespace }}')
 
-                with open(template_path, 'w') as f:
-                    yaml.dump(resource_data, f, Dumper=LiteralBlockDumper, width=float("inf"), default_flow_style=False, allow_unicode=True, sort_keys=True)
-                    logging.info(f"Succesfully updated resource: {resource_name}\n")
+                changed = True
 
-                if kind == 'NetworkPolicy':
-                    network_policy_templates.append(template_path)
+            if not changed:
+                continue
 
+            try:
+                write_template_documents(template_path, documents, Dumper=LiteralBlockDumper, width=float("inf"), default_flow_style=False, allow_unicode=True, sort_keys=True)
+                logging.info(f"Succesfully updated resources in {template_path}\n")
             except Exception as e:
                 logging.error(f"Error processing template '{template_path}': {e}")
+                continue
+
+            if kind == 'NetworkPolicy':
+                network_policy_templates.append(template_path)
 
     # Add the OperatorPolicy subscription values harvested from the
     # AddOnTemplates to this chart's values.yaml, so every reference
@@ -1211,11 +1244,11 @@ def ensure_network_policies(template_path):
     logging.info("Wrapped NetworkPolicy template with networkPolicies.enabled condition: %s", template_path)
 
 
-def ensure_addontemplate_network_policies(helmChart):
+def ensure_addontemplate_network_policies(helmChart, branch=None):
     """Wraps NetworkPolicy manifests embedded inside AddOnTemplate resources
     with a Helm conditional so they are only deployed when
     global.networkPolicies.enabled is true."""
-    addonTemplates = find_templates_of_type(helmChart, 'AddOnTemplate')
+    addonTemplates = find_templates_of_type(helmChart, 'AddOnTemplate', branch)
     for addonTemplate in addonTemplates:
         with open(addonTemplate, 'r') as f:
             content = f.read()
@@ -1265,23 +1298,26 @@ def ensure_addontemplate_network_policies(helmChart):
 
 # injectAnnotationsForAddonTemplate injects following annotations for deployments in the AddonTemplate:
 # - target.workload.openshift.io/management: '{"effect": "PreferredDuringScheduling"}'
-def injectAnnotationsForAddonTemplate(helmChart):
+def injectAnnotationsForAddonTemplate(helmChart, branch=None):
     logging.info("Injecting Annotations for deployments in the AddonTemplate ...")
 
-    addonTemplates = find_templates_of_type(helmChart, 'AddOnTemplate')
+    addonTemplates = find_templates_of_type(helmChart, 'AddOnTemplate', branch)
     for addonTemplate in addonTemplates:
+        documents = load_template_documents(addonTemplate, branch)
         injected = False
-        with open(addonTemplate, 'r') as f:
-            templateContent = yaml.safe_load(f)
-            agentSpec = templateContent['spec']['agentSpec']
+        for templateContent in documents:
+            if not isinstance(templateContent, dict) or templateContent.get('kind') != 'AddOnTemplate':
+                continue
+
+            agentSpec = templateContent.get('spec', {}).get('agentSpec', {})
             if 'workload' not in agentSpec:
-                return
+                continue
             workload = agentSpec['workload']
             if 'manifests' not in workload:
-                return
+                continue
             manifests = workload['manifests']
             for manifest in manifests:
-                if manifest['kind'] == 'Deployment':
+                if manifest.get('kind') == 'Deployment':
                     metadata = manifest['spec']['template']['metadata']
                     if 'annotations' not in metadata:
                         metadata['annotations'] = {}
@@ -1289,27 +1325,30 @@ def injectAnnotationsForAddonTemplate(helmChart):
                         metadata['annotations']['target.workload.openshift.io/management'] = '{"effect": "PreferredDuringScheduling"}'
                         injected = True
         if injected:
-            with open(addonTemplate, 'w') as f:
-                yaml.dump(templateContent, f, width=float("inf"), sort_keys=True)
-                logging.info("Annotations injected successfully. \n")
+            write_template_documents(addonTemplate, documents, width=float("inf"), sort_keys=True)
+            logging.info("Annotations injected successfully. \n")
 
 
 # updateRBAC adds standard configuration to the RBAC resources (clusterroles, roles, clusterrolebindings, and rolebindings)
-def updateRBAC(helmChart, chartName):
+def updateRBAC(helmChart, chartName, branch=None):
     logging.info("Updating clusterroles, roles, clusterrolebindings, and rolebindings ...")
-    clusterroles = find_templates_of_type(helmChart, 'ClusterRole')
-    roles = find_templates_of_type(helmChart, 'Role')
-    clusterrolebindings = find_templates_of_type(helmChart, 'ClusterRoleBinding')
-    rolebindings = find_templates_of_type(helmChart, 'RoleBinding')
+    rbac_kinds = ['ClusterRole', 'Role', 'ClusterRoleBinding', 'RoleBinding']
+    rbac_files = []
+    for kind in rbac_kinds:
+        rbac_files.extend(find_templates_of_type(helmChart, kind, branch))
 
-    for rbacFile in clusterroles + roles + clusterrolebindings + rolebindings:
-        with open(rbacFile, 'r') as f:
-            rbac = yaml.safe_load(f)
-        rbac['metadata']['name'] = "{{ .Values.org }}:{{ .Chart.Name }}:" + chartName
-        if rbac['kind'] in ['RoleBinding', 'ClusterRoleBinding']:
-            rbac['roleRef']['name'] = "{{ .Values.org }}:{{ .Chart.Name }}:" + chartName
-        with open(rbacFile, 'w') as f:
-            yaml.dump(rbac, f, width=float("inf"), sort_keys=True)
+    for rbacFile in dict.fromkeys(rbac_files):
+        documents = load_template_documents(rbacFile, branch)
+        changed = False
+        for rbac in documents:
+            if not isinstance(rbac, dict) or rbac.get('kind') not in rbac_kinds:
+                continue
+            rbac['metadata']['name'] = "{{ .Values.org }}:{{ .Chart.Name }}:" + chartName
+            if rbac['kind'] in ['RoleBinding', 'ClusterRoleBinding']:
+                rbac['roleRef']['name'] = "{{ .Values.org }}:{{ .Chart.Name }}:" + chartName
+            changed = True
+        if changed:
+            write_template_documents(rbacFile, documents, width=float("inf"), sort_keys=True)
     logging.info("Clusterroles, roles, clusterrolebindings, and rolebindings updated. \n")
 
 def inject_security_context_constraints(resource, constraints_override):
@@ -1367,25 +1406,30 @@ def inject_security_context_constraints(resource, constraints_override):
         logging.info(f"Container '{container_name}' security context: {container_security_context}\n")
         
 
-def update_security_contexts(template_chart_path, constraints_override):
+def update_security_contexts(template_chart_path, constraints_override, branch=None):
     """_summary_
 
     Args:
         template_chart_path (_type_): _description_
         constraints (list, optional): _description_. Defaults to [].
+        branch (str, optional): Target release branch, enables multi-document support.
     """
     log_header("Injecting security context constraints...")
 
-    for kind in ["Deployment", "Job", "StatefulSet"]:
-        resource_templates = find_templates_of_type(template_chart_path, kind)
-        if not resource_templates:
-            continue
-    
-        for template in resource_templates:
-            try:
-                with open(template, 'r', encoding="utf-8") as f:
-                    resource = yaml.safe_load(f)
+    resource_kinds = ["Deployment", "Job", "StatefulSet"]
+    templates = []
+    for kind in resource_kinds:
+        templates.extend(find_templates_of_type(template_chart_path, kind, branch))
 
+    for template in dict.fromkeys(templates):
+        try:
+            documents = load_template_documents(template, branch)
+            changed = False
+            for resource in documents:
+                if not isinstance(resource, dict) or resource.get("kind") not in resource_kinds:
+                    continue
+
+                kind = resource.get("kind")
                 name = resource.get("metadata", {}).get("name")
                 constraints = next(
                     (c for c in constraints_override if c.get("kind") == kind and c.get("name") == name), {}
@@ -1397,11 +1441,13 @@ def update_security_contexts(template_chart_path, constraints_override):
                     logging.info("Injecting *default* security context into '%s/%s'", kind, name)
 
                 inject_security_context_constraints(resource, constraints)
-                with open(template, 'w', encoding="utf-8") as f:
-                    yaml.dump(resource, f, width=float("inf"), sort_keys=True)
+                changed = True
 
-            except Exception as e:
-                logging.error(f"Error injecting security context for {template}: {e}")
+            if changed:
+                write_template_documents(template, documents, width=float("inf"), sort_keys=True)
+
+        except Exception as e:
+            logging.error(f"Error injecting security context for {template}: {e}")
 
     logging.info("Updated security context for '%s'\n", template_chart_path)
 
@@ -1418,9 +1464,9 @@ def injectRequirements(helm_chart_path, chart, branch):
     preserved_files = chart.get("preserve_files", [])
 
     errors = []
-    errors.extend(fixImageReferences(helm_chart_path, image_mappings) or [])
-    errors.extend(fixEnvVarImageReferences(helm_chart_path, image_mappings, envImageMappings=env_image_mappings) or [])
-    errors.extend(fixImageReferencesForAddonTemplate(helm_chart_path, image_mappings) or [])
+    errors.extend(fixImageReferences(helm_chart_path, image_mappings, branch=branch) or [])
+    errors.extend(fixEnvVarImageReferences(helm_chart_path, image_mappings, branch=branch, envImageMappings=env_image_mappings) or [])
+    errors.extend(fixImageReferencesForAddonTemplate(helm_chart_path, image_mappings, branch=branch) or [])
     if errors:
         logging.warning(
             "Skipping chart updates for '%s' due to %d image mapping error(s)",
@@ -1428,14 +1474,14 @@ def injectRequirements(helm_chart_path, chart, branch):
         )
         return errors
 
-    injectAnnotationsForAddonTemplate(helm_chart_path)
-    ensure_addontemplate_network_policies(helm_chart_path)
+    injectAnnotationsForAddonTemplate(helm_chart_path, branch)
+    ensure_addontemplate_network_policies(helm_chart_path, branch)
 
     if not skip_rbac_overrides:
-        updateRBAC(helm_chart_path, chart_name)
+        updateRBAC(helm_chart_path, chart_name, branch)
 
     if is_version_compatible(branch, '2.10', '2.5', '2.10'):
-        update_security_contexts(helm_chart_path, security_context_constraints)
+        update_security_contexts(helm_chart_path, security_context_constraints, branch)
 
     if is_version_compatible(branch, '2.13', '2.8', '2.13'):
         update_helm_resources(chart_name, helm_chart_path, skip_rbac_overrides, exclusions, inclusions, branch,
@@ -1548,6 +1594,59 @@ def renderChart(chart_path):
     except subprocess.CalledProcessError as e:
         logging.error("Error rendering chart: %s", e.stderr.decode())
         return False
+
+def lint_chart(chart, repo_path, branch=None, skip_overrides=False):
+    """Validate a chart's overrides without modifying any files.
+
+    Runs the same image-reference mapping helpers used during generation with
+    ``apply=False`` against the chart's source directory, and verifies that
+    every configured ``preserve_files`` entry exists. Returns a list of error
+    strings; an empty list means the chart can be transformed successfully.
+
+    When *skip_overrides* is True, image-mapping validation is skipped
+    (matching the behavior of ``--skipOverrides`` during generation).
+    """
+    chart_name = chart.get("name", "<unknown>")
+    chart_path = chart.get("chart-path")
+
+    if not chart_path:
+        return [f"Chart '{chart_name}' is missing the required 'chart-path' setting."]
+
+    resolved_path = os.path.join(repo_path, chart_path)
+    if not os.path.isdir(resolved_path):
+        return [f"Chart '{chart_name}' path not found at: {resolved_path}"]
+
+    errors = []
+
+    if not skip_overrides:
+        image_mappings = chart.get("imageMappings", {})
+        env_image_mappings = chart.get("envImageMappings", {})
+
+        errors.extend(fixImageReferences(resolved_path, image_mappings, branch=branch, apply=False) or [])
+        errors.extend(fixEnvVarImageReferences(
+            resolved_path, image_mappings, branch=branch, apply=False,
+            envImageMappings=env_image_mappings,
+        ) or [])
+        errors.extend(fixImageReferencesForAddonTemplate(
+            resolved_path, image_mappings, branch=branch, apply=False,
+        ) or [])
+
+    templates_dir = os.path.join(resolved_path, "templates")
+    template_basenames = set()
+    if os.path.isdir(templates_dir):
+        template_basenames = {f for f in os.listdir(templates_dir) if f.endswith((".yaml", ".yml"))}
+
+    for preserved_file in chart.get("preserve_files", []):
+        # Generation matches preserve_files by basename (os.path.basename),
+        # so lint validates the same way.
+        if os.path.basename(preserved_file) not in template_basenames:
+            errors.append(
+                f"Chart '{chart_name}' declares preserved file '{preserved_file}' "
+                f"but no matching template exists in {templates_dir}"
+            )
+
+    return errors
+
 
 def main():
     """Entry point for the generate-charts generator."""
@@ -1682,6 +1781,20 @@ def main():
                 sys.exit(1)
 
             chart_name = chart.get("name", "")
+
+            if lint:
+                logging.info(f"Linting chart: '{chart_name}'")
+                chart_errors = lint_chart(chart, repo_path, branch, skip_overrides=skipOverrides)
+                if chart_errors:
+                    all_errors.extend(chart_errors)
+                    logging.error(
+                        "Chart '%s' failed lint with %d error(s).",
+                        chart_name, len(chart_errors),
+                    )
+                else:
+                    logging.info(f"Chart '{chart_name}' passed lint.")
+                continue
+
             logging.info(f"Helm Chartifying: '{chart_name}'")
 
             # Copy over all CRDs to the destination directory
@@ -1705,7 +1818,9 @@ def main():
                 logging.error(f"Failed to render chart {destinationChartPath}")
             
             # Update the helm chart resources with additional overrides
-            updateResources(destination, repo_name, chart)
+            resource_errors = updateResources(destination, repo_name, chart, branch)
+            if resource_errors:
+                all_errors.extend(resource_errors)
 
             if not skipOverrides:
                 logging.info("Adding Overrides (set --skipOverrides to skip) ...")
