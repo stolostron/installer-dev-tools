@@ -411,6 +411,11 @@ def _validate_chart_components(
 
 def validate_charts_config(config, errors, warnings):
     """Validate a charts-config.yaml (charts / generate-charts.py)."""
+    # generate-charts.py exits early with "No charts listed in config to be
+    # moved!" for an empty config, so treat that as a valid no-op. Older
+    # release branches ship an empty charts-config.yaml.
+    if not config:
+        return
     # generate-charts.py clones the repository default branch when ``branch``
     # is omitted, and ``--component-branch`` can supply it at run time.
     _validate_chart_components(config, errors, warnings, require_branch=False)
@@ -482,6 +487,14 @@ def validate_file(config_path, config_type, strict=False, source=None):
     except yaml.YAMLError as e:
         logger.error("Failed to parse YAML: %s: %s", config_path, e)
         return False
+
+    if not config and config_type == "charts":
+        # generate-charts.py treats an empty charts-config.yaml as "no charts
+        # to move" and exits successfully, so match that behaviour here.
+        logger.info(
+            "Config validation passed: %s (empty charts config)", label
+        )
+        return True
 
     if config is None:
         logger.error("Config file is empty: %s", config_path)

@@ -678,6 +678,9 @@ Two required keys are conditional, mirroring generator behavior:
 - `charts-config.yaml` components may omit `branch` for the same reason;
   `--component-branch` can also supply it at run time. With `--component`,
   validation is limited to the selected entry.
+- An empty `charts-config.yaml` is a valid no-op, matching
+  `generate-charts.py`'s "No charts listed in config to be moved!" early
+  exit. Older release branches ship an empty file.
 
 ---
 

@@ -526,6 +526,15 @@ class TestValidateChartsConfig(unittest.TestCase):
         errors, _ = self._run(config)
         self.assertEqual(errors, [])
 
+    def test_empty_config_is_noop(self):
+        # generate-charts.py exits early with "No charts listed in config to
+        # be moved!" for an empty config. Older release branches ship an empty
+        # charts-config.yaml, so this must not be reported as a schema error.
+        for config in (None, {}, []):
+            errors, warnings = self._run(config)
+            self.assertEqual(errors, [])
+            self.assertEqual(warnings, [])
+
     def test_missing_chart_required_keys(self):
         config = {
             "components": [
@@ -771,6 +780,15 @@ class TestValidateEndToEnd(unittest.TestCase):
                 f.write("")
             self.assertFalse(validate_config.validate(path, "operators"))
 
+    def test_empty_charts_file_is_noop(self):
+        # Older release branches ship an empty charts-config.yaml and
+        # generate-charts.py exits successfully for it.
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "charts-config.yaml")
+            with open(path, "w") as f:
+                f.write("")
+            self.assertTrue(validate_config.validate(path, "charts"))
+
     def test_invalid_yaml(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = os.path.join(tmp, "bad.yaml")
@@ -879,6 +897,12 @@ class TestValidateOrExit(unittest.TestCase):
         ) as ctx:
             validate_config.validate_or_exit(config, "copy", "copy-config.yaml")
         self.assertEqual(ctx.exception.code, 1)
+
+    def test_empty_charts_config_is_noop(self):
+        with self.assertLogs("utils.config_validator", level="INFO"):
+            validate_config.validate_or_exit(
+                None, "charts", "charts-config.yaml"
+            )
 
     def test_skip_bypasses_errors(self):
         config = [{"repo_name": "x"}]
