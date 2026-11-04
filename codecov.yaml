@@ -1,0 +1,33 @@
+# Codecov configuration
+# https://docs.codecov.com/docs/codecov-yaml
+#
+# NOTE: this repository does not currently produce a coverage report. There is no
+# unit-test suite wired to a coverage tool -- the content is installer tooling,
+# scripts, and automation that runs against live clusters rather than under a
+# coverage profiler.
+#
+# This file is intentionally present so the coverage signal is explicit and the
+# configuration is ready for the first report. Both status checks are
+# `informational` plus `if_not_found: success`, so they report but never block a
+# pull request. When a real report is produced, remove `informational: true` and
+# set real targets.
+
+coverage:
+  precision: 2
+  round: down
+  range: "60...100"
+
+  status:
+    project:
+      default:
+        if_not_found: success
+        informational: true
+    patch:
+      default:
+        if_not_found: success
+        informational: true
+
+comment:
+  layout: "reach,diff,flags,files"
+  behavior: default
+  require_changes: true
