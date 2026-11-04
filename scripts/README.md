@@ -666,10 +666,18 @@ Two required keys are conditional, mirroring generator behavior:
   `os.path.join`. The `gen_command` flow always requires `bundlePath`, even
   when the component also has an `operators` list, because
   `bundles-to-charts.py` selects that flow whenever `github_ref` is absent.
+- An `operators` component needs `github_ref` or `gen_command`. Without
+  either, the generator reaches its source-selection fallback and exits after
+  cloning earlier components.
+- The `gen_command` flow also needs component-level `imageMappings` and one
+  of `sha` or `git_remote`, even when an `operators` list is present.
+- `webhook_paths` entries must be non-empty strings; null entries would reach
+  `os.path.join(..., None)` during copy.
 - `copy-config.yaml` components need `github_ref` (used for the clone URL)
   but may omit `branch` (falls back to the repository default branch).
 - `charts-config.yaml` components may omit `branch` for the same reason;
-  `--component-branch` can also supply it at run time.
+  `--component-branch` can also supply it at run time. With `--component`,
+  validation is limited to the selected entry.
 
 ---
 

@@ -177,6 +177,13 @@ def _check_types(entry, path, errors):
             errors.append(f"{path}.{key}: expected list, got {type(value).__name__}")
         if key in _BOOL_FIELDS and not isinstance(value, bool):
             errors.append(f"{path}.{key}: expected bool, got {type(value).__name__}")
+        if key == "webhook_paths" and isinstance(value, list):
+            for i, item in enumerate(value):
+                if not isinstance(item, str) or not item.strip():
+                    errors.append(
+                        f"{path}.{key}[{i}]: expected non-empty string, "
+                        f"got {type(item).__name__}"
+                    )
 
 
 def _extract_components(config, errors):
@@ -286,6 +293,27 @@ def validate_operators_config(config, errors, warnings):
                         )
                         continue
                     _validate_operator_entry(op, op_path, errors, warnings)
+
+                # ``bundles-to-charts.py`` needs git_url or gen_command to
+                # produce bundles for an operators list; otherwise it reaches
+                # the source-selection fallback and exits after cloning the
+                # components processed before it.
+                if not comp.get("github_ref") and "gen_command" not in comp:
+                    errors.append(
+                        f"{comp_path}: 'operators' requires 'github_ref' or "
+                        "'gen_command'"
+                    )
+
+                # The gen_command flow reads the component-level
+                # ``imageMappings`` even when operator entries are present.
+                if (
+                    "gen_command" in comp
+                    and not comp.get("github_ref")
+                    and "imageMappings" not in comp
+                ):
+                    errors.append(
+                        f"{comp_path}: gen_command flow requires 'imageMappings'"
+                    )
         else:
             # gen_command flow: operator fields live on the component directly.
             if "gen_command" in comp or "name" in comp:
@@ -305,6 +333,17 @@ def validate_operators_config(config, errors, warnings):
             and not comp.get("bundlePath")
         ):
             errors.append(f"{comp_path}: gen_command flow requires 'bundlePath'")
+        # The gen_command branch reads ``repo["sha"]`` unless ``git_remote``
+        # is set, so one of the two must be present.
+        if (
+            "gen_command" in comp
+            and not comp.get("github_ref")
+            and "git_remote" not in comp
+            and "sha" not in comp
+        ):
+            errors.append(
+                f"{comp_path}: gen_command flow requires 'sha' or 'git_remote'"
+            )
 
 
 def _validate_chart_components(

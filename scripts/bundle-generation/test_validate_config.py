@@ -192,6 +192,8 @@ class TestValidateOperatorsConfig(unittest.TestCase):
                     "branch": "main",
                     "gen_command": "./gen.sh",
                     "bundlePath": "bundle/",
+                    "imageMappings": {"x": "x_key"},
+                    "sha": "abc123",
                     "operators": [
                         {"name": "x-operator", "bundlePath": "b/", "imageMappings": {}}
                     ],
@@ -200,6 +202,87 @@ class TestValidateOperatorsConfig(unittest.TestCase):
         }
         errors, _ = self._run(config)
         self.assertEqual(errors, [])
+
+    def test_gen_command_with_operators_requires_flat_image_mappings(self):
+        # The gen_command branch reads repo["imageMappings"] even when an
+        # operators list is present.
+        config = {
+            "components": [
+                {
+                    "repo_name": "x",
+                    "branch": "main",
+                    "gen_command": "./gen.sh",
+                    "bundlePath": "bundle/",
+                    "sha": "abc123",
+                    "operators": [
+                        {"name": "x-operator", "bundlePath": "b/", "imageMappings": {}}
+                    ],
+                }
+            ],
+        }
+        errors, _ = self._run(config)
+        self.assertTrue(any("requires 'imageMappings'" in e for e in errors))
+
+    def test_gen_command_with_operators_requires_sha_or_git_remote(self):
+        # Without git_remote the generator reads repo["sha"] directly.
+        config = {
+            "components": [
+                {
+                    "repo_name": "x",
+                    "branch": "main",
+                    "gen_command": "./gen.sh",
+                    "bundlePath": "bundle/",
+                    "imageMappings": {"x": "x_key"},
+                    "operators": [
+                        {"name": "x-operator", "bundlePath": "b/", "imageMappings": {}}
+                    ],
+                }
+            ],
+        }
+        errors, _ = self._run(config)
+        self.assertTrue(any("requires 'sha' or 'git_remote'" in e for e in errors))
+
+    def test_operators_requires_github_ref_or_gen_command(self):
+        # bundles-to-charts.py exits after cloning earlier components when a
+        # component has neither source mechanism.
+        config = {
+            "components": [
+                {
+                    "repo_name": "x",
+                    "branch": "main",
+                    "operators": [
+                        {"name": "x-operator", "bundlePath": "b/", "imageMappings": {}}
+                    ],
+                }
+            ],
+        }
+        errors, _ = self._run(config)
+        self.assertTrue(
+            any("'operators' requires 'github_ref' or 'gen_command'" in e for e in errors)
+        )
+
+    def test_webhook_paths_rejects_null_and_empty_entries(self):
+        # Null entries would reach os.path.join(..., None) during copy.
+        config = {
+            "components": [
+                {
+                    "repo_name": "x",
+                    "github_ref": "https://github.com/org/repo.git",
+                    "branch": "main",
+                    "operators": [
+                        {
+                            "name": "x-operator",
+                            "bundlePath": "b/",
+                            "imageMappings": {},
+                            "webhook_paths": ["config/webhook/manifests.yaml", None, " "],
+                        }
+                    ],
+                }
+            ],
+        }
+        errors, _ = self._run(config)
+        self.assertTrue(any("webhook_paths[1]" in e for e in errors))
+        self.assertTrue(any("webhook_paths[2]" in e for e in errors))
 
     # --- Unknown keys ---
 
@@ -289,6 +372,7 @@ class TestValidateOperatorsConfig(unittest.TestCase):
             [
                 {
                     "repo_name": "x",
+                    "github_ref": "https://github.com/org/repo.git",
                     "branch": "main",
                     "operators": [
                         {"name": "x", "bundlePath": "b/", "imageMappings": {}}
@@ -305,6 +389,7 @@ class TestValidateOperatorsConfig(unittest.TestCase):
             "components": [
                 {
                     "repo_name": "x",
+                    "github_ref": "https://github.com/org/repo.git",
                     "branch": "main",
                     "operators": [
                         {
@@ -346,6 +431,7 @@ class TestValidateOperatorsConfig(unittest.TestCase):
             "components": [
                 {
                     "repo_name": "x",
+                    "github_ref": "https://github.com/org/repo.git",
                     "branch": "main",
                     "operators": [
                         {
@@ -638,6 +724,7 @@ class TestValidateEndToEnd(unittest.TestCase):
             "components": [
                 {
                     "repo_name": "x",
+                    "github_ref": "https://github.com/org/repo.git",
                     "branch": "main",
                     "operators": [
                         {
@@ -718,6 +805,7 @@ class TestConfigShapes(unittest.TestCase):
     def _operator_component(self):
         return {
             "repo_name": "x",
+            "github_ref": "https://github.com/org/repo.git",
             "branch": "main",
             "operators": [
                 {"name": "x", "bundlePath": "b/", "imageMappings": {"a": "b"}}
