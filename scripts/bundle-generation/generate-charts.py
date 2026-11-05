@@ -31,6 +31,7 @@ from chart_utils import (
     inject_helm_flow_control as injectHelmFlowControl,
 )
 from git import Repo
+from utils.config_validator import validate_or_exit
 from validate_csv import *
 
 # Removed literal_str class - using post-processing instead
@@ -1561,9 +1562,11 @@ def main():
     parser.add_argument("--component-branch", dest="component_branch", action='append', type=str, required=False, help="Override branch for a specific component. Format: component_name:branch_name. Can be specified multiple times.")
     parser.add_argument("--component-fork", dest="component_fork", action='append', type=str, required=False, help="Override git repository URL for a specific component. Format: component_name:git_url. Can be specified multiple times.")
     parser.add_argument("--debug", "-v", dest="debug", action="store_true", help="Enable DEBUG-level logging with coloredlogs")
+    parser.add_argument("--skip-validation", dest="skip_validation", action="store_true", help="Skip config schema validation (not recommended)")
 
     parser.set_defaults(lint=False)
     parser.set_defaults(debug=False)
+    parser.set_defaults(skip_validation=False)
 
     args = parser.parse_args()
 
@@ -1636,7 +1639,43 @@ def main():
 
     # Optionally filter by a specific component
     if component:
-        components = [repo for repo in components if repo.get("repo_name") == component]
+        if isinstance(components, list):
+            components = [
+                repo
+                for repo in components
+                if isinstance(repo, dict) and repo.get("repo_name") == component
+            ]
+
+    # Fail fast on a malformed config instead of producing a partial chart tree.
+    # Validate only the selected entries when --component is set so a malformed
+    # sibling does not block generation of a valid component.
+    if component:
+        if isinstance(config, dict):
+            validation_config = dict(config)
+            validation_config["components"] = components
+        else:
+            validation_config = components
+    else:
+        validation_config = config
+    validate_or_exit(
+        validation_config, "charts", config_yaml, skip=args.skip_validation
+    )
+
+    # Fail before any clone when neither the config nor a --component-fork
+    # override supplies the clone URL.
+    missing_github_ref = [
+        repo.get("repo_name")
+        for repo in components
+        if isinstance(repo, dict)
+        and not repo.get("github_ref")
+        and repo.get("repo_name") not in component_fork_overrides
+    ]
+    if missing_github_ref:
+        logging.critical(
+            "Missing 'github_ref' and no --component-fork override for: %s",
+            missing_github_ref,
+        )
+        sys.exit(1)
 
     # Loop through each repo in the config.yaml
     for repo in components:

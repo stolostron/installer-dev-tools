@@ -40,6 +40,7 @@ from chart_utils import (
 )
 from git import Repo
 from packaging import version
+from utils.config_validator import validate_or_exit
 from utils.git_sha_fetcher import fetch_sha_from_git_remote
 from validate_csv import *
 
@@ -1118,7 +1119,7 @@ def addCRDs(repo, operator, outputDir, branch, preservedFiles=None, overwrite=Fa
 
     skipped_files = []
 
-    if 'bundlePath' in operator:
+    if operator.get('bundlePath'):
         manifestsPath = os.path.join(os.path.dirname(os.path.realpath(__file__)), "tmp", repo, operator["bundlePath"])
         if not os.path.exists(manifestsPath):
             raise ValueError("Could not validate bundlePath at given path: " + operator["bundlePath"])
@@ -1203,7 +1204,7 @@ def getBundleManifestsPath(repo, operator):
     getBundleManifestsPath returns the path to the manifests directory
     of the latest operator bundle available in the desired channel
     """
-    if 'bundlePath' in operator:
+    if operator.get('bundlePath'):
         bundlePath = os.path.join(os.path.dirname(os.path.realpath(__file__)), "tmp", repo, operator["bundlePath"])
         if not os.path.exists(bundlePath):
             logging.critical("Could not validate bundlePath at given path: %s", operator["bundlePath"])
@@ -1251,7 +1252,7 @@ def get_csv_path(repo, operator, branch):
     Returns:
         _type_: _description_
     """
-    if 'bundlePath' in operator:
+    if operator.get('bundlePath'):
         manifests_path = os.path.join(os.path.dirname(os.path.realpath(__file__)), "tmp", repo, operator["bundlePath"])
         if not os.path.exists(manifests_path):
             logging.critical("Could not validate bundlePath at given path: %s", operator["bundlePath"])
@@ -1411,8 +1412,11 @@ def main():
     parser.add_argument("--component-branch", dest="component_branch", action='append', type=str, required=False, help="Override branch for a specific component. Format: component_name:branch_name. Can be specified multiple times.")
     parser.add_argument("--component-fork", dest="component_fork", action='append', type=str, required=False, help="Override git repository URL for a specific component. Format: component_name:git_url. Can be specified multiple times.")
     parser.add_argument("--debug", "-v", dest="debug", action="store_true", help="Enable DEBUG-level logging with coloredlogs")
+    parser.add_argument("--skip-validation", dest="skip_validation", action="store_true", help="Skip config schema validation (not recommended)")
+    parser.set_defaults(skipOverrides=False)
     parser.set_defaults(lint=False)
     parser.set_defaults(debug=False)
+    parser.set_defaults(skip_validation=False)
 
     args = parser.parse_args()
 
@@ -1478,6 +1482,11 @@ def main():
     except Exception:
         logging.critical("Unexpected error while loading configuration '%s'", config_yaml)
         sys.exit(1)
+
+    # Fail fast on a malformed config instead of producing a partial chart tree.
+    validate_or_exit(
+        config, "operators", config_yaml, skip=args.skip_validation
+    )
 
     # Normalize config into a list of components
     if isinstance(config, dict):
