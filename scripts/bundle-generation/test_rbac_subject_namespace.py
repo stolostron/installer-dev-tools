@@ -37,6 +37,7 @@ def _build_chart(tmpdir, templates):
 
 
 def _cluster_role_binding(subjects):
+    """Build a minimal ClusterRoleBinding with the given subjects."""
     return {
         'apiVersion': 'rbac.authorization.k8s.io/v1',
         'kind': 'ClusterRoleBinding',
@@ -90,8 +91,10 @@ class TestRbacSubjectNamespaceFallback(unittest.TestCase):
     def test_empty_subjects_does_not_raise(self):
         """A binding with an empty subject list must still be written."""
         with tempfile.TemporaryDirectory() as tmpdir:
+            binding = _cluster_role_binding([])
+            binding['metadata']['annotations'] = {'test-namespace': 'PLACEHOLDER_NAMESPACE'}
             chart = _build_chart(tmpdir, {
-                'rolebinding.yaml': _cluster_role_binding([]),
+                'rolebinding.yaml': binding,
             })
             os.environ.pop('ACM_RELEASE_VERSION', None)
             os.environ.pop('MCE_RELEASE_VERSION', None)
@@ -103,6 +106,10 @@ class TestRbacSubjectNamespaceFallback(unittest.TestCase):
             with open(os.path.join(chart, 'templates', 'rolebinding.yaml')) as f:
                 updated = yaml.safe_load(f)
             self.assertEqual(updated['subjects'], [])
+            self.assertEqual(
+                updated['metadata']['annotations']['test-namespace'],
+                '{{ .Values.global.namespace }}',
+            )
 
     def test_namespace_does_not_leak_across_bindings(self):
         """Each binding falls back to the global namespace independently."""
