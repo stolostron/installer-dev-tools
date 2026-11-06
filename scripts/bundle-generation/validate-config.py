@@ -60,6 +60,11 @@ def main():
         action="store_true",
         help="Enable DEBUG-level logging",
     )
+    parser.add_argument(
+        "--verbose",
+        action="store_true",
+        help="Print a per-component checklist showing every validated field",
+    )
 
     args = parser.parse_args()
 
@@ -67,7 +72,10 @@ def main():
 
     coloredlogs.install(level="DEBUG" if args.debug else "INFO")
 
-    success = validate_file(args.config, args.config_type, strict=args.strict)
+    success = validate_file(
+        args.config, args.config_type, strict=args.strict,
+        verbose=args.verbose,
+    )
     sys.exit(0 if success else 1)
 
 

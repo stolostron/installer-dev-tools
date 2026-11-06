@@ -304,12 +304,14 @@ def main():
     parser.add_argument("--config", dest="config", type=str, required=False, help="If provided, this config file will be processed")
     parser.add_argument("--destination", dest="destination", type=str, required=False, help="Destination directory of the created helm chart")
     parser.add_argument("--skip-validation", dest="skip_validation", action="store_true", help="Skip config schema validation (not recommended)")
+    parser.add_argument("--verbose-validation", dest="verbose_validation", action="store_true", help="Print a per-component checklist during config validation")
 
     args = parser.parse_args()
     component = args.component
     config_override = args.config
     destination = args.destination
     skip_validation = args.skip_validation
+    verbose_validation = args.verbose_validation
 
     logging.basicConfig(level=logging.DEBUG)
 
@@ -330,7 +332,8 @@ def main():
 
     # Fail fast on a malformed config instead of copying a partial chart tree.
     validate_or_exit(
-        config, "copy", config_yaml, skip=skip_validation
+        config, "copy", config_yaml, skip=skip_validation,
+        verbose=verbose_validation,
     )
 
     # Set release version environment variables if provided in config
