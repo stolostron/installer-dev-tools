@@ -1119,6 +1119,9 @@ def update_helm_resources(chartName, helmChart, skip_rbac_overrides, exclusions,
 
                 if chartName != "managed-serviceaccount":
                     if kind == "ClusterRoleBinding" or kind == "RoleBinding":
+                        # Fallback for subjects that do not carry a namespace. Reset per
+                        # resource so one binding cannot leak its namespace into another.
+                        target_namespace = default_namespace
                         if 'subjects' in resource_data:
                             for subject in resource_data['subjects']:
                                 subject_namespace = subject.get('namespace', None)
