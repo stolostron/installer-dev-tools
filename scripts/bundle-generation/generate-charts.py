@@ -957,6 +957,14 @@ LiteralBlockDumper.add_representer(str, _represent_multiline_string)
 
 # updateHelmResources adds standard configuration to the generic kubernetes resources
 def update_helm_resources(chartName, helmChart, skip_rbac_overrides, exclusions, inclusions, branch, subscription_extra_fields=None, preserved_files=None):
+    """Apply Helm templating and standard configuration to rendered chart resources.
+
+    Rewrites namespaces, image references, RBAC subjects, and other
+    chart-specific fields in place so the copied chart can be re-rendered
+    with the consumer's values. Files listed in ``preserved_files`` are
+    skipped, and template processing errors are logged without aborting the
+    remaining resources.
+    """
     if preserved_files is None:
         preserved_files = []
     logging.info(f"Updating resources chart: {chartName}")
@@ -1119,6 +1127,9 @@ def update_helm_resources(chartName, helmChart, skip_rbac_overrides, exclusions,
 
                 if chartName != "managed-serviceaccount":
                     if kind == "ClusterRoleBinding" or kind == "RoleBinding":
+                        # Fallback for subjects that do not carry a namespace. Reset per
+                        # resource so one binding cannot leak its namespace into another.
+                        target_namespace = default_namespace
                         if 'subjects' in resource_data:
                             for subject in resource_data['subjects']:
                                 subject_namespace = subject.get('namespace', None)
