@@ -846,28 +846,28 @@ class TestConfigShapes(unittest.TestCase):
         }
 
     def test_operators_accepts_bare_list(self):
-        errors, warnings = validate_config.collect_issues(
+        errors, warnings, _ = validate_config.collect_issues(
             [self._operator_component()], "operators"
         )
         self.assertEqual(errors, [])
         self.assertEqual(warnings, [])
 
     def test_charts_accepts_bare_list(self):
-        errors, warnings = validate_config.collect_issues(
+        errors, warnings, _ = validate_config.collect_issues(
             [self._chart_component()], "charts"
         )
         self.assertEqual(errors, [])
         self.assertEqual(warnings, [])
 
     def test_copy_accepts_components_mapping(self):
-        errors, warnings = validate_config.collect_issues(
+        errors, warnings, _ = validate_config.collect_issues(
             {"components": [self._chart_component()]}, "copy"
         )
         self.assertEqual(errors, [])
         self.assertEqual(warnings, [])
 
     def test_scalar_top_level_is_error(self):
-        errors, _ = validate_config.collect_issues("nope", "operators")
+        errors, _, _ = validate_config.collect_issues("nope", "operators")
         self.assertTrue(any("expected a mapping or list" in e for e in errors))
 
 
@@ -934,6 +934,126 @@ class TestValidateOrExit(unittest.TestCase):
     def test_unknown_type_raises(self):
         with self.assertRaises(validate_config.ConfigValidationError):
             validate_config.collect_issues({}, "bogus")
+
+
+# ---------------------------------------------------------------------------
+# Verbose checklist report
+# ---------------------------------------------------------------------------
+
+
+class TestVerboseReport(unittest.TestCase):
+    """Tests for the --verbose checklist output."""
+
+    def test_verbose_false_produces_no_report_lines(self):
+        """When verbose=False, collect_issues returns an inactive report."""
+        config = {
+            "components": [
+                {
+                    "repo_name": "x",
+                    "github_ref": "https://github.com/org/repo.git",
+                    "branch": "main",
+                    "charts": [
+                        {
+                            "name": "my-chart",
+                            "chart-path": "charts/my-chart",
+                            "always-or-toggle": "toggle",
+                            "imageMappings": {"img": "img_alias"},
+                        }
+                    ],
+                }
+            ],
+        }
+        _, _, report = validate_config.collect_issues(config, "charts", verbose=False)
+        self.assertFalse(report.active)
+        self.assertEqual(report._lines, [])
+
+    def test_verbose_true_produces_checklist(self):
+        """When verbose=True, the report contains pass entries."""
+        config = {
+            "components": [
+                {
+                    "repo_name": "x",
+                    "github_ref": "https://github.com/org/repo.git",
+                    "branch": "main",
+                    "charts": [
+                        {
+                            "name": "my-chart",
+                            "chart-path": "charts/my-chart",
+                            "always-or-toggle": "toggle",
+                            "imageMappings": {"img": "img_alias"},
+                        }
+                    ],
+                }
+            ],
+        }
+        errors, warnings, report = validate_config.collect_issues(
+            config, "charts", verbose=True,
+        )
+        self.assertEqual(errors, [])
+        self.assertEqual(warnings, [])
+        self.assertTrue(report.active)
+        self.assertGreater(len(report._lines), 0)
+        self.assertGreater(report._counts["pass"], 0)
+        self.assertEqual(report._counts["fail"], 0)
+
+    def test_verbose_logs_on_valid_config(self):
+        """validate_or_exit with verbose=True emits checklist log lines."""
+        config = [
+            {
+                "repo_name": "x",
+                "github_ref": "https://github.com/org/repo.git",
+                "branch": "main",
+                "charts": [],
+            }
+        ]
+        with self.assertLogs("utils.config_validator", level="INFO") as cm:
+            validate_config.validate_or_exit(
+                config, "copy", "copy-config.yaml", verbose=True,
+            )
+        # Should contain "Config validation report" and "Summary" lines
+        joined = "\n".join(cm.output)
+        self.assertIn("Config validation report", joined)
+        self.assertIn("Summary", joined)
+
+    def test_verbose_report_counts_warnings(self):
+        """Warnings from unknown keys appear in the verbose report."""
+        config = {
+            "components": [
+                {
+                    "repo_name": "x",
+                    "github_ref": "https://github.com/org/repo.git",
+                    "branch": "main",
+                    "charts": [],
+                    "typo_key": "oops",
+                }
+            ],
+        }
+        errors, warnings, report = validate_config.collect_issues(
+            config, "charts", verbose=True,
+        )
+        self.assertEqual(errors, [])
+        self.assertEqual(len(warnings), 1)
+        self.assertGreater(report._counts["warn"], 0)
+
+    def test_verbose_report_counts_errors(self):
+        """Errors from missing required keys appear in the verbose report."""
+        config = {
+            "components": [
+                {
+                    "repo_name": "x",
+                    # missing github_ref and branch
+                    "operators": [
+                        {"name": "op", "imageMappings": {"a": "b"}},
+                        # missing bundlePath
+                    ],
+                }
+            ],
+        }
+        errors, _, report = validate_config.collect_issues(
+            config, "operators", verbose=True,
+        )
+        self.assertGreater(len(errors), 0)
+        self.assertGreater(report._counts["fail"], 0)
 
 
 if __name__ == "__main__":

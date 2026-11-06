@@ -1541,6 +1541,7 @@ def main():
     parser.add_argument("--component-fork", dest="component_fork", action='append', type=str, required=False, help="Override git repository URL for a specific component. Format: component_name:git_url. Can be specified multiple times.")
     parser.add_argument("--debug", "-v", dest="debug", action="store_true", help="Enable DEBUG-level logging with coloredlogs")
     parser.add_argument("--skip-validation", dest="skip_validation", action="store_true", help="Skip config schema validation (not recommended)")
+    parser.add_argument("--verbose-validation", dest="verbose_validation", action="store_true", help="Print a per-component checklist during config validation")
 
     parser.set_defaults(lint=False)
     parser.set_defaults(debug=False)
@@ -1636,7 +1637,8 @@ def main():
     else:
         validation_config = config
     validate_or_exit(
-        validation_config, "charts", config_yaml, skip=args.skip_validation
+        validation_config, "charts", config_yaml, skip=args.skip_validation,
+        verbose=args.verbose_validation,
     )
 
     # Fail before any clone when neither the config nor a --component-fork
