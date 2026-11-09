@@ -44,7 +44,13 @@ suffix="$application-${xy//./}"
 
 case "$application" in
     "acm")
-        imagerepo="rhacm2"
+        acm_major="${xy%%.*}"
+        acm_minor="${xy##*.}"
+        if (( acm_major > 5 || (acm_major == 5 && acm_minor >= 1) )); then
+            imagerepo="rhacm5"
+        else
+            imagerepo="rhacm2"
+        fi
         ;;
     "mce")
         imagerepo="multicluster-engine"
