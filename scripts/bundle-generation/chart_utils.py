@@ -124,12 +124,41 @@ def find_templates_of_type(helmChart, kind, branch=None):
                     single_doc = yaml.safe_load(f)
                     docs = [single_doc] if single_doc else []
                 for doc in docs:
-                    if doc and doc.get('kind') == kind:
+                    if isinstance(doc, dict) and doc.get('kind') == kind:
                         resources.append(filePath)
                         break
             except yaml.YAMLError:
                 continue
     return resources
+
+
+def load_template_documents(template_path, branch=None):
+    """Load the YAML document(s) from *template_path*.
+
+    Multi-document files are only split when the target release supports it
+    (ACM 2.16+ / MCE 2.11+); older releases keep the historical
+    single-document behavior so existing charts are unaffected.
+    """
+    with open(template_path, 'r', encoding='utf-8') as f:
+        if branch is not None and is_version_compatible(
+            branch, '2.16', '2.11', '2.16'
+        ):
+            return list(yaml.safe_load_all(f))
+        single_doc = yaml.safe_load(f)
+        return [single_doc] if single_doc is not None else []
+
+
+def write_template_documents(template_path, documents, **dump_kwargs):
+    """Write *documents* back to *template_path*.
+
+    A single document is written with ``yaml.dump`` (byte-for-byte compatible
+    with the pre-multi-doc behavior); multiple documents use ``yaml.dump_all``.
+    """
+    with open(template_path, 'w', encoding='utf-8') as f:
+        if len(documents) == 1:
+            yaml.dump(documents[0], f, **dump_kwargs)
+        else:
+            yaml.dump_all(documents, f, **dump_kwargs)
 
 
 # ---------------------------------------------------------------------------
@@ -228,69 +257,73 @@ def fix_image_references(helmChart, imageKeyMapping, branch=None,
 
     resource_kinds = ["Deployment", "Job", "StatefulSet"]
     errors = []
-    pending_updates = []
+    pending_updates = {}  # keyed by template_path to avoid cross-kind overwrites
     imageKeys = []
 
     for kind in resource_kinds:
         resource_templates = find_templates_of_type(helmChart, kind, branch)
         for template_path in resource_templates:
-            with open(template_path, 'r', encoding='utf-8') as f:
-                resource_data = yaml.safe_load(f)
-
-            for container_section in ('containers', 'initContainers'):
-                containers = (
-                    resource_data.get('spec', {})
-                    .get('template', {})
-                    .get('spec', {})
-                    .get(container_section, [])
-                )
-                if not containers:
+            if template_path in pending_updates:
+                documents = pending_updates[template_path]
+            else:
+                documents = load_template_documents(template_path, branch)
+            for resource_data in documents:
+                if not isinstance(resource_data, dict) or resource_data.get('kind') != kind:
                     continue
-                for container in containers:
-                    if 'image' not in container:
-                        continue
-                    repository = parse_image_ref(container['image'])["repository"]
-                    container_name = container.get('name', 'unknown')
-                    image_key = lookup_image_key(repository, imageKeyMapping)
-                    if image_key is None:
-                        label = operator_name or os.path.basename(helmChart)
-                        errors.append(format_image_mapping_error(
-                            label,
-                            os.path.relpath(template_path, helmChart),
-                            f"container[{container_name}].image",
-                            repository,
-                        ))
-                        logging.error(errors[-1])
-                        continue
-                    imageKeys.append(image_key)
-                    if apply:
-                        container['image'] = "{{ .Values.global.imageOverrides." + image_key + " }}"
-                        container['imagePullPolicy'] = "{{ .Values.global.pullPolicy }}"
 
-                # Handle --agent-image-name args for init containers in Deployments
-                if container_section == 'initContainers' and kind == "Deployment" and apply and not errors:
+                for container_section in ('containers', 'initContainers'):
+                    containers = (
+                        resource_data.get('spec', {})
+                        .get('template', {})
+                        .get('spec', {})
+                        .get(container_section, [])
+                    )
+                    if not containers:
+                        continue
                     for container in containers:
-                        args = container.get('args', [])
-                        refreshed_args = []
-                        for arg in args:
-                            if "--agent-image-name" not in arg:
-                                refreshed_args.append(arg)
-                            else:
-                                refreshed_args.append(
-                                    "--agent-image-name={{ .Values.global.imageOverrides."
-                                    + imageKeys[-1] + " }}"
-                                )
-                        container['args'] = refreshed_args
+                        if 'image' not in container:
+                            continue
+                        repository = parse_image_ref(container['image'])["repository"]
+                        container_name = container.get('name', 'unknown')
+                        image_key = lookup_image_key(repository, imageKeyMapping)
+                        if image_key is None:
+                            label = operator_name or os.path.basename(helmChart)
+                            errors.append(format_image_mapping_error(
+                                label,
+                                os.path.relpath(template_path, helmChart),
+                                f"container[{container_name}].image",
+                                repository,
+                            ))
+                            logging.error(errors[-1])
+                            continue
+                        imageKeys.append(image_key)
+                        if apply:
+                            container['image'] = "{{ .Values.global.imageOverrides." + image_key + " }}"
+                            container['imagePullPolicy'] = "{{ .Values.global.pullPolicy }}"
+
+                    # Handle --agent-image-name args for init containers in Deployments
+                    if container_section == 'initContainers' and kind == "Deployment" and apply and not errors:
+                        for container in containers:
+                            args = container.get('args', [])
+                            refreshed_args = []
+                            for arg in args:
+                                if "--agent-image-name" not in arg:
+                                    refreshed_args.append(arg)
+                                else:
+                                    refreshed_args.append(
+                                        "--agent-image-name={{ .Values.global.imageOverrides."
+                                        + imageKeys[-1] + " }}"
+                                    )
+                            container['args'] = refreshed_args
 
             if apply and not errors:
-                pending_updates.append((template_path, resource_data))
+                pending_updates[template_path] = documents
 
     if errors or not apply:
         return errors
 
-    for template_path, resource_data in pending_updates:
-        with open(template_path, 'w', encoding='utf-8') as f:
-            yaml.dump(resource_data, f, width=float("inf"), sort_keys=True)
+    for template_path, documents in pending_updates.items():
+        write_template_documents(template_path, documents, width=float("inf"), sort_keys=True)
 
     try:
         del values['global']['imageOverrides']['imageOverride']
@@ -328,75 +361,81 @@ def fix_env_var_image_references(helmChart, imageKeyMapping, branch=None,
     imageKeys = []
 
     for deployment in deployments:
-        with open(deployment, 'r', encoding='utf-8') as f:
-            deploy = yaml.safe_load(f)
-
-        containers = deploy['spec']['template']['spec']['containers']
-        for container in containers:
-            if 'env' not in container:
+        documents = load_template_documents(deployment, branch)
+        for deploy in documents:
+            if not isinstance(deploy, dict) or deploy.get('kind') != 'Deployment':
                 continue
-            for env in container['env']:
-                env_var_name = env['name']
-                # Skip valueFrom entries (fieldRef, secretKeyRef, etc.)
-                if 'value' not in env:
-                    if 'valueFrom' in env:
-                        logging.info(
-                            "[%s] Skipping env var '%s' in %s -- uses valueFrom, not a literal value",
-                            label, env_var_name,
-                            os.path.relpath(deployment, helmChart),
-                        )
+
+            containers = (
+                deploy.get('spec', {})
+                .get('template', {})
+                .get('spec', {})
+                .get('containers', [])
+            )
+            for container in containers:
+                if 'env' not in container:
                     continue
-                explicit_key = envImageMappings.get(env_var_name)
-                if explicit_key is None and not env_var_name.endswith('_IMAGE'):
-                    if env_value_looks_like_image_ref(env.get('value')):
-                        logging.warning(
-                            "[%s] Skipping image-like env var '%s' in %s; "
-                            "add it to envImageMappings to template it",
-                            label, env_var_name,
-                            os.path.relpath(deployment, helmChart),
-                        )
-                    continue
-                repository = parse_image_ref(env['value'])['repository']
-                if explicit_key is not None:
-                    if explicit_key not in imageKeyMapping.values():
-                        errors.append(
-                            f"[{label}] envImageMappings entry '{env_var_name}' maps to unknown "
-                            f"image key '{explicit_key}' in {os.path.relpath(deployment, helmChart)}; "
-                            f"expected one of the imageMappings values"
-                        )
-                        logging.error(errors[-1])
+                for env in container['env']:
+                    env_var_name = env['name']
+                    # Skip valueFrom entries (fieldRef, secretKeyRef, etc.)
+                    if 'value' not in env:
+                        if 'valueFrom' in env:
+                            logging.info(
+                                "[%s] Skipping env var '%s' in %s -- uses valueFrom, not a literal value",
+                                label, env_var_name,
+                                os.path.relpath(deployment, helmChart),
+                            )
                         continue
-                    repository_key = lookup_image_key(repository, imageKeyMapping)
-                    if repository_key is not None and repository_key != explicit_key:
-                        logging.warning(
-                            "envImageMappings entry '%s' -> '%s' overrides repository mapping '%s' for image '%s'",
-                            env_var_name, explicit_key, repository_key, repository,
-                        )
-                    image_key = explicit_key
-                else:
-                    image_key = lookup_image_key(repository, imageKeyMapping)
-                    if image_key is None:
-                        errors.append(format_image_mapping_error(
-                            label,
-                            os.path.relpath(deployment, helmChart),
-                            f"env.{env_var_name}",
-                            repository,
-                        ))
-                        logging.error(errors[-1])
+                    explicit_key = envImageMappings.get(env_var_name)
+                    if explicit_key is None and not env_var_name.endswith('_IMAGE'):
+                        if env_value_looks_like_image_ref(env.get('value')):
+                            logging.warning(
+                                "[%s] Skipping image-like env var '%s' in %s; "
+                                "add it to envImageMappings to template it",
+                                label, env_var_name,
+                                os.path.relpath(deployment, helmChart),
+                            )
                         continue
-                imageKeys.append(image_key)
-                if apply:
-                    env['value'] = "{{ .Values.global.imageOverrides." + image_key + " }}"
+                    repository = parse_image_ref(env['value'])['repository']
+                    if explicit_key is not None:
+                        if explicit_key not in imageKeyMapping.values():
+                            errors.append(
+                                f"[{label}] envImageMappings entry '{env_var_name}' maps to unknown "
+                                f"image key '{explicit_key}' in {os.path.relpath(deployment, helmChart)}; "
+                                f"expected one of the imageMappings values"
+                            )
+                            logging.error(errors[-1])
+                            continue
+                        repository_key = lookup_image_key(repository, imageKeyMapping)
+                        if repository_key is not None and repository_key != explicit_key:
+                            logging.warning(
+                                "envImageMappings entry '%s' -> '%s' overrides repository mapping '%s' for image '%s'",
+                                env_var_name, explicit_key, repository_key, repository,
+                            )
+                        image_key = explicit_key
+                    else:
+                        image_key = lookup_image_key(repository, imageKeyMapping)
+                        if image_key is None:
+                            errors.append(format_image_mapping_error(
+                                label,
+                                os.path.relpath(deployment, helmChart),
+                                f"env.{env_var_name}",
+                                repository,
+                            ))
+                            logging.error(errors[-1])
+                            continue
+                    imageKeys.append(image_key)
+                    if apply:
+                        env['value'] = "{{ .Values.global.imageOverrides." + image_key + " }}"
 
         if apply:
-            pending_updates.append((deployment, deploy))
+            pending_updates.append((deployment, documents))
 
     if errors or not apply:
         return errors
 
-    for deployment, deploy in pending_updates:
-        with open(deployment, 'w', encoding='utf-8') as f:
-            yaml.dump(deploy, f, width=float("inf"), sort_keys=True)
+    for deployment, documents in pending_updates:
+        write_template_documents(deployment, documents, width=float("inf"), sort_keys=True)
 
     with open(valuesYaml, 'r', encoding='utf-8') as f:
         values = yaml.safe_load(f)

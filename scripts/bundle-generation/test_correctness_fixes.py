@@ -368,5 +368,133 @@ class TestYamlSortKeysEnabled(unittest.TestCase):
             self.assertLess(meta_pos, spec_pos, "metadata should come before spec")
 
 
+# ---------------------------------------------------------------------------
+# Multi-document YAML handling in generate-charts update helpers
+# ---------------------------------------------------------------------------
+
+MULTI_DOC_TEMPLATE = (
+    "apiVersion: v1\nkind: ConfigMap\nmetadata:\n  name: cm1\ndata: {}\n"
+    "---\n"
+    "apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: dep1\n"
+    "spec:\n  template:\n    spec:\n      containers:\n"
+    "      - name: manager\n        image: quay.io/example/my-operator:latest\n"
+)
+
+
+class TestMultiDocGenerateChartsHelpers(unittest.TestCase):
+    """generate-charts helpers must update every document, not just the first."""
+
+    def setUp(self):
+        os.environ.pop('ACM_RELEASE_VERSION', None)
+        os.environ.pop('MCE_RELEASE_VERSION', None)
+
+    def test_fix_image_references_updates_deployment_in_multi_doc(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            chart = _build_chart(tmpdir, {'multi.yaml': MULTI_DOC_TEMPLATE})
+            errors = generate_charts.fixImageReferences(
+                chart, IMAGE_MAPPINGS, branch='release-2.17',
+            )
+            self.assertEqual(errors, [])
+
+            with open(os.path.join(chart, 'templates', 'multi.yaml')) as f:
+                documents = list(yaml.safe_load_all(f))
+
+            self.assertEqual(len(documents), 2)
+            self.assertEqual(documents[0]['kind'], 'ConfigMap')
+            self.assertEqual(documents[1]['kind'], 'Deployment')
+            container = documents[1]['spec']['template']['spec']['containers'][0]
+            self.assertIn('imageOverrides.my_operator', container['image'])
+
+    def test_update_rbac_updates_all_documents(self):
+        rbac_yaml = (
+            "apiVersion: rbac.authorization.k8s.io/v1\nkind: ClusterRole\n"
+            "metadata:\n  name: old-cluster-role\n---\n"
+            "apiVersion: rbac.authorization.k8s.io/v1\nkind: ClusterRoleBinding\n"
+            "metadata:\n  name: old-binding\n"
+            "roleRef:\n  name: old-cluster-role\n"
+        )
+        with tempfile.TemporaryDirectory() as tmpdir:
+            chart = _build_chart(tmpdir, {'rbac.yaml': rbac_yaml})
+            generate_charts.updateRBAC(chart, 'my-chart', 'release-2.17')
+
+            with open(os.path.join(chart, 'templates', 'rbac.yaml')) as f:
+                documents = list(yaml.safe_load_all(f))
+
+            self.assertEqual(len(documents), 2)
+            self.assertEqual(documents[0]['metadata']['name'], '{{ .Values.org }}:{{ .Chart.Name }}:my-chart')
+            self.assertEqual(documents[1]['metadata']['name'], '{{ .Values.org }}:{{ .Chart.Name }}:my-chart')
+            self.assertEqual(documents[1]['roleRef']['name'], '{{ .Values.org }}:{{ .Chart.Name }}:my-chart')
+
+
+# ---------------------------------------------------------------------------
+# 6. --lint validates without writing
+# ---------------------------------------------------------------------------
+
+class TestLintChart(unittest.TestCase):
+    """lint_chart must validate mappings and preserve_files without writing."""
+
+    def setUp(self):
+        os.environ.pop('ACM_RELEASE_VERSION', None)
+        os.environ.pop('MCE_RELEASE_VERSION', None)
+
+    def _chart_config(self, **overrides):
+        config = {
+            'name': 'test-chart',
+            'chart-path': 'test-chart',
+            'imageMappings': IMAGE_MAPPINGS,
+        }
+        config.update(overrides)
+        return config
+
+    def test_lint_passes_for_valid_chart(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            _build_chart(tmpdir, {'multi.yaml': MULTI_DOC_TEMPLATE})
+            errors = generate_charts.lint_chart(
+                self._chart_config(), tmpdir, 'release-2.17',
+            )
+            self.assertEqual(errors, [])
+
+    def test_lint_reports_unmapped_image(self):
+        unmapped = (
+            "apiVersion: apps/v1\nkind: Deployment\nmetadata:\n  name: dep1\n"
+            "spec:\n  template:\n    spec:\n      containers:\n"
+            "      - name: manager\n        image: quay.io/example/unknown:latest\n"
+        )
+        with tempfile.TemporaryDirectory() as tmpdir:
+            _build_chart(tmpdir, {'deploy.yaml': unmapped})
+            errors = generate_charts.lint_chart(
+                self._chart_config(), tmpdir, 'release-2.17',
+            )
+            self.assertEqual(len(errors), 1)
+            self.assertIn('unknown', errors[0])
+
+    def test_lint_does_not_modify_templates(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            chart = _build_chart(tmpdir, {'multi.yaml': MULTI_DOC_TEMPLATE})
+            original = open(os.path.join(chart, 'templates', 'multi.yaml')).read()
+
+            generate_charts.lint_chart(self._chart_config(), tmpdir, 'release-2.17')
+
+            self.assertEqual(original, open(os.path.join(chart, 'templates', 'multi.yaml')).read())
+
+    def test_lint_reports_missing_preserved_file(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            _build_chart(tmpdir, {'multi.yaml': MULTI_DOC_TEMPLATE})
+            errors = generate_charts.lint_chart(
+                self._chart_config(preserve_files=['templates/does-not-exist.yaml']),
+                tmpdir, 'release-2.17',
+            )
+            self.assertEqual(len(errors), 1)
+            self.assertIn('does-not-exist.yaml', errors[0])
+
+    def test_lint_reports_missing_chart_path(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            errors = generate_charts.lint_chart(
+                self._chart_config(**{'chart-path': 'missing-dir'}), tmpdir,
+            )
+            self.assertEqual(len(errors), 1)
+            self.assertIn('not found', errors[0])
+
+
 if __name__ == '__main__':
     unittest.main()
