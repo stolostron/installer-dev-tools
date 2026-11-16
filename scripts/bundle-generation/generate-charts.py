@@ -812,14 +812,33 @@ def ensure_multiclusterroleassignment_namespace(resource_data, resource_name, de
                     logging.info(f"Namespace for MulticlusterRoleAssignment {resource_name} placement '{placement.get('name')}' set to {placement_namespace}")
 
 def ensure_clustermanagementaddon_namespace(resource_data, resource_name, default_namespace):
+    """
+    Ensures namespace references in a ClusterManagementAddOn are templated.
+
+    Handles both the flat ``spec.defaultConfigs`` list and the
+    ``spec.installStrategy.placements`` list. ``spec.defaultConfigs`` entries
+    reference add-on resources (for example an AddOnDeploymentConfig) by
+    namespace. Each namespace the upstream chart declares is wrapped as
+    ``{{ default "<chart value>" .Values.global.namespace }}`` so a consumer can
+    override it through ``global.namespace`` while releases that do not supply
+    that value keep rendering the namespace the chart shipped with.
+    """
     if 'spec' not in resource_data:
         return
-    
-    cma_spec = resource_data.get('spec')  
-    cma_install_strategy = cma_spec.get('installStrategy')
-    cma_placements = cma_install_strategy.get('placements')
 
-    for placement in cma_placements:
+    cma_spec = resource_data.get('spec')
+
+    # Ensure defaultConfigs namespace references follow the global namespace,
+    # falling back to the value declared by the chart it was generated from.
+    for default_config in cma_spec.get('defaultConfigs') or []:
+        default_config_namespace = default_config.get('namespace')
+        if not default_config_namespace or is_helm_template(default_config_namespace):
+            continue
+        default_config['namespace'] = f"{{{{ default \"{default_config_namespace}\" .Values.global.namespace }}}}"
+        logging.info(f"Namespace for defaultConfig '{default_config.get('name')}' for {resource_name} set to {default_config['namespace']}")
+
+    cma_install_strategy = cma_spec.get('installStrategy') or {}
+    for placement in cma_install_strategy.get('placements') or []:
         placement_namespace = placement.get('namespace', default_namespace)
         if placement_namespace == 'open-cluster-management':
             placement_namespace = f"{{{{ default \"{placement_namespace}\" .Values.global.namespace }}}}"
